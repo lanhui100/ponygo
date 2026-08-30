@@ -1,0 +1,678 @@
+#!/usr/bin/env bash
+# ============================================================
+# ponygo —— 项目工程化治理元框架的命令行入口（单文件、零依赖 shell）
+#
+# 用法：
+#   ponygo init     [--yes] [--dry-run]   在项目根建立/注入 .meta/ 治理骨架
+#   ponygo audit    [--level S|M] [--dry-run]  自适应体检：打分 + 缺口 + 最小改进动作
+#   ponygo status                         查看成熟度级与骨架完整度（骨架缺口或声明级判据不符 exit 1）
+#   ponygo upgrade                        跟随框架升级指引（首版不实际合并，见 -h）
+#   ponygo sync                           把 constitution 投影到根 AGENTS.md / CLAUDE.md
+#
+# 设计约束：判定优先只读；破坏性动作前必须确认（或 --yes）。
+#           非零退出（non-zero exit）语义：凡机器可查的缺口，命令 exit 1。
+# 平台边界：Windows Git Bash / GNU 用户态（find -printf、sed -i、date -d 按 GNU 语义）。
+# ============================================================
+set -u
+
+# ---------- 常量（与 .meta/ 骨架、README、maturity-ladder.md 对齐） ----------
+META_DIR=".meta"
+META_YAML="$META_DIR/meta.yaml"
+DECISIONS_DIR="$META_DIR/decisions"
+CONSTITUTION="$META_DIR/constitution/constitution.md"
+
+# decisions lifecycle 四态 + class 封闭集合（唯一真源，供 audit 与 status 复用）
+LIFECYCLES="proposed implemented rejected archived"
+CLASSES="feature bug-fix simplification architecture process testing"
+
+# 成熟的阶梯六级（L3-L6 为"靠 review"的目标画像，机械判定只见 L0-L2）
+LEVELS="L0[播种] L1[决策入册] L2[承诺可验] L3[文档分层] L4[流程资产] L5[负空间] L6[领域定制]"
+
+# ---------- 工具函数 ----------
+die() { printf 'ponygo: %s\n' "$*" >&2; exit 1; }
+info() { printf 'ponygo: %s\n' "$*"; }
+
+# 是否已有治理根
+has_meta() { [ -d "$META_DIR" ]; }
+
+# 决策文件计数——排除集 {README.md, *.zh.md} 的唯一真源（audit / status / verify_ladder 共用）
+count_decisions() {
+  find "$DECISIONS_DIR" -type f -name '*.md' ! -name 'README.md' ! -name '*.zh.md' 2>/dev/null | wc -l | tr -d ' '
+}
+
+# 读取当前成熟度级（缺 yaml 或读不到则视为 L0；把 "L2" 形式防御性归一为 2）
+read_level() {
+  if [ -f "$META_YAML" ]; then
+    local lv
+    lv=$(sed -n 's/^level:[[:space:]]*//p' "$META_YAML" | head -n1 | tr -d '[:space:]"L')
+    printf '%s' "${lv:-0}"
+  else
+    echo "0"
+  fi
+}
+
+# 把 level 缓冲成 "L<n>" 显示（内部传整数）
+fmt_level() { printf 'L%s' "$1"; }
+
+# 是否空项目（无代码迹象：无常见 manifest / 无源码目录 / 无 .git 之外的文件）
+looks_empty() {
+  [ -d "$META_DIR" ] && return 1
+  # 有任一常见 manifest 或源码树即视为"有代码"（比 depth-selector 的多栈计数更宽——
+  # 这里只需判"有没有代码"，depth-selector 才判"有几种栈"）
+  for f in package.json Cargo.toml go.mod pyproject.toml setup.py pom.xml build.gradle *.csproj; do
+    [ -e "$f" ] && return 1
+  done
+  for d in src lib app packages crates; do
+    [ -d "$d" ] && return 1
+  done
+  return 0
+}
+
+confirm_or_skip() {
+  # 除非 --yes，否则打印即将执行并等确认；--dry-run 只打印
+  if [ "${DRY_RUN:-0}" = "1" ]; then
+    info "[dry-run] $*"
+    return 1
+  fi
+  if [ "${YES:-0}" != "1" ]; then
+    printf 'ponygo: 即将执行：%s\nponygo: 回车继续 / 输入 n 取消：' "$*"
+    read -r ans || ans=n
+    case "$ans" in
+      ""|[Yy]|[Yy][Ee][Ss]) return 0 ;;
+      *) info "已取消"; return 1 ;;
+    esac
+  fi
+  return 0
+}
+
+# ---------- 骨架铺设（init 复用） ----------
+write_skeleton() {
+  local lvl="${1:-0}"
+  mkdir -p "$DECISIONS_DIR"/{proposed,implemented,rejected,archived}
+  mkdir -p "$META_DIR"/{constitution,gates,skills,docs-tier}
+
+  # decisions/README.md：缺失时生成与模板仓库 eol 归一后逐字节一致的全量版（内容源收敛为本 heredoc 常量）
+  if [ ! -f "$DECISIONS_DIR/README.md" ]; then
+    cat > "$DECISIONS_DIR/README.md" <<'PONYGO_EOF'
+# decisions/ —— 决策记录（ADR / Agent Note）
+
+这是治理根的**记忆**：任何"为什么这样 / 为什么不那样"的决定，都落到这里，
+而不是散落在人脑、聊天记录或 PR（拉取请求）线程里。
+
+## 路径规范
+
+```
+decisions/{lifecycle}/{class}/yyyy-mm-dd-topic-title.md
+```
+
+两个轴都编码进**路径**（文件夹即标签，内容里不必重复声明，二者永不漂移）：
+
+- **lifecycle（状态轴，顶层）** 随状态迁移：
+  - `proposed/` —— 提案，未实现或部分实现
+  - `implemented/` —— 已落地，记录当前态（事实随代码更新）
+  - `rejected/` —— 已否决，判定保留在路径 + Status 行
+  - `archived/` —— 冻结历史快照（只有 implemented 能进入；见 methodology.md §2.3）
+- **class（类别轴，嵌套）** 来自封闭集合：
+  - `feature`（新能力）/ `bug-fix`（修缺陷）/ `simplification`（减复杂度）/
+    `architecture`（交付源码的结构）/ `process`（代码周围的工具与流程）/ `testing`（测试策略）
+  - class 目录由**写入时创建**，不预建空目录——空目录既不承载事实、又制造"有决策"的假象。
+  - **lifecycle 四态目录由 `ponygo init` 预建**（`proposed/ implemented/ rejected/ archived/`）：
+    状态轴的空态是合法的——它代表治理根已播种；而 class 是类别轴，空目录不承载事实，故不预建。
+
+## 文件格式契约
+
+头部固定前两行：
+
+```markdown
+# Agent Note: <title>
+
+Status: <status>
+```
+
+- `Status:` 三选一，必须与所在文件夹一致：`proposed` / `implemented` / `rejected — <一行理由>`。
+- 正文从 `## Problem` 开始（先写动机，脱离方案也成立）。
+- `implemented/` 用现在时 `## Decision`；禁止提案时代标题（`## Proposal` / `## Plan` /
+  `## Migration plan` / `## Acceptance criteria`）。
+- 每条必含 `## Alternatives considered`（候选方案与落选原因）——记录无备选的决策是在邀请重开争执。
+
+## 触发规则（谁在什么时候必须写）
+
+非平凡变更 = 命中任一：行为变更 / 架构 / 跨文件或跨包契约 / 流程与工具链 /
+测试策略 / 磁盘-线-配置格式 / 维护者可能再访的决定。
+命中即同一次变更内新增或更新记录。纯机械或局部编辑豁免。
+
+## 与下一级的关系
+
+有决策记录是 L1 的判据之一；是否"承诺可验"（L2）取决于 `gates/` 是否有非零退出门禁。
+PONYGO_EOF
+  fi
+
+  # meta.yaml：仅 level 字段（其余由 git / 目录存在性派生，不冗余声明）
+  if [ ! -f "$META_YAML" ]; then
+    printf '# ponygo 治理根状态文件（唯一真值源：level）\n# 版本由 git 派生；组件清单由 .meta/ 目录存在性充当；演进由 git + decisions/ 的 ADR 充当。\n\nlevel: %s\n' "$lvl" > "$META_YAML"
+  fi
+
+  # 空目录占位说明（只在目录为空时写入 README，避免覆盖用户已有内容）
+  [ ! -s "$META_DIR/gates/README.md" ] 2>/dev/null && \
+    [ -z "$(ls -A "$META_DIR/gates" 2>/dev/null)" ] && \
+    printf '# gates/ —— 门禁（把承诺转成非零退出命令）\n\n首版（L2 及以下）此目录为空。升到 L2 时放你的第一个门禁，并同步 meta.yaml 的 level 改为 2。\n' > "$META_DIR/gates/README.md"
+
+  [ -z "$(ls -A "$META_DIR/skills" 2>/dev/null)" ] && \
+    printf '# skills/ —— 流程资产（高频+高判断力流程的可复用技能）\n\n首版（L4 及以下）此目录为空。升到 L4 时放你的第一个技能。\n' > "$META_DIR/skills/README.md"
+
+  [ -z "$(ls -A "$META_DIR/docs-tier" 2>/dev/null)" ] && \
+    printf '# docs-tier/ —— 文档分层（按 tier 给每个事实安一个家）\n\n首版（L3 及以下）此目录为空。升到 L3 时放你的 tier 定义与 slop checklist。\n' > "$META_DIR/docs-tier/README.md"
+
+  # 宪法模板（若模板仓库自带则跳过；此处生成最小可填模板）
+  if [ ! -f "$CONSTITUTION" ]; then
+    cat > "$CONSTITUTION" <<'EOF'
+# 宪法（Constitution）—— 单一真相源
+
+> 本文件是本项目工程化命约的单一真相源。根目录 AGENTS.md / CLAUDE.md 的常载命约由本文件投影派生（`ponygo sync`），标记区 `<!-- BEGIN constitution -->` … `<!-- END constitution -->`。禁止手编投影区。
+
+## 槽位（实例化时填写）
+| 槽位 | 应填内容 |
+|---|---|
+| 项目名 | 【TODO: 填项目名】 |
+| 一句话定位 | 【TODO: 填一句话定位】 |
+| 技术栈 | 【TODO: 填技术栈】 |
+| 成熟度目标 | 【TODO: 填，如 L2】 |
+
+## 常载命约（Standing Orders）
+1. 任何非平凡变更都要落为 `.meta/decisions/` 下一条带 `## Alternatives considered` 的决策记录。
+2. 凡机械可查的承诺，配一条非零退出的命令；机器到不了的，显式标注"靠 review"。
+3. 删除代码前先搜消费者；恢复条件立法，拒绝"以后可能用得上"式怀旧。
+
+## 停止线
+槽位未填时本文件为模板态，不投影。成熟度目标（meta.yaml level）是硬上限，达到前不抢跑下一档。
+EOF
+  fi
+}
+
+# ---------- 投影同步（constitution → AGENTS.md / CLAUDE.md） ----------
+do_sync() {
+  # AI 适配开关：meta.yaml 里 ai-surface: off 时，不生成 AGENTS.md / CLAUDE.md（禁 AI 团队整体退场）
+  if grep -qiE '^ai-surface:[[:space:]]*off' "$META_YAML" 2>/dev/null; then
+    info "ai-surface: off —— 跳过 AGENTS.md / CLAUDE.md 投影（未生成任何 AI 投影文件）。"
+    return 0
+  fi
+  [ -f "$CONSTITUTION" ] || die "无 $CONSTITUTION，无法投影"
+  # 守卫：对整个 constitution 文件判 TODO（不能只判截断后的 body——槽位在「## 常载命约」之前）
+  if grep -q 'TODO:' "$CONSTITUTION"; then
+    die "constitution 槽位未填（仍含 TODO），模板态不投影。请先填槽位再 'ponygo sync'。"
+  fi
+  local begin='<!-- BEGIN constitution -->'
+  local end='<!-- END constitution -->'
+  # 抽取投影体：从「## 常载命约」起（跳过「## 槽位」占位表与头部 H1）
+  local body
+  body=$(awk 'BEGIN{ok=0} /^## 常载命约/{ok=1} ok' "$CONSTITUTION")
+  if [ -z "${body//[[:space:]]/}" ]; then
+    die "constitution 缺「## 常载命约」节，无法投影"
+  fi
+  for target in AGENTS.md CLAUDE.md; do
+    if [ -f "$target" ]; then
+      # 文件已存在：只在标记区之间替换；无标记区则追加
+      if grep -q "$begin" "$target"; then
+        awk -v b="$begin" -v e="$end" -v body="$body" '
+          BEGIN{inblk=0; donebody=0}
+          $0==b { print b; print body; inblk=1; donebody=1; next }
+          $0==e { print e; inblk=0; next }
+          inblk { next }
+          { print }
+          END{ if(!donebody){ print b; print body; print e } }
+        ' "$target" > "$target.tmp" && mv "$target.tmp" "$target"
+      else
+        printf '%s\n%s\n%s\n%s\n' "$begin" "$body" "$end" "" >> "$target"
+      fi
+    else
+      printf '%s\n%s\n%s\n' "$begin" "$body" "$end" > "$target"
+    fi
+    info "已投影 → $target"
+  done
+}
+
+# ---------- meta.yaml 违例键告警（合法键仅 level / ai-surface；status 与 audit 双挂同一函数） ----------
+warn_meta_violations() {
+  [ -f "$META_YAML" ] || return 0
+  local bad
+  # 判定前剥 \r：CRLF 环境下合法键不得被误报（V2 的 \r 防御）
+  bad=$(sed 's/\r$//' "$META_YAML" | grep -vE '^[[:space:]]*(#|$)' | grep -vE '^(level|ai-surface):')
+  [ -n "$bad" ] || return 0
+  printf 'ponygo: WARN meta.yaml 含非法键（合法键仅 level / ai-surface，且须顶格无缩进）：\n' >&2
+  printf '%s\n' "$bad" | sed 's/^/ponygo: WARN   /' >&2
+}
+
+# ---------- 级自洽验证（status 调用；判据唯一真源：maturity-ladder.md §5） ----------
+# 验级基准：无条件验 min(声明级,2) 及以下全部判据；声明 L3+ 的自证提示由 cmd_status 保留输出。
+VL_FAILS=""
+vl_fail() { VL_FAILS="${VL_FAILS}  - $1"$'\n'; }
+
+verify_ladder() {
+  local lv="$1"
+  VL_FAILS=""
+  # 归一后不匹配 ^[0-6]$ → 只验 L0、报 0.4 FAIL、跳过 L1/L2（不对未验证值做算术比较）
+  local validated=0
+  case "$lv" in
+    0|1|2|3|4|5|6) validated=1 ;;
+  esac
+  # 日期合法性探测：GNU date 可用才机械判 1.6 日期，否则降级"靠 review"（P6 诚实条款）
+  local DATE_OK=0
+  date -d @0 '+%Y' >/dev/null 2>&1 && DATE_OK=1
+  local verified_range="L0"
+  local f rel slashes b d8 st lc d
+
+  # ---- L0（0.1-0.4）----
+  [ -d "$META_DIR" ] || vl_fail "0.1 .meta/ 缺失 → 跑 'ponygo init'"
+  [ -f "$META_YAML" ] || vl_fail "0.2 .meta/meta.yaml 缺失 → 跑 'ponygo init' 或手工建"
+  grep -q '^level:' "$META_YAML" 2>/dev/null || vl_fail "0.3 meta.yaml 缺 level 字段 → 补一行 'level: 0'"
+  [ "$validated" = "1" ] || vl_fail "0.4 level 取值非法（归一后：${lv:-空}）→ meta.yaml 的 level 改为 0-6 单个整数（不支持行内注释/缩进/其它形态）"
+
+  if [ "$validated" = "1" ]; then
+
+    # ---- L1（1.1-1.7，声明级 ≥1 时验；决策计数排除集 {README.md, *.zh.md}）----
+    if [ "$lv" -ge 1 ]; then
+      verified_range="L0-L1"
+      [ -d "$DECISIONS_DIR" ] || vl_fail "1.1 .meta/decisions/ 缺失 → 建 decisions/ 与四态子目录"
+      local n_dec=0
+      n_dec=$(count_decisions)
+      [ "${n_dec:-0}" -gt 0 ] || vl_fail "1.2 无决策记录（排除 README.md / *.zh.md）→ 写第一篇 ADR 落 proposed/ 或 implemented/"
+      # 1.3 顶层目录 ⊆ 四态封闭集（路径即标签，杂项目录即违例）
+      while IFS= read -r d; do
+        case " $LIFECYCLES " in *" $d "*) ;; *)
+          vl_fail "1.3 decisions/ 顶层目录越界：$d → 只允许 proposed/implemented/rejected/archived（移走或改名）"
+        ;; esac
+      done < <(find "$DECISIONS_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null)
+      # 1.4 二级目录 ⊆ 六类封闭集
+      while IFS= read -r d; do
+        case " $CLASSES " in *" $d "*) ;; *)
+          vl_fail "1.4 二级目录越界：$d → 只允许 feature/bug-fix/simplification/architecture/process/testing"
+        ;; esac
+      done < <(find "$DECISIONS_DIR" -mindepth 2 -maxdepth 2 -type d -printf '%f\n' 2>/dev/null)
+      # 1.5 每个决策 .md 恰好位于 {lifecycle}/{class}/ 两级（深度 1-2 与 ≥4 均违例；README 豁免）
+      local n15=0 names15=""
+      while IFS= read -r -d '' f; do
+        rel="${f#"$DECISIONS_DIR"/}"
+        slashes="${rel//[!\/]/}"
+        if [ "${#slashes}" -ne 2 ]; then
+          n15=$((n15+1)); [ "$n15" -le 3 ] && names15="${names15}${rel}；"
+        fi
+      done < <(find "$DECISIONS_DIR" -type f -name '*.md' ! -name 'README.md' -print0 2>/dev/null)
+      [ "$n15" -eq 0 ] || vl_fail "1.5 有决策文件未恰好位于 {lifecycle}/{class}/ 两级（如：${names15%;}）→ 移到 {lifecycle}/{class}/ 下"
+      # 1.6 文件名格式 + 日期合法性（README 豁免；date 不可用时在结论行降级标注）
+      local n16=0 names16="" n16d=0 names16d=""
+      while IFS= read -r -d '' f; do
+        b="${f##*/}"
+        [ "$b" = "README.md" ] && continue
+        if ! printf '%s\n' "$b" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}-.+\.md$'; then
+          n16=$((n16+1)); [ "$n16" -le 3 ] && names16="${names16}${b}；"
+        elif [ "$DATE_OK" = "1" ]; then
+          d8="${b:0:10}"
+          date -d "$d8" >/dev/null 2>&1 || { n16d=$((n16d+1)); [ "$n16d" -le 3 ] && names16d="${names16d}${b}；"; }
+        fi
+      done < <(find "$DECISIONS_DIR" -type f -name '*.md' -print0 2>/dev/null)
+      [ "$n16" -eq 0 ] || vl_fail "1.6 文件名不符合 yyyy-mm-dd-topic.md（如：${names16%;}）→ 按日期前缀规范改名"
+      [ "$n16d" -eq 0 ] || vl_fail "1.6 日期不合法（如：${names16d%;}）→ 改为真实存在的 yyyy-mm-dd"
+      # 1.7 Status 首词（trim、剥 \r、区分大小写）与所在 lifecycle 一致；archived/ 下 implemented/archived 均判过；README 豁免
+      local n17=0 names17=""
+      while IFS= read -r -d '' f; do
+        b="${f##*/}"
+        [ "$b" = "README.md" ] && continue
+        rel="${f#"$DECISIONS_DIR"/}"
+        lc="${rel%%/*}"
+        st=$(sed -n 's/\r$//;s/^Status:[[:space:]]*//p' "$f" 2>/dev/null | head -n1 | awk '{print $1}')
+        if [ -z "$st" ]; then
+          n17=$((n17+1)); [ "$n17" -le 3 ] && names17="${names17}${b}(缺 Status:行)；"
+        elif [ "$lc" = "archived" ]; then
+          if [ "$st" != "implemented" ] && [ "$st" != "archived" ]; then
+            n17=$((n17+1)); [ "$n17" -le 3 ] && names17="${names17}${b}(Status: $st)；"
+          fi
+        elif [ "$st" != "$lc" ]; then
+          n17=$((n17+1)); [ "$n17" -le 3 ] && names17="${names17}${b}(Status: $st)；"
+        fi
+      done < <(find "$DECISIONS_DIR" -type f -name '*.md' -print0 2>/dev/null)
+      [ "$n17" -eq 0 ] || vl_fail "1.7 Status 首词与所在目录不符（如：${names17%;}）→ 改 Status 首词与所在 lifecycle 一致（archived/ 允许 implemented 或 archived）"
+    fi
+
+    # ---- L2（2.1-2.4，声明级 ≥2 时验；声明 L2 即视为已承诺钩子）----
+    if [ "$lv" -ge 2 ]; then
+      verified_range="L0-L2"
+      # 2.1 gates/ 有实质文件（README/.gitkeep 占位不计分）
+      if ! find "$META_DIR/gates" -type f ! -name 'README.md' ! -name '.gitkeep' -print -quit 2>/dev/null | grep -q .; then
+        vl_fail "2.1 gates/ 无实质门禁文件（README/.gitkeep 不计）→ 放第一个非零退出的门禁脚本"
+      fi
+      # 2.2 代理判据：*.sh 过 bash -n；真判据（--help / 空样本非零拒绝）靠人工补验
+      local sh_bad=0 shf=""
+      while IFS= read -r -d '' f; do
+        bash -n "$f" 2>/dev/null || { sh_bad=1; [ -z "$shf" ] && shf="$f"; }
+      done < <(find "$META_DIR/gates" -type f -name '*.sh' -print0 2>/dev/null)
+      [ "$sh_bad" = "0" ] || vl_fail "2.2 门禁脚本语法错误：$shf → 修语法；并人工补真判据（'<gate> --help' / 空样本须非零拒绝）"
+      # 2.3 至少一个门禁带负样本 spec（*.spec.*，收紧防误配）
+      if ! find "$META_DIR/gates" -type f -name '*.spec.*' -print -quit 2>/dev/null | grep -q .; then
+        vl_fail "2.3 gates/ 无负样本 spec（*.spec.*）→ 配一个证明门会拒绝非法样本的 spec 文件"
+      fi
+      # 2.4 hooksPath 已设且钩子目录非空。仅在 git 仓库内判定——非 git 目录读到的
+      # 全局配置与本项目无关，视为未设（防假 PASS）。
+      local hook_path=""
+      if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        vl_fail "2.4 已声明 L2 但不在 git 仓库内，本地钩子无从挂载 → git init 后 git config core.hooksPath .githooks 并放入钩子脚本"
+      else
+        hook_path=$(git config core.hooksPath 2>/dev/null)
+        if [ -z "$hook_path" ] || [ ! -d "$hook_path" ] || [ -z "$(ls -A "$hook_path" 2>/dev/null)" ]; then
+          vl_fail "2.4 已声明 L2 但本地钩子未挂（core.hooksPath 未设/钩子目录为空）→ git config core.hooksPath .githooks 并放入钩子脚本"
+        fi
+      fi
+    fi
+
+  fi
+
+  if [ -n "$VL_FAILS" ]; then
+    echo ""
+    echo "级自洽验证：未通过（声明 $(fmt_level "$lv")）——以下判据 FAIL："
+    printf '%s' "$VL_FAILS"
+    return 1
+  fi
+
+  echo ""
+  if [ "$lv" = "0" ]; then
+    echo "级自洽验证：通过（纯 L0 长驻：合法终态）"
+  else
+    if [ "$DATE_OK" != "1" ]; then
+      echo "级自洽验证：通过（${verified_range} 机械判据 PASS；日期合法性：靠 review）"
+    else
+      echo "级自洽验证：通过（${verified_range} 机械判据全部 PASS）"
+    fi
+  fi
+  [ "$verified_range" = "L0-L2" ] && \
+    echo "  注：2.2 是「可运行」的代理判据（bash -n 语法）；真判据：跑 '<gate> --help' 或空样本须非零拒绝。"
+  return 0
+}
+
+# ---------- 命令实现 ----------
+cmd_init() {
+  if has_meta; then
+    info "已存在 .meta/ 治理根（level=$(read_level)）。"
+    info "不要重复 init —— 用 'ponygo audit' 体检，或 'ponygo status' 看现状。"
+    exit 0
+  fi
+
+  if looks_empty; then
+    info "探测：空项目 / 新项目 → 全新铺骨架"
+    confirm_or_skip "在新项目根建立 .meta/ 治理骨架（level: 0）" || exit 0
+    write_skeleton 0
+  else
+    info "探测：有代码但无治理 → 注入骨架（不碰业务代码）"
+    confirm_or_skip "注入 .meta/ 治理骨架到既有代码仓库（只增不改业务文件）" || exit 0
+    write_skeleton 0
+  fi
+
+  # 铺完骨架后，若宪法模板槽位未填，则不投影（模板态不投影）
+  if grep -q 'TODO:' "$CONSTITUTION" 2>/dev/null; then
+    info "宪法模板含未填槽位，跳过投影。填好宪法后再 'ponygo sync'。"
+  else
+    confirm_or_skip "把 constitution 投影到根 AGENTS.md / CLAUDE.md" && do_sync
+  fi
+  info "完成。当前 level=$(read_level)。下一步：ponygo status 查看骨架完整度。"
+}
+
+cmd_audit() {
+  # 自适应深度选择：探测重型信号 → M 档；全轻 → S 档
+  local heavy=0 reasons=""
+  # 信号1：贡献者数 >= 3
+  local contrib=0
+  if [ -d .git ]; then contrib=$(git shortlog -sne 2>/dev/null | wc -l | tr -d ' '); fi
+  [ "${contrib:-0}" -ge 3 ] && { heavy=1; reasons="$reasons 贡献者≥3($contrib)"; }
+  # 信号2：多技术栈（多种 manifest 并存）
+  local manifests=0
+  for f in package.json Cargo.toml go.mod pyproject.toml pom.xml; do [ -e "$f" ] && manifests=$((manifests+1)); done
+  [ "$manifests" -ge 2 ] && { heavy=1; reasons="$reasons 多栈manifest×$manifests"; }
+  # 信号3：monorepo（packages/ 下多个包）
+  local npkgs=0
+  [ -d packages ] && npkgs=$(find packages -maxdepth 2 -name package.json 2>/dev/null | wc -l | tr -d ' ')
+  [ "${npkgs:-0}" -ge 3 ] && { heavy=1; reasons="$reasons monorepo($npkgs包)"; }
+  # 信号4：已有治理痕迹（.meta/.github/.githooks 任一已存在 → 值得深查）
+  local gov=0
+  for g in .meta .github .githooks; do [ -e "$g" ] && gov=$((gov+1)); done
+  [ "$gov" -ge 1 ] && { heavy=1; reasons="$reasons 已有治理痕迹×$gov"; }
+  # 信号5：强合规（存在认证/合规/追溯相关目录；仅做粗筛，最终靠 review）
+  local comp=0
+  for g in compliance traceability docs/compliance docs/traceability; do [ -e "$g" ] && comp=$((comp+1)); done
+  [ "$comp" -ge 1 ] && { heavy=1; reasons="$reasons 强合规痕迹"; }
+
+  local LEVEL_CHOICE="${LEVEL:-}"
+  if [ -n "$LEVEL_CHOICE" ]; then
+    LEVEL_CHOICE=$(echo "$LEVEL_CHOICE" | tr 'a-z' 'A-Z')
+  elif [ "$heavy" = "1" ]; then
+    LEVEL_CHOICE="M"
+  else
+    LEVEL_CHOICE="S"
+  fi
+
+  # F6：帮助文本承诺 S|M，其余显式拒绝
+  case "$LEVEL_CHOICE" in
+    S|M) ;;
+    *) die "审计深度档仅支持 S|M，收到：$LEVEL_CHOICE" ;;
+  esac
+
+  info "审计深度：${LEVEL_CHOICE} 档${reasons:+（触发:$reasons）}"
+  [ "${LEVEL_CHOICE}" = "M" ] || { info "S 档——骨架层判定（判「有没有」）。"; }
+  [ "${LEVEL_CHOICE}" = "M" ] && { info "M 档——机制层判定（判「对不对」）。"; }
+
+  # ---- 四问打分（S 档查骨架层，M 档追加机制层；每项一条现成命令，命中+1）----
+  local hit=0 total=0
+
+  # 问① 决策记在哪
+  total=$((total+1)); [ -d "$DECISIONS_DIR" ] && hit=$((hit+1))
+  total=$((total+1))
+  found=0; for lc in $LIFECYCLES; do [ -d "$DECISIONS_DIR/$lc" ] && found=1; done
+  [ "$found" = "1" ] && hit=$((hit+1))
+  total=$((total+1))
+  n_dec=$(count_decisions)
+  [ "${n_dec:-0}" -gt 0 ] && hit=$((hit+1))   # 有至少一条决策
+  total=$((total+1))
+  if [ -d "$DECISIONS_DIR/rejected" ] && [ -n "$(ls -A "$DECISIONS_DIR/rejected" 2>/dev/null | grep -vE '^(README\.md|\.gitkeep)$')" ]; then hit=$((hit+1)); fi  # 被否选项留痕（占位文件不计）
+  total=$((total+1))
+  # 状态与内容一致：反向查缺 Status 头的 md（允许义务外的 README 豁免）
+  bad_status=$(find "$DECISIONS_DIR" -name '*.md' ! -name 'README.md' -exec grep -L '^Status:' {} + 2>/dev/null | wc -l | tr -d ' ')
+  [ "${bad_status:-0}" -eq 0 ] && hit=$((hit+1))
+
+  if [ "$LEVEL_CHOICE" = "M" ]; then
+    total=$((total+1))
+    n_alt=$(grep -rl 'Alternatives' "$DECISIONS_DIR" 2>/dev/null | grep -v '/README\.md$' | wc -l | tr -d ' ')
+    [ "${n_alt:-0}" -gt 0 ] && hit=$((hit+1))  # 有 Alternatives 节
+    total=$((total+1)); [ -f .git/hooks/pre-commit ] || [ -f .githooks/pre-commit ] && hit=$((hit+1))  # 触发条件/门禁痕迹
+  fi
+
+  # 问② 承诺怎么强制
+  total=$((total+1))
+  if [ -d "$META_DIR/gates" ] && [ -n "$(ls -A "$META_DIR/gates" 2>/dev/null | grep -vE '^(README\.md|\.gitkeep)$')" ]; then hit=$((hit+1)); fi
+  total=$((total+1))
+  # 本地钩子已挂：仅在 git 仓库内判定（非 git 目录读到的全局配置与本项目无关）
+  hook_path=""
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    hook_path=$(git config core.hooksPath 2>/dev/null)
+  fi
+  if [ -n "$hook_path" ] && [ -d "$hook_path" ]; then hit=$((hit+1)); fi  # 本地钩子已挂
+  total=$((total+1))
+  # CI 存在：跨平台探测（GitHub/GitLab/Bitbucket/Azure/Drone/Jenkins/通用 ci 目录）
+  has_ci=0
+  for cf in .github/workflows .gitlab-ci.yml bitbucket-pipelines.yml azure-pipelines.yml .drone.yml Jenkinsfile ci; do
+    [ -e "$cf" ] && has_ci=1 && break
+  done
+  [ "$has_ci" = "1" ] && hit=$((hit+1))
+
+  if [ "$LEVEL_CHOICE" = "M" ]; then
+    total=$((total+1)); [ -d .github/workflows ] && hit=$((hit+1))
+    total=$((total+1))
+    # 负样本 spec：语言无关后缀探测（按项目栈自适应，仅给常见样例）
+    negspec=$(find . -path ./node_modules -prune -o \( -name '*_test.go' -o -name '*_test.rs' -o -name 'test_*.py' -o -name '*_test.py' -o -name '*.spec.ts' -o -name '*.spec.js' -o -name '*.Spec.cs' \) -print 2>/dev/null | head -1)
+    [ -n "$negspec" ] && hit=$((hit+1))
+  fi
+
+  # 问③ 重复劳动怎么复用
+  total=$((total+1))
+  [ -d "$META_DIR/skills" ] && [ -n "$(ls -A "$META_DIR/skills" 2>/dev/null | grep -vE '^(README\.md|\.gitkeep)$')" ] && hit=$((hit+1))
+
+  # 问④ 过时怎么退场
+  total=$((total+1))
+  [ -d "$DECISIONS_DIR/archived" ] && hit=$((hit+1))
+
+  # ---- 输出 ----
+  echo ""
+  echo "===== ponygo 审计结果（${LEVEL_CHOICE} 档）====="
+  echo "命中 $hit / $total 项"
+  info "当前治理级：$(read_level)"
+  warn_meta_violations
+  echo ""
+  echo "缺口与最小改进动作（按杠杆排序，优先「强制层」）："
+  if [ ! -f "$META_YAML" ]; then
+    echo "  - 无 .meta/meta.yaml → 跑 'ponygo init' 或手工建 level: 0"
+  fi
+  local lv="$(read_level)"
+  if [ -d "$DECISIONS_DIR" ] && [ "${n_dec:-0}" -eq 0 ]; then
+    echo "  - decisions/ 无任何决策 → 写第一篇 ADR，落 proposed/ 或 implemented/"
+  fi
+  if [ -z "${hook_path:-}" ] && [ ! -f .githooks/pre-commit ]; then
+    echo "  - 无本地钩子（core.hooksPath 未设）→ 这是「强制层」缺口，优先补（放大器）"
+  fi
+  echo ""
+  echo "提示：程序只判「有无/对不对」，不判「值不值」——是否值得建某机制，靠 review（P6）。"
+  echo ""
+  echo "替代物认可：若你用非 ponygo 形态达成同等效果（如 CONTRIBUTING.md + CODEOWNERS + CI，"
+  echo "或 docs/adr 而非 .meta/decisions），本命令只做机械形状探测、不裁决价值——请按"
+  echo "checklists/audit.md「已认可替代物」条款自评为命中，勿把形状分当价值分。"
+  if [ "$comp" -ge 1 ]; then
+    echo ""
+    echo "合规免责：检测到合规/追溯痕迹（compliance/traceability）。ponygo 是工程化治理脚手架，"
+    echo "爬满 L6 不构成任何监管合规背书（FDA、ISO 13485/26262、SOC2、PIPL 等），"
+    echo "不替代贵组织的质控与审计流程——合规评判请交由合规流程（P6）。"
+  fi
+  echo ""
+  echo "级自洽验证请跑 'ponygo status'（声明级判据不符时 exit 1）。"
+}
+
+cmd_status() {
+  local lv
+  lv=$(read_level)
+  echo "===== ponygo status ====="
+  echo "治理级：$(fmt_level "$lv")"
+  warn_meta_violations
+  echo ""
+  echo "骨架完整度："
+  local missing=0
+  for d in "$META_DIR" "$META_DIR/constitution" "$DECISIONS_DIR" "$META_DIR/gates" "$META_DIR/skills" "$META_DIR/docs-tier"; do
+    if [ -d "$d" ]; then printf '  [ok]  %s\n' "$d"; else printf '  [缺]  %s\n' "$d"; missing=$((missing+1)); fi
+  done
+  [ -f "$META_YAML" ] && printf '  [ok]  %s\n' "$META_YAML" || { printf '  [缺]  %s\n' "$META_YAML"; missing=$((missing+1)); }
+
+  local n_dec=0
+  n_dec=$(count_decisions)
+  printf '  决策数：%s\n' "$n_dec"
+  echo ""
+  if [ "$missing" -gt 0 ]; then
+    echo "下一步（去下一级 / 补缺口）："
+    [ ! -f "$META_YAML" ] && echo "  - 补 $META_YAML（level: 0）"
+    echo "  骨架不完整，exit 1（机器可查的缺口 = 非零退出）。"
+    exit 1
+  else
+    echo "骨架完整。"
+    # 级自洽验证：失败项输出取代"去下一级"建议文本（不叠床架屋）
+    if ! verify_ladder "$lv"; then exit 1; fi
+    case "$lv" in
+      0|1) echo "去 L$((lv+1))：见 maturity-ladder.md（仓库根）对应级退出标准与布尔检查项。" ;;
+      2)   echo "已达机械判定的上限。L3+ 为「靠 review」的目标画像，按需选装。" ;;
+      *)   echo "已声明 $(fmt_level "$lv")，但 L3-L6 属目标画像：请对照 maturity-ladder.md §2 的依赖清单自证，否则视为散文（P6 诚实条款）。" ;;
+    esac
+  fi
+}
+
+cmd_upgrade() {
+  echo "===== ponygo upgrade ====="
+  echo "首版不实际执行 diff 合并（那是 v+2 能力）。当前只给升级纪律："
+  echo "  1) 实例化禁止 cp -r / degit 抹历史——保留 fork 图方可跟随升级。"
+  echo "  2) 保留血缘：git remote add upstream <ponygo 模板> && git fetch upstream && git merge upstream/main"
+  echo "  3) 已失去血缘（cp 产生）→ 升级退化为人肉对照，漂移自担（诚实声明，勿假装可自动升级）。"
+  local remotes=""
+  remotes=$(git remote 2>/dev/null)
+  if [ -n "$remotes" ]; then
+    echo "当前 remote："; echo "$remotes" | sed 's/^/  - /'
+  else
+    echo "当前无 git remote（或不在 git 仓库）。"
+  fi
+}
+
+# ---------- 退级（停止线执行器） ----------
+cmd_retire() {
+  local target="${1:-}"
+  if [ -z "$target" ]; then
+    echo "用法：ponygo retire --level <N|off>   （注意 off 必须挂在 --level 后：ponygo retire --level off）"
+    echo "  N     把 meta.yaml 的 level 改写为目标档（降级，如 2 → 1），并提示移除超档机制"
+    echo "  off   整体退场：ai-surface 置 off（不再生成 AI 投影）+ level 归 0（纯 L0 长驻模式）"
+    echo "说明：删除是独立工程（P9）——退级须录一条 decision 到 .meta/decisions/。"
+    return 0
+  fi
+  has_meta || die "无 .meta/ 治理根（meta.yaml 缺失）——先 'ponygo init' 再退级"
+  [ -f "$META_YAML" ] || die "$META_YAML 缺失或不是常规文件——先 'ponygo init' 再退级"
+  case "$target" in
+    off)
+      confirm_or_skip "把 ai-surface 置 off 且 level 归 0（整体退场到纯 L0 长驻模式）" || return 0
+      sed -i 's/^level:.*/level: 0/' "$META_YAML"
+      grep -qE '^ai-surface:' "$META_YAML" || printf 'ai-surface: off\n' >> "$META_YAML"
+      sed -i 's/^ai-surface:.*/ai-surface: off/' "$META_YAML"
+      info "已整体退场：level 0 + ai-surface off。勿忘录一条退级 decision。"
+      ;;
+    [0-6])
+      confirm_or_skip "把 level 降级到 $target（并提示移除超档机制）" || return 0
+      sed -i "s/^level:.*/level: $target/" "$META_YAML"
+      # 联动：降到 L0 时应清掉 ai-surface 悬挂（否则 sync 仍会生成投影，与退场语义冲突）
+      if [ "$target" = "0" ] && grep -qE '^ai-surface:[[:space:]]*on' "$META_YAML"; then
+        info "已降级到 L0，检测到 ai-surface: on —— 若要纯 L0 长驻，请改 'ponygo retire --level off'。"
+      fi
+      info "level 已降到 $target。超档机制（gates/skills/docs-tier）请按 P9 连根拔并录 decision。"
+      ;;
+    *) die "retire 目标非法：$target（用 0-6 或 off）" ;;
+  esac
+}
+
+# ---------- 帮助 ----------
+usage() {
+  cat <<'EOF'
+ponygo —— 项目工程化治理元框架命令行（单文件、零依赖）
+
+用法：
+  ponygo init     [--yes] [--dry-run]    建立/注入 .meta/ 治理骨架（自判新/旧项目）
+  ponygo audit    [--level S|M]          自适应体检：打分 + 缺口 + 最小改进动作
+  ponygo status                          查看成熟度级与骨架完整度（骨架缺口或声明级判据不符 exit 1）
+  ponygo upgrade                         跟随框架升级指引（首版不实际合并）
+  ponygo sync                            把 constitution 投影到 AGENTS.md / CLAUDE.md
+  ponygo retire   --level <N|off>        退级 / 整体退场（停止线执行器）
+
+选项：
+  --yes       破坏性动作前不再确认
+  --dry-run   只打印将执行的动作，不落盘
+  --level S|M 强制指定审计深度档（默认按项目特征自适应）
+EOF
+}
+
+# ---------- 入口 ----------
+DRY_RUN=0; YES=0; LEVEL=""; CMD=""; RETIRE_LEVEL=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --yes) YES=1 ;;
+    --dry-run) DRY_RUN=1 ;;
+    --level) [ $# -ge 2 ] || die "--level 需要取值（如 --level S / --level off）"; shift; LEVEL="$1" ;;
+    -h|--help) usage; exit 0 ;;
+    init|audit|status|upgrade|sync|retire) CMD="$1" ;;
+    *) die "未知参数或子命令：$1（见 'ponygo --help'）" ;;
+  esac
+  shift
+done
+
+case "${CMD:-}" in
+  init) cmd_init ;;
+  audit) cmd_audit ;;
+  status) cmd_status ;;
+  upgrade) cmd_upgrade ;;
+  sync) do_sync ;;
+  retire) cmd_retire "${LEVEL:-}" ;;
+  "") usage; exit 0 ;;
+esac
