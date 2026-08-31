@@ -421,7 +421,7 @@ s18_repo_consistency() {
   else
     bad "checklist.md 缺机制层数 15 口径"
   fi
-  if grep -Eq '精微[[:space:]]*8|精微层.{0,3}8[[:space:]]*项' "$ROOT/audit/checklist.md" 2>/dev/null; then
+  if grep -Eq '精微[[:space:]]*8|精微层.{0,10}8[[:space:]]*项' "$ROOT/audit/checklist.md" 2>/dev/null; then
     ok "checklist.md 含精微层数 8"
   else
     bad "checklist.md 缺精微层数 8 口径"

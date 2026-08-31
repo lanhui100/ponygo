@@ -447,6 +447,19 @@ verify_ladder() {
 }
 
 # ---------- 命令实现 ----------
+# 探测既有治理形态（"已认可替代物"条款，见 checklists/audit.md）——init 前提示，防盲目双轨
+detect_alt_gov() {
+  local hits="" d
+  for d in docs/adr docs/decisions docs/architecture/decisions; do
+    [ -d "$d" ] && hits="$hits $d(决策载体)"
+  done
+  # [ -e ] 同时覆盖文件与目录（.github/workflows 是目录，其余是文件）
+  for d in CONTRIBUTING.md CODEOWNERS .pre-commit-config.yaml lefthook.yml .github/workflows .gitlab-ci.yml Jenkinsfile azure-pipelines.yml; do
+    [ -e "$d" ] && hits="$hits $d(强制/流程)"
+  done
+  printf '%s' "$hits"
+}
+
 cmd_init() {
   if has_meta; then
     info "已存在 .meta/ 治理根（level=$(read_level)）。"
@@ -459,7 +472,15 @@ cmd_init() {
     confirm_or_skip "在新项目根建立 .meta/ 治理骨架（level: 0）" || exit 0
     write_skeleton 0
   else
-    info "探测：有代码但无治理 → 注入骨架（不碰业务代码）"
+    local alt
+    alt=$(detect_alt_gov)
+    if [ -n "$alt" ]; then
+      info "探测：有代码，且发现既有治理形态（已认可替代物候选）：$alt"
+      info "  同等治理效果可用别的形态达成——不建议盲目注入，制造两套并行体系。"
+      info "  建议：先 'ponygo audit' 体检对照 checklists/audit.md「已认可替代物」条款，再决定迁移。"
+    else
+      info "探测：有代码但无治理 → 注入骨架（不碰业务代码）"
+    fi
     confirm_or_skip "注入 .meta/ 治理骨架到既有代码仓库（只增不改业务文件）" || exit 0
     write_skeleton 0
   fi

@@ -29,7 +29,29 @@
 
 ---
 
-## 3. 快速开始（六条命令）
+## 3. 安装与快速开始（六条命令）
+
+### 3.1 安装（无安装器，单文件零依赖）
+
+`ponygo` 就是一个 bash 脚本，clone 即用，不需要任何包管理器：
+
+```bash
+# 1. 拿到脚本（任选其一）
+git clone <本仓库>                # 方式 A：clone 模板仓库
+# 或只取单文件：curl -fsSL <raw-url>/ponygo -o ponygo（方式 B，丢血缘，升级退化为人肉对照）
+
+# 2. 让 `ponygo` 命令全局可用（Git Bash / Linux / macOS，任选其一）
+export PATH="<clone目录>:$PATH"    # 写进 ~/.bashrc 持久化
+# 或 alias ponygo='bash <clone目录>/ponygo'
+
+# 3. 验证
+ponygo --help
+```
+
+平台要求：Git Bash（Windows）/ GNU 用户态（`find -printf`、`sed -i`、`date -d`，见 §6.2）。
+推荐方式 A（clone）：保留 git 血缘，`ponygo upgrade` 才有跟随升级的前提（见 §3 命令）。
+
+### 3.2 六条命令
 
 ```bash
 ponygo init      # 新项目：在仓库根生成 .meta/ 治理骨架 + meta.yaml（level: 0）
@@ -109,6 +131,7 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
 | 已有治理 | 已有 `.meta/` | `ponygo status` / `ponygo upgrade` |
 
 CLI 从不假设项目是空仓；它对"已有治理"与"零治理但历史厚重"两种情况都只做**增量**，不要求推倒重来。
+对第二种场景，`init` 也会先探测既有治理形态（`docs/adr/`、CONTRIBUTING.md、CODEOWNERS、pre-commit/lefthook、CI 配置等）并提示"先 `audit` 再决定迁移"——探测只是提示，不是拦截；确认后仍可注入（你是裁"值不值"的人，机器只裁"有没有"）。
 
 ---
 
