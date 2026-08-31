@@ -33,18 +33,24 @@
 
 ### 3.1 安装（一键安装 / 单文件零依赖）
 
-`ponygo` 是纯 bash 实现的治理演进脚手架，无外部包依赖。支持一键安装或 clone 即用：
+`ponygo` 是纯 bash 实现的治理演进脚手架，无外部包依赖。任选以下一种方式安装：
+
+**方式 A：一行命令远端安装（推荐，自动注入 `~/.local/bin` 并做 PATH 引导）**
 
 ```bash
-# 方式 A：一行命令远端安装（自动注入 ~/.local/bin 并做 PATH 引导）
 curl -fsSL https://raw.githubusercontent.com/lanhui100/ponygo/main/install.sh | bash
+```
 
-# 方式 B：源码目录一键安装（clone 仓库后）
+**方式 B：源码目录一键安装（clone 本仓库后）**
+
+```bash
 ./install.sh
+```
 
-# 方式 C：保留 git 血缘手动挂载（方便后续 ponygo upgrade 跟随升级）
-git clone https://github.com/lanhui100/ponygo.git
-export PATH="$PWD/ponygo:$PATH"    # 写进 ~/.bashrc 持久化
+**方式 C：保留 git 血缘手动挂载（方便后续 `ponygo upgrade` 跟随升级）**
+
+```bash
+git clone https://github.com/lanhui100/ponygo.git && export PATH="$PWD/ponygo:$PATH"
 ```
 
 平台要求：Git Bash（Windows）/ Linux / macOS（GNU 用户态，见 §6.2）。
