@@ -35,7 +35,7 @@ git rev-parse --is-inside-work-tree 2>/dev/null   # 是否在 git 仓库内
 
 ### 阶段 D：写下第一篇决策（升 L1 的起手）
 
-- [ ] 用 `decisions/README.md` 的路径规范，落第一篇 ADR：
+- [ ] 用骨架预置的 `.meta/skills/write-adr/SKILL.md`（框架交付的唯一预置技能）落第一篇 ADR：
   `implemented/{class}/yyyy-mm-dd-<topic>.md`（或先 `proposed/`）
 - [ ] 确保头部两行 `# Agent Note: <title>` + `Status: implemented`，正文有 `## Problem` 和 `## Alternatives considered`
 

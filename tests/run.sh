@@ -111,6 +111,8 @@ s02_init() {
   [ -f "$T/.meta/meta.yaml" ] && ok "meta.yaml 存在" || bad "meta.yaml 缺失"
   grep -q '^level: 0' "$T/.meta/meta.yaml" && ok "level: 0" || bad "level 字段异常"
   [ -f "$T/.meta/decisions/README.md" ] && ok "decisions/README.md 生成" || bad "decisions/README.md 缺失"
+  [ -f "$T/.meta/skills/write-adr/SKILL.md" ] && ok "预置 write-adr 技能" || bad "write-adr 技能缺失"
+  grep -q '何时用' "$T/.meta/skills/write-adr/SKILL.md" && ok "write-adr 含触发式 description" || bad "write-adr 缺触发式 description"
   [ ! -f "$T/AGENTS.md" ] && [ ! -f "$T/CLAUDE.md" ] && ok "模板态不投影" || bad "模板态不应投影"
   run_cli "$T" init --yes
   assert_eq "重复 init exit 0（不覆盖）" 0 "$R_RC"
@@ -215,10 +217,10 @@ s09_audit_counts() {
   # shellcheck disable=SC2046
   run_cli_env "$T" $G audit --level S
   assert_eq "S 档 exit 0" 0 "$R_RC"
-  assert_contains "S 档命中 4 / 10" "$R_OUT" "命中 4 / 10"
+  assert_contains "S 档命中 5 / 10（含预置 write-adr）" "$R_OUT" "命中 5 / 10"
   # shellcheck disable=SC2046
   run_cli_env "$T" $G audit --level M
-  assert_contains "M 档命中 4 / 14" "$R_OUT" "命中 4 / 14"
+  assert_contains "M 档命中 5 / 14（含预置 write-adr）" "$R_OUT" "命中 5 / 14"
 }
 
 s10_audit_level_arg() {
@@ -385,6 +387,12 @@ s14_decisions_readme() {
     ok "生成 docs-tier/README 与模板 eol 归一后一致（含 tier 模板）"
   else
     bad "生成 docs-tier/README 与模板不一致"
+  fi
+  if diff <(tr -d '\r' < "$T/.meta/skills/write-adr/SKILL.md") \
+          <(tr -d '\r' < "$ROOT/.meta/skills/write-adr/SKILL.md") >/dev/null 2>&1; then
+    ok "生成 write-adr/SKILL.md 与模板 eol 归一后一致"
+  else
+    bad "生成 write-adr/SKILL.md 与模板不一致"
   fi
 }
 

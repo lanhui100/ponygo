@@ -93,7 +93,7 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
 │   ├── rejected/
 │   └── archived/
 ├── gates/                     # 门禁：把承诺转成非零退出命令（每门配负样本 spec）
-├── skills/                    # 流程资产：高频+高判断力流程的可复用技能（触发式 description + 校准样例）
+├── skills/                    # 流程资产：高频+高判断力流程的可复用技能（预置 write-adr，其余按 Rule of three 生长）
 └── docs-tier/                 # 文档分层：按 tier 分类法给每个事实安一个家
 ```
 

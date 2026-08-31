@@ -1,0 +1,36 @@
+---
+name: write-adr
+description: 何时用：出现任何非平凡变更（行为变更 / 架构 / 跨文件或跨包契约 / 流程与工具链 / 测试策略 / 磁盘-线-配置格式 / 维护者可能再访的决定，命中任一）需要落决策记录时；或把记录迁移状态（proposed → implemented / rejected / archived）时。纯机械或局部编辑豁免。
+---
+
+# write-adr —— 把一次非平凡决策落成 .meta/decisions/ 记录
+
+## 真相源
+
+- `.meta/decisions/README.md` —— 路径规范、格式契约、触发规则（唯一真源，冲突时以它为准）
+- `.meta/constitution/constitution.md` —— 常载命约第 1 条（决策必须入册且带 Alternatives）
+- ponygo 仓库根 `maturity-ladder.md` §5 —— L1 判据（status 机械校验的逐项定义）
+
+## 步骤
+
+1. **判触发**：对照 description 的枚举，命中任一即写。拿不准 → 写（多记成本一段文字，漏记成本永久丢失）。
+2. **选 lifecycle**：`proposed/`（未实现）或 `implemented/`（随本次变更落地）。
+3. **选 class**：`feature`（新能力）/ `bug-fix`（修缺陷）/ `simplification`（减复杂度）/ `architecture`（交付源码的结构）/ `process`（代码周围的工具与流程）/ `testing`（测试策略）。都不够 → 考虑在 `decisions/classes.local` 登记领域扩展（扩展即一次治理决策，须评审）。
+4. **建文件**：`.meta/decisions/{lifecycle}/{class}/$(date +%F)-<topic-title>.md`，topic 用 kebab-case。
+5. **头部**：第一行 `# Agent Note: <title>`，空行，`Status: <与所在目录一致>`（rejected 可带一行理由：`rejected — <理由>`）。
+6. **正文**：`## Problem` 开头（先写动机，脱离方案也成立）→ `## Decision`（implemented 用现在时；禁止 `## Proposal` / `## Plan` / `## Acceptance criteria` 等提案时代标题）→ `## Alternatives considered`（候选方案 + 落选原因，**必填**）→ `## Consequences`（可选）。
+7. **迁移状态** = 移动文件到目标 lifecycle + 改 `Status:` 行 + 把提案时代标题改写为现在时——三件事在同一次变更内完成。
+
+## 校准样例
+
+- 正例（该写）：把某命令的退出码语义从 0 改为 1 → 行为变更，写 `implemented/feature/…`。
+- 正例（该写）：评审后否决"用 yaml 多字段记版本" → 写 `rejected/process/…`，Status 行带一行理由。
+- 正例（该写）：引入 lefthook 管理本地钩子 → 流程与工具链变更，写 `implemented/process/…`。
+- 反例（豁免）：改 README 错别字、调整测试断言文案 → 纯机械/局部编辑，不写。
+- 反例（豁免）：格式化重排、重命名局部变量 → 无行为/契约/结构/流程变化，不写。
+- 边界（靠 review）：重构归哪个 class？判别器是"可观察行为是否改变"——改变 → feature/bug-fix；只为减复杂度 → simplification（`refactor` 刻意缺席，与之重叠）。
+
+## 验证与报告
+
+- 跑 `ponygo status`：决策数应 +1，L1 判据 1.2–1.7 全绿（路径两级、文件名日期、Status 与目录一致）。
+- 报告格式：新记录路径 + lifecycle/class + 一句话 Problem。
