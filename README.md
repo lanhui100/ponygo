@@ -31,25 +31,24 @@
 
 ## 3. 安装与快速开始（六条命令）
 
-### 3.1 安装（无安装器，单文件零依赖）
+### 3.1 安装（一键安装 / 单文件零依赖）
 
-`ponygo` 就是一个 bash 脚本，clone 即用，不需要任何包管理器：
+`ponygo` 是纯 bash 实现的治理演进脚手架，无外部包依赖。支持一键安装或 clone 即用：
 
 ```bash
-# 1. 拿到脚本（任选其一）
-git clone <本仓库>                # 方式 A：clone 模板仓库
-# 或只取单文件：curl -fsSL <raw-url>/ponygo -o ponygo（方式 B，丢血缘，升级退化为人肉对照）
+# 方式 A：一行命令远端安装（自动注入 ~/.local/bin 并做 PATH 引导）
+curl -fsSL https://raw.githubusercontent.com/ponygo/ponygo/main/install.sh | bash
 
-# 2. 让 `ponygo` 命令全局可用（Git Bash / Linux / macOS，任选其一）
+# 方式 B：源码目录一键安装（clone 仓库后）
+./install.sh
+
+# 方式 C：保留 git 血缘手动挂载（方便后续 ponygo upgrade 跟随升级）
+git clone <本仓库>
 export PATH="<clone目录>:$PATH"    # 写进 ~/.bashrc 持久化
-# 或 alias ponygo='bash <clone目录>/ponygo'
-
-# 3. 验证
-ponygo --help
 ```
 
-平台要求：Git Bash（Windows）/ GNU 用户态（`find -printf`、`sed -i`、`date -d`，见 §6.2）。
-推荐方式 A（clone）：保留 git 血缘，`ponygo upgrade` 才有跟随升级的前提（见 §3 命令）。
+平台要求：Git Bash（Windows）/ Linux / macOS（GNU 用户态，见 §6.2）。
+安装后验证：`ponygo --help`
 
 ### 3.2 六条命令
 

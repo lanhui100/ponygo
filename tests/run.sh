@@ -477,6 +477,24 @@ s19_boundary_regress() {
   grep -q 'BEGIN constitution' "$T/AGENTS.md" && ok "块已追加" || bad "块未追加"
 }
 
+s20_installer() {
+  echo "--- 场景20：install.sh 一键安装与环境探测"
+  local T target_bin out rc=0
+  T=$(new_case)
+  target_bin="$T/bin"
+
+  # 1. 本地源码安装测试
+  out=$(bash "$ROOT/install.sh" "$target_bin" 2>&1) || rc=$?
+  assert_eq "install.sh 本地安装 exit 0" 0 "$rc"
+  [ -x "$target_bin/ponygo" ] && ok "生成可执行文件 target/ponygo" || bad "未生成 target/ponygo"
+  echo "$out" | grep -q "已成功安装到" && ok "输出成功信息" || bad "未输出成功信息"
+
+  # 2. 自检能否运行
+  local help_out
+  help_out=$("$target_bin/ponygo" --help 2>&1)
+  echo "$help_out" | grep -q "ponygo" && ok "已安装 ponygo 可正常执行 --help" || bad "安装后无法执行"
+}
+
 # ============================================================
 s01_help
 s02_init
@@ -497,8 +515,10 @@ s16_status_no_meta
 s17_dry_run
 s18_repo_consistency
 s19_boundary_regress
+s20_installer
 
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
 [ "$FAIL" -eq 0 ] || exit 1
 exit 0
+
