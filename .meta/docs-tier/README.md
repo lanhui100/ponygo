@@ -5,7 +5,11 @@
 
 升到 L3 时，把下方模板表填成你的 `tier-taxonomy.md`，并补 slop checklist 与词数预算。
 
-## tier 分类法模板（解冻 L3 时填写；原理：methodology.md §5.1）
+> **「原理」引用的出处**：本文的 methodology 引用指向 ponygo 框架仓库的
+> `docs/methodology.md`：<https://github.com/lanhui100/ponygo/blob/main/docs/methodology.md>。
+> 原理层唯一真相源在框架仓库，实例不复制——复制即漂移。
+
+## tier 分类法模板（解冻 L3 时填写；原理：methodology §5.1）
 
 每一 tier 的「该承载什么 / 不该承载什么」必须写死——只写"放什么文档"的 tier 表会漂移。
 
@@ -23,7 +27,7 @@
 **放置速查**：bug→事故复盘；理由→决策记录；过程→how-to；契约→模块 README；
 standing orders→常载命约 + 理由链。
 
-## slop checklist（审计清单，原理：methodology.md §5.4）
+## slop checklist（审计清单，原理：methodology §5.4）
 
 - 同一条规则出现在多个家（留一个家，其余链过去）；
 - 叙述历史/战争故事（previously/now/no longer——状态会腐烂）；

@@ -10,11 +10,15 @@
 （Rule of three 对它天然满足）。它是**框架交付物，不计入** L4"实例已长出流程资产"
 的证据——L4 仍要求你的项目按 Rule of three 自己长出第一个 skill。
 
+> **「原理」引用的出处**：本文及实例骨架中的 methodology 引用，均指向 ponygo 框架仓库的
+> `docs/methodology.md`：<https://github.com/lanhui100/ponygo/blob/main/docs/methodology.md>。
+> 原理层唯一真相源在框架仓库，实例不复制——复制即漂移。
+
 ---
 
 ## SKILL.md 五要素契约
 
-每篇技能一个目录 `<skill-name>/SKILL.md`，由五要素构成（原理：methodology.md §3.1）：
+每篇技能一个目录 `<skill-name>/SKILL.md`，由五要素构成（原理：methodology §3.1）：
 
 | # | 要素 | 要求 |
 |---|---|---|
@@ -45,7 +49,7 @@ disable-model-invocation: <可选。true = 只许用户点名，禁模型自主�
 - 跑 `<命令>`；输出：<格式>
 ```
 
-## 三条纪律（源自 dsh 实证，methodology.md §3.3）
+## 三条纪律（源自 dsh 实证，methodology §3.3）
 
 1. **调用权限分层**：重型 / 危险 / 高成本流程标 `disable-model-invocation: true`——
    只许用户点名，防模型误路由（范式：dsh-translate-docs）。

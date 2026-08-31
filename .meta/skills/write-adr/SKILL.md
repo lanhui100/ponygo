@@ -9,7 +9,7 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 
 - `.meta/decisions/README.md` —— 路径规范、格式契约、触发规则（唯一真源，冲突时以它为准）
 - `.meta/constitution/constitution.md` —— 常载命约第 1 条（决策必须入册且带 Alternatives）
-- ponygo 仓库根 `maturity-ladder.md` §5 —— L1 判据（status 机械校验的逐项定义）
+- ponygo 框架仓库 `maturity-ladder.md` §5 —— L1 判据（status 机械校验的逐项定义）：<https://github.com/lanhui100/ponygo/blob/main/maturity-ladder.md>
 
 ## 步骤
 

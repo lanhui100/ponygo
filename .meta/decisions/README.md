@@ -15,7 +15,8 @@ decisions/{lifecycle}/{class}/yyyy-mm-dd-topic-title.md
   - `proposed/` —— 提案，未实现或部分实现
   - `implemented/` —— 已落地，记录当前态（事实随代码更新）
   - `rejected/` —— 已否决，判定保留在路径 + Status 行
-  - `archived/` —— 冻结历史快照（只有 implemented 能进入；见 methodology.md §2.3）
+  - `archived/` —— 冻结历史快照（只有 implemented 能进入；原理见 ponygo 框架仓库
+    `docs/methodology.md` §2.3：<https://github.com/lanhui100/ponygo/blob/main/docs/methodology.md>）
 - **class（类别轴，嵌套）** 来自封闭集合：
   - `feature`（新能力）/ `bug-fix`（修缺陷）/ `simplification`（减复杂度）/
     `architecture`（交付源码的结构）/ `process`（代码周围的工具与流程）/ `testing`（测试策略）

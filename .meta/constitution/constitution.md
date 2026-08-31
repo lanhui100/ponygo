@@ -32,7 +32,9 @@
 
 ## 常载命约（Standing Orders）
 
-> 每条命约 1-3 行，必须是"约定"而非"故事"；每条链到 `docs/methodology.md` 的原理层。
+> 每条命约 1-3 行，必须是"约定"而非"故事"；每条链到原理层——指 ponygo 框架仓库的
+> `docs/methodology.md`：<https://github.com/lanhui100/ponygo/blob/main/docs/methodology.md>。
+> 原理层唯一真相源在框架仓库，实例不复制——复制即漂移。
 > 这是每次会话必载、不可被后续指令覆盖的**常驻约束**。下方 5 条为最普适的预设，实例化时可增删，但保留最少 3 条。
 
 1. **决策必须入册且带 Alternatives**——任何非平凡变更（行为 / 架构 / 契约 / 流程 / 测试策略变更，命中任一）都要落到 `.meta/decisions/{lifecycle}/{class}/` 下的一条决策记录，且必含 `## Alternatives considered`（候选方案与落选原因）。口头决定、只存在于聊天/PR 讨论里的"为什么这样/为什么不那样"视为未发生。
