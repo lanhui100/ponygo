@@ -2,7 +2,7 @@
 # ponygo 一键安装脚本：零依赖，单文件安装与全局配置引导
 set -euo pipefail
 
-REPO_RAW_URL="${PONYGO_SOURCE_URL:-https://raw.githubusercontent.com/ponygo/ponygo/main/ponygo}"
+REPO_RAW_URL="${PONYGO_SOURCE_URL:-https://raw.githubusercontent.com/lanhui100/ponygo/main/ponygo}"
 BIN_DIR="${PONYGO_INSTALL_DIR:-${1:-$HOME/.local/bin}}"
 
 info() { printf "\033[32m[ponygo:install]\033[0m %s\n" "$*"; }

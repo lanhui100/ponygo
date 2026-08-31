@@ -37,14 +37,14 @@
 
 ```bash
 # 方式 A：一行命令远端安装（自动注入 ~/.local/bin 并做 PATH 引导）
-curl -fsSL https://raw.githubusercontent.com/ponygo/ponygo/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/lanhui100/ponygo/main/install.sh | bash
 
 # 方式 B：源码目录一键安装（clone 仓库后）
 ./install.sh
 
 # 方式 C：保留 git 血缘手动挂载（方便后续 ponygo upgrade 跟随升级）
-git clone <本仓库>
-export PATH="<clone目录>:$PATH"    # 写进 ~/.bashrc 持久化
+git clone https://github.com/lanhui100/ponygo.git
+export PATH="$PWD/ponygo:$PATH"    # 写进 ~/.bashrc 持久化
 ```
 
 平台要求：Git Bash（Windows）/ Linux / macOS（GNU 用户态，见 §6.2）。
