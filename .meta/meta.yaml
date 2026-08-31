@@ -5,9 +5,9 @@
 # 铁律（防手填漂移，呼应 methodology.md P2「凡机械可查必有非零退出命令」）：
 #   - 本文件【只】承载一个真值源字段：level（成熟度级）。
 #   - 版本号 → 由 git 派生（git log / tag），不要在这里手填第二个"版本"。
-#   - "已激活组件"清单 → 由 .meta/ 下【目录是否实际存在】充当（文件夹即标签），
+#   - "已激活组件"清单 → 由 .meta/ 与 .agents/ 下【目录是否实际存在】充当（文件夹即标签），
 #     不要在这里手填一份会与目录漂移的副本。
-#   - "演进记录" → 由 git 历史 + decisions/ 下的 ADR 充当，不要在这里重复记。
+#   - "演进记录" → 由 git 历史 + .agents/notes/ 下的 ADR 充当，不要在这里重复记。
 #   - 合法键 = level + ai-surface 两个：ai-surface: on|off 控制 sync 是否生成 AI 投影；
 #     出现其它键（含缩进的 level/ai-surface）会被 'ponygo status' / 'ponygo audit' 告警（WARN）。
 #

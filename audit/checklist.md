@@ -19,19 +19,19 @@
 
 | # | 子项 | 判定（布尔命题） | 检查命令（现成） | 失败时最小改进动作 |
 |---|---|---|---|---|
-| 1.1 | 有专用决策载体 | 存在一个专门目录承载决策记录（ponygo 或替代形态均可） | `ls -d .meta/decisions docs/adr docs/decisions docs/architecture/decisions 2>/dev/null \| head -1` | 建 `.meta/decisions/` 或任意 ADR 目录，写第一篇 ADR |
-| 1.2 | 路径编码状态 | 四态目录齐全 | `ls -d .meta/decisions/{proposed,implemented,rejected,archived} 2>/dev/null` | 补齐缺失的四态目录 |
-| 1.3 | 有决策记录 | 决策文件数 > 0（README 豁免） | `find .meta/decisions -name '*.md' ! -name 'README.md' ! -name '*.zh.md' \| wc -l` | 写第一篇 ADR，落 `implemented/` 或 `proposed/` |
+| 1.1 | 有专用决策载体 | 存在一个专门目录承载决策记录（ponygo 或替代形态均可） | `ls -d .agents/notes docs/adr docs/decisions docs/architecture/decisions 2>/dev/null \| head -1` | 建 `.agents/notes/` 或任意 ADR 目录，写第一篇 ADR |
+| 1.2 | 路径编码状态 | 四态目录齐全 | `ls -d .agents/notes/{proposed,implemented,rejected,archived} 2>/dev/null` | 补齐缺失的四态目录 |
+| 1.3 | 有决策记录 | 决策文件数 > 0（README 豁免） | `find .agents/notes -name '*.md' ! -name 'README.md' ! -name '*.zh.md' \| wc -l` | 写第一篇 ADR，落 `implemented/` 或 `proposed/` |
 
 ### 机制层（M 档追加）
 
 | # | 子项 | 判定（布尔命题） | 检查命令 | 失败时最小改进动作 |
 |---|---|---|---|---|
-| 1.4 | 状态与内容一致 | 无缺 `Status:` 头的决策文件（README 豁免） | `find .meta/decisions -name '*.md' ! -name 'README.md' -exec grep -L '^Status:' {} + \| wc -l` 应为 0 | 给缺头文件补 `# Agent Note:` + `Status:` 前两行 |
-| 1.5 | 有 Alternatives 节 | 每条决策含候选方案 | `grep -rl 'Alternatives' .meta/decisions \| wc -l` ≥ 记录总数 | 补 `## Alternatives considered` |
-| 1.6 | 被否选项留痕 | `rejected/` 非空（排除 `.gitkeep`/`README.md` 占位）或含被否候选记录 | `ls -A .meta/decisions/rejected/ \| grep -v -e '^\.gitkeep$' -e '^README\.md$' \| wc -l` > 0 | 把被否决的方案落一条 `rejected/` 记录 |
+| 1.4 | 状态与内容一致 | 无缺 `Status:` 头的决策文件（README 豁免） | `find .agents/notes -name '*.md' ! -name 'README.md' -exec grep -L '^Status:' {} + \| wc -l` 应为 0 | 给缺头文件补 `# Agent Note:` + `Status:` 前两行 |
+| 1.5 | 有 Alternatives 节 | 每条决策含候选方案 | `grep -rl 'Alternatives' .agents/notes \| wc -l` ≥ 记录总数 | 补 `## Alternatives considered` |
+| 1.6 | 被否选项留痕 | `rejected/` 非空（排除 `.gitkeep`/`README.md` 占位）或含被否候选记录 | `ls -A .agents/notes/rejected/ \| grep -v -e '^\.gitkeep$' -e '^README\.md$' \| wc -l` > 0 | 把被否决的方案落一条 `rejected/` 记录 |
 | 1.7 | 触发条件枚举化 | 有一份"何时必须写"的枚举清单 | `grep -rl "非平凡变更\|触发规则" .meta/ docs/ 2>/dev/null \| head -1` | 写触发规则（命中任一即写，纯机械豁免） |
-| 1.8 | supersession 当次处理 | 新增记录时替换旧记录在同一变更 | `git log --oneline -5 -- .meta/decisions \| wc -l` 且无残留被弃记录（语义） | 靠 review；建 supersession 审计习惯 |
+| 1.8 | supersession 当次处理 | 新增记录时替换旧记录在同一变更 | `git log --oneline -5 -- .agents/notes \| wc -l` 且无残留被弃记录（语义） | 靠 review；建 supersession 审计习惯 |
 
 ### 精微层（`[future]` 首版不启用）
 
@@ -71,18 +71,18 @@
 
 | # | 子项 | 判定 | 检查命令 | 失败动作 |
 |---|---|---|---|---|
-| 3.1 | 有技能目录 | `skills/` 存在 | `ls -d .meta/skills 2>/dev/null` | 建 `.meta/skills/` |
+| 3.1 | 有技能目录 | `skills/` 存在 | `ls -d .agents/skills 2>/dev/null` | 建 `.agents/skills/` |
 
 ### 机制层（M 档追加）
 
 | # | 子项 | 判定 | 检查命令 | 失败动作 |
 |---|---|---|---|---|
-| 3.2 | 有至少一个资产化流程 | 技能文件数 > 0 | `find .meta/skills -name 'SKILL.md' -o -name '*.md' \| grep -v README \| wc -l` > 0 | 把"每三次重复劳动"资产化为技能 |
-| 3.3 | 技能带触发式 description | description 内联触发条件 | `grep -l '何时用\|trigger\|When to use' .meta/skills/*/SKILL.md 2>/dev/null` | 补触发式 description |
-| 3.4 | 技能带校准样例 | 正反例成对 | `grep -l '校准样例\|calibration\|Examples' .meta/skills/*/SKILL.md 2>/dev/null` | 补校准样例 |
+| 3.2 | 有至少一个资产化流程 | 技能文件数 > 0 | `find .agents/skills -name 'SKILL.md' -o -name '*.md' \| grep -v README \| wc -l` > 0 | 把"每三次重复劳动"资产化为技能 |
+| 3.3 | 技能带触发式 description | description 内联触发条件 | `grep -l '何时用\|trigger\|When to use' .agents/skills/*/SKILL.md 2>/dev/null` | 补触发式 description |
+| 3.4 | 技能带校准样例 | 正反例成对 | `grep -l '校准样例\|calibration\|Examples' .agents/skills/*/SKILL.md 2>/dev/null` | 补校准样例 |
 
 > **L4 解冻前置**：SKILL.md 的完整格式契约（五要素 + 契约头部示例 + 三条纪律）见
-> `.meta/skills/README.md`；skill 元数据门禁（frontmatter/触发/样例的机械校验）与
+> `.agents/skills/README.md`；skill 元数据门禁（frontmatter/触发/样例的机械校验）与
 > "第三次重复"计数机制属 L4 依赖的未交付物（maturity-ladder §2），解冻 L4 前逐项
 > 满足 3.2–3.4 即可，不预建门禁（空门禁是被永久引用的死重）。
 
@@ -99,13 +99,13 @@
 
 | # | 子项 | 判定 | 检查命令 | 失败动作 |
 |---|---|---|---|---|
-| 4.1 | 有归档目录 | `archived/` 存在 | `ls -d .meta/decisions/archived 2>/dev/null` | 建 `archived/`（只有 implemented 能进） |
+| 4.1 | 有归档目录 | `archived/` 存在 | `ls -d .agents/notes/archived 2>/dev/null` | 建 `archived/`（只有 implemented 能进） |
 
 ### 机制层（M 档追加）
 
 | # | 子项 | 判定 | 检查命令 | 失败动作 |
 |---|---|---|---|---|
-| 4.2 | 归档被冻结 | 归档件有哈希封印 manifest | `ls .meta/decisions/archived/*.manifest* 2>/dev/null \| head -1` | 加 append-only 封印 manifest |
+| 4.2 | 归档被冻结 | 归档件有哈希封印 manifest | `ls .agents/notes/archived/*.manifest* 2>/dev/null \| head -1` | 加 append-only 封印 manifest |
 | 4.3 | 搜索隔离过期 | `.rgignore` 排除 archived | `grep -l archived .rgignore 2>/dev/null` | 在 `.rgignore` 排除 archived 目录 |
 | 4.4 | 退场有判据 | 归档/拒绝不是按字数或年龄 | 语义，见 `scorecard.md` 问④ | 靠 review |
 | 4.5 | supersession 同 PR | 被取代记录同一变更删除 | 语义 | 靠 review |

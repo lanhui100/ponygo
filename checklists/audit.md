@@ -63,4 +63,4 @@ ponygo audit --level M  # 复查，确认命中数上升
 ## 改造的成果物
 
 一份「改造路线图」：现状等级 → 目标等级 → N 条按杠杆排序的最小改进动作 → 各自的验收命令。
-写入 `.meta/decisions/proposed/{class}/yyyy-mm-dd-audit-roadmap.md`（proposed 态），执行完再迁到 implemented。
+写入 `.agents/notes/proposed/{class}/yyyy-mm-dd-audit-roadmap.md`（proposed 态），执行完再迁到 implemented。

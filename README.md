@@ -66,7 +66,7 @@ git clone https://github.com/lanhui100/ponygo.git && export PATH="$PWD/ponygo:$P
 ### 3.2 六条命令
 
 ```bash
-ponygo init      # 新项目：在仓库根生成 .meta/ 治理骨架 + meta.yaml（level: 0）
+ponygo init      # 新项目：在仓库根生成 .agents/ + .meta/ 治理骨架 + meta.yaml（level: 0）
 ponygo audit     # 旧项目改造（或随时体检）：按自适应审计打分，输出缺口与最小改进动作；有治理根时内嵌级自洽验证，判据不符 exit 1
 ponygo status    # 查看当前成熟度级（L0-L6）与骨架完整性，并对声明级（L0-L2）判据逐项机械验证，不符即非零退出
 ponygo upgrade   # 跟随框架升级：把本仓库新版 ponygo 的命令面/判据同步进已有治理根
@@ -80,30 +80,36 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
 
 ## 4. 它如何工作
 
-### 4.1 目录骨架（治理根 `.meta/`）
+### 4.1 目录骨架（双根：`.agents/` 运行时资产 + `.meta/` 机器态真源）
+
+**分家原则**：`.agents/` 承载 AI agent **运行时读写**的治理资产（必须在工具发现路径上）；`.meta/` 承载治理的**机器态与真源**（constitution 经投影消费、gates 由钩子/CI 消费、meta.yaml 是状态文件）。另有根目录 `AGENTS.md` / `CLAUDE.md` 常载投影面与 `.rgignore` 归档搜索隔离。
 
 ```
+.agents/
+├── notes/                     # 决策记录（ADR）：路径即标签，文件夹即 lifecycle × class
+│   ├── README.md              #    路径规范 + 格式契约 + 触发规则（唯一真源）
+│   ├── proposed/
+│   ├── implemented/
+│   ├── rejected/
+│   └── archived/              # .rgignore 隔离：防陈旧事实挤掉当前搜索结果
+└── skills/                    # 流程资产：高频+高判断力流程的可复用技能（预置 write-adr，其余按 Rule of three 生长）
+    ├── README.md              #    SKILL.md 五要素契约
+    └── write-adr/SKILL.md     #    框架交付的唯一预置技能
 .meta/
 ├── meta.yaml                  # 合法键仅两个：level（成熟度级，整数 0-6，如 level: 2）与 ai-surface；版本由 git 派生，组件清单由目录存在性充当
 ├── constitution/              # 宪法：语义规范（"什么是好的"），供投影到 AGENTS.md / CLAUDE.md
 │   └── constitution.md        #    模板态（槽位未填）时 sync 投影初始引导 bootstrap：AI agent 进场即有指引，
 │                              #    由 agent 完成填槽/重投影/首篇 ADR；填槽后重跑 sync，引导自动被常载命约替换
-├── decisions/                 # 决策记录（ADR）：路径即标签，文件夹即 lifecycle × class
-│   ├── proposed/
-│   ├── implemented/
-│   ├── rejected/
-│   └── archived/
 ├── gates/                     # 门禁：把承诺转成非零退出命令（每门配负样本 spec）
-├── skills/                    # 流程资产：高频+高判断力流程的可复用技能（预置 write-adr，其余按 Rule of three 生长）
 └── docs-tier/                 # 文档分层：按 tier 分类法给每个事实安一个家
 ```
 
 **关键约定**（其它文件据此派生命令名与路径）：
 
-- `meta.yaml` 仅 `level` 与 `ai-surface` 两个合法键 + 注释（其它键是规格违例）；**版本由 git 派生，组件清单由 `.meta/` 目录存在性充当**——不冗余声明能被机械推导的东西。
-- 决策文件路径：`decisions/{lifecycle}/{class}/yyyy-mm-dd-topic-title.md`，其中
+- `meta.yaml` 仅 `level` 与 `ai-surface` 两个合法键 + 注释（其它键是规格违例）；**版本由 git 派生，组件清单由 `.meta/` + `.agents/` 目录存在性充当**——不冗余声明能被机械推导的东西。
+- 决策文件路径：`.agents/notes/{lifecycle}/{class}/yyyy-mm-dd-topic-title.md`，其中
   - `lifecycle ∈ {proposed, implemented, rejected, archived}`
-  - `class ∈ {feature, bug-fix, simplification, architecture, process, testing}`（领域扩展：`decisions/classes.local` 每行追加一个 class，见 `.meta/decisions/README.md`）
+  - `class ∈ {feature, bug-fix, simplification, architecture, process, testing}`（领域扩展：`notes/classes.local` 每行追加一个 class，见 `.agents/notes/README.md`）
 - 文件夹即标签：lifecycle/class 编码进路径，文件内容里无需重复声明，二者永不漂移。
 
 ### 4.2 成熟度阶梯（L0–L6）
@@ -181,7 +187,7 @@ CLI 从不假设项目是空仓；它对"已有治理"与"零治理但历史厚�
 | `tests/run.sh` | CLI 自测（纯 bash、零依赖、18+ 场景），`bash tests/run.sh` 全绿为准 | 维护者；回归门禁 |
 | `.github/workflows/ci.yml` | 回归门禁挂载：ubuntu + windows Git Bash 双平台跑 tests/run.sh + 聚合门 | 维护者；分支保护依赖 |
 | `docs/methodology.md` | 原理层：方法论设计依据（源自 deepseek-harness） | 想懂"为什么"的人；机制层的理论源头 |
-| `.meta/` | 治理根骨架：constitution / decisions / gates / skills / docs-tier / meta.yaml | 实例化产物；由 `ponygo init` 生成进用户项目 |
+| `.meta/` + `.agents/` | 治理根骨架（双根）：.meta/ = constitution / gates / docs-tier / meta.yaml；.agents/ = notes / skills | 实例化产物；由 `ponygo init` 生成进用户项目 |
 | `maturity-ladder.md` | 成熟度阶梯定义（L0–L6 逐档判据） | `ponygo status` 与 review 的判定来源 |
 | `audit/` | 四问记分卡 + 分层细目库 + 自适应深度选择器 | `ponygo audit` 的执行依据 |
 | `audit/checklist.md` | 分层细目（骨架 / 机制 / 精微三层条目） | 审计打分时的逐项参照 |

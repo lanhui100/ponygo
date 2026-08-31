@@ -65,7 +65,7 @@ write_constitution_filled() { # 填掉 constitution 全部 TODO 槽位
 }
 write_valid_decision() { # $1=case目录 $2=相对 decisions/ 的子路径（含文件名）
   local dir
-  dir="$1/.meta/decisions/$(dirname "$2")"
+  dir="$1/.agents/notes/$(dirname "$2")"
   mkdir -p "$dir"
   cat > "$dir/$(basename "$2")" <<'EOF'
 # Agent Note: test decision
@@ -84,7 +84,7 @@ EOF
 }
 write_proposal_decision() { # $1=case目录 $2=相对 decisions/ 的子路径（含文件名）
   local dir
-  dir="$1/.meta/decisions/$(dirname "$2")"
+  dir="$1/.agents/notes/$(dirname "$2")"
   mkdir -p "$dir"
   cat > "$dir/$(basename "$2")" <<'EOF'
 # Agent Note: test proposal
@@ -128,16 +128,18 @@ s02_init() {
   run_cli "$T" init --yes
   assert_eq "init exit 0" 0 "$R_RC"
   for d in proposed implemented rejected archived; do
-    [ -d "$T/.meta/decisions/$d" ] && ok "decisions/$d 存在" || bad "decisions/$d 缺失"
+    [ -d "$T/.agents/notes/$d" ] && ok "notes/$d 存在" || bad "notes/$d 缺失"
   done
-  for d in constitution gates skills docs-tier; do
+  for d in constitution gates docs-tier; do
     [ -d "$T/.meta/$d" ] && ok ".meta/$d 存在" || bad ".meta/$d 缺失"
   done
+  [ -d "$T/.agents/skills" ] && ok ".agents/skills 存在" || bad ".agents/skills 缺失"
+  grep -qF '/.agents/notes/archived/' "$T/.rgignore" && ok ".rgignore 归档隔离" || bad ".rgignore 缺归档隔离"
   [ -f "$T/.meta/meta.yaml" ] && ok "meta.yaml 存在" || bad "meta.yaml 缺失"
   grep -q '^level: 0' "$T/.meta/meta.yaml" && ok "level: 0" || bad "level 字段异常"
-  [ -f "$T/.meta/decisions/README.md" ] && ok "decisions/README.md 生成" || bad "decisions/README.md 缺失"
-  [ -f "$T/.meta/skills/write-adr/SKILL.md" ] && ok "预置 write-adr 技能" || bad "write-adr 技能缺失"
-  grep -q '何时用' "$T/.meta/skills/write-adr/SKILL.md" && ok "write-adr 含触发式 description" || bad "write-adr 缺触发式 description"
+  [ -f "$T/.agents/notes/README.md" ] && ok "decisions/README.md 生成" || bad "decisions/README.md 缺失"
+  [ -f "$T/.agents/skills/write-adr/SKILL.md" ] && ok "预置 write-adr 技能" || bad "write-adr 技能缺失"
+  grep -q '何时用' "$T/.agents/skills/write-adr/SKILL.md" && ok "write-adr 含触发式 description" || bad "write-adr 缺触发式 description"
   [ -f "$T/AGENTS.md" ] && [ -f "$T/CLAUDE.md" ] && ok "模板态投影初始引导（bootstrap）" || bad "模板态未投影初始引导"
   grep -q '初始引导' "$T/AGENTS.md" && ok "投影含 bootstrap 标记" || bad "投影缺 bootstrap 标记"
   run_cli "$T" init --yes
@@ -296,7 +298,7 @@ s11_l1_criteria() {
   T=$(new_case); run_cli "$T" init --yes
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-x.md"
-  sed -i 's/^Status: implemented/Status: proposed/' "$T/.meta/decisions/implemented/feature/2026-01-02-x.md"
+  sed -i 's/^Status: implemented/Status: proposed/' "$T/.agents/notes/implemented/feature/2026-01-02-x.md"
   run_cli "$T" status
   assert_eq "Status 不符 → exit 1" 1 "$R_RC"
   assert_contains "报 1.7" "$R_OUT" "1.7"
@@ -310,7 +312,7 @@ s11_l1_criteria() {
   T=$(new_case); run_cli "$T" init --yes
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "archived/testing/2026-01-02-old.md"
-  sed -i 's/^Status: implemented/Status: rejected/' "$T/.meta/decisions/archived/testing/2026-01-02-old.md"
+  sed -i 's/^Status: implemented/Status: rejected/' "$T/.agents/notes/archived/testing/2026-01-02-old.md"
   run_cli "$T" status
   assert_eq "archived 下 Status: rejected → exit 1" 1 "$R_RC"
   assert_contains "报 1.7（archived 违例）" "$R_OUT" "1.7"
@@ -325,8 +327,8 @@ s11_l1_criteria() {
   T=$(new_case); run_cli "$T" init --yes
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-x.md"
-  mkdir -p "$T/.meta/decisions/implemented/feature/extra"
-  cp "$T/.meta/decisions/implemented/feature/2026-01-02-x.md" "$T/.meta/decisions/implemented/feature/extra/2026-01-02-deep.md"
+  mkdir -p "$T/.agents/notes/implemented/feature/extra"
+  cp "$T/.agents/notes/implemented/feature/2026-01-02-x.md" "$T/.agents/notes/implemented/feature/extra/2026-01-02-deep.md"
   run_cli "$T" status
   assert_eq "depth-4 违例 → exit 1" 1 "$R_RC"
   assert_contains "报 1.5（depth-4）" "$R_OUT" "1.5"
@@ -340,7 +342,7 @@ s11_l1_criteria() {
   T=$(new_case); run_cli "$T" init --yes
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-crlf.md"
-  sed -i 's/$/\r/' "$T/.meta/decisions/implemented/feature/2026-01-02-crlf.md"
+  sed -i 's/$/\r/' "$T/.agents/notes/implemented/feature/2026-01-02-crlf.md"
   run_cli "$T" status
   assert_eq "CRLF 决策文件不假 FAIL（1.7）→ exit 0" 0 "$R_RC"
 
@@ -425,27 +427,27 @@ s14_decisions_readme() {
   echo "--- 场景14：生成 decisions/ skills/ README 与模板 eol 归一逐字节一致（F3 + skills 契约）"
   local T; T=$(new_case)
   run_cli "$T" init --yes
-  if diff <(tr -d '\r' < "$T/.meta/decisions/README.md") \
-          <(tr -d '\r' < "$ROOT/.meta/decisions/README.md") >/dev/null 2>&1; then
+  if diff <(tr -d '\r' < "$T/.agents/notes/README.md") \
+          <(tr -d '\r' < "$ROOT/.agents/notes/README.md") >/dev/null 2>&1; then
     ok "生成 decisions/README 与模板 eol 归一后一致"
   else
     bad "生成 decisions/README 与模板不一致"
   fi
-  if diff <(tr -d '\r' < "$T/.meta/skills/README.md") \
-          <(tr -d '\r' < "$ROOT/.meta/skills/README.md") >/dev/null 2>&1; then
+  if diff <(tr -d '\r' < "$T/.agents/skills/README.md") \
+          <(tr -d '\r' < "$ROOT/.agents/skills/README.md") >/dev/null 2>&1; then
     ok "生成 skills/README 与模板 eol 归一后一致（含五要素契约）"
   else
     bad "生成 skills/README 与模板不一致"
   fi
-  grep -q '五要素' "$T/.meta/skills/README.md" && ok "skills 契约含五要素" || bad "skills 契约缺五要素"
+  grep -q '五要素' "$T/.agents/skills/README.md" && ok "skills 契约含五要素" || bad "skills 契约缺五要素"
   if diff <(tr -d '\r' < "$T/.meta/docs-tier/README.md") \
           <(tr -d '\r' < "$ROOT/.meta/docs-tier/README.md") >/dev/null 2>&1; then
     ok "生成 docs-tier/README 与模板 eol 归一后一致（含 tier 模板）"
   else
     bad "生成 docs-tier/README 与模板不一致"
   fi
-  if diff <(tr -d '\r' < "$T/.meta/skills/write-adr/SKILL.md") \
-          <(tr -d '\r' < "$ROOT/.meta/skills/write-adr/SKILL.md") >/dev/null 2>&1; then
+  if diff <(tr -d '\r' < "$T/.agents/skills/write-adr/SKILL.md") \
+          <(tr -d '\r' < "$ROOT/.agents/skills/write-adr/SKILL.md") >/dev/null 2>&1; then
     ok "生成 write-adr/SKILL.md 与模板 eol 归一后一致"
   else
     bad "生成 write-adr/SKILL.md 与模板不一致"
@@ -510,7 +512,7 @@ s19_boundary_regress() {
   T=$(new_case); run_cli "$T" init --yes
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-a.md"
-  mkdir -p "$T/.meta/decisions/random-stuff"
+  mkdir -p "$T/.agents/notes/random-stuff"
   run_cli "$T" status
   assert_eq "1.3 杂项目录 → exit 1" 1 "$R_RC"
   assert_contains "报 1.3" "$R_OUT" "1.3"
@@ -525,7 +527,7 @@ s19_boundary_regress() {
   T=$(new_case); run_cli "$T" init --yes
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-c.md"
-  sed -i '/^Status:/d' "$T/.meta/decisions/implemented/feature/2026-01-02-c.md"
+  sed -i '/^Status:/d' "$T/.agents/notes/implemented/feature/2026-01-02-c.md"
   run_cli "$T" status
   assert_eq "缺 Status 行 → exit 1" 1 "$R_RC"
   assert_contains "报 1.7" "$R_OUT" "1.7"
@@ -621,7 +623,7 @@ s21_external001_regress() {
   run_cli "$T" status
   assert_eq "未登记的扩展 class → exit 1" 1 "$R_RC"
   assert_contains "报 1.4" "$R_OUT" "1.4"
-  printf '# 领域扩展\ndomain-x\n' > "$T/.meta/decisions/classes.local"
+  printf '# 领域扩展\ndomain-x\n' > "$T/.agents/notes/classes.local"
   run_cli "$T" status
   assert_eq "classes.local 登记后 → exit 0" 0 "$R_RC"
   # P1-3：sync 锚点（英文标题 + <!-- sync-body -->）

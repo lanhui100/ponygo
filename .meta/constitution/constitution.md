@@ -37,7 +37,7 @@
 > 原理层唯一真相源在框架仓库，实例不复制——复制即漂移。
 > 这是每次会话必载、不可被后续指令覆盖的**常驻约束**。下方 5 条为最普适的预设，实例化时可增删，但保留最少 3 条。
 
-1. **决策必须入册且带 Alternatives**——任何非平凡变更（行为 / 架构 / 契约 / 流程 / 测试策略变更，命中任一）都要落到 `.meta/decisions/{lifecycle}/{class}/` 下的一条决策记录，且必含 `## Alternatives considered`（候选方案与落选原因）。口头决定、只存在于聊天/PR 讨论里的"为什么这样/为什么不那样"视为未发生。
+1. **决策必须入册且带 Alternatives**——任何非平凡变更（行为 / 架构 / 契约 / 流程 / 测试策略变更，命中任一）都要落到 `.agents/notes/{lifecycle}/{class}/` 下的一条决策记录，且必含 `## Alternatives considered`（候选方案与落选原因）。口头决定、只存在于聊天/PR 讨论里的"为什么这样/为什么不那样"视为未发生。
    链：P1 记忆瓶颈原理、methodology §2.5 触发规则、§2.4 格式契约。
 
 2. **凡机械可查的承诺，配一条非零退出的命令**——本宪法里每一条可被程序检验的约定，必须有对应的门禁（.meta/gates/ 或项目的 gate 脚本）能 `exit 1` 拦截违例；做不到机器检验的，显式标注"靠 review / 靠自觉"，不得装假门禁。
@@ -61,11 +61,14 @@
 | 路径 | 职责 |
 |---|---|
 | `.meta/constitution/` | 本宪法（单一真相源） |
-| `.meta/decisions/` | 决策记录（ADR / Agent Note），lifecycle × class 双轴路径编码（见 `.meta/decisions/README.md`） |
 | `.meta/gates/` | 门禁（gate）定义与负样本 spec（见 `.meta/gates/README.md`） |
-| `.meta/skills/` | 可复用流程技能（SKILL.md）（见 `.meta/skills/README.md`） |
 | `.meta/docs-tier/` | 文档分层（tier）约定（见 `.meta/docs-tier/README.md`） |
 | `.meta/meta.yaml` | 状态文件，仅 `level` 字段 |
+| `.agents/notes/` | 决策记录（ADR / Agent Note），lifecycle × class 双轴路径编码（见 `.agents/notes/README.md`） |
+| `.agents/skills/` | 可复用流程技能（SKILL.md）（见 `.agents/skills/README.md`） |
+
+> 分家原则：`.agents/` 承载 AI agent 运行时读写的资产（须在工具发现路径上）；
+> `.meta/` 承载治理的机器态与真源（经投影或钩子消费）。
 
 ---
 

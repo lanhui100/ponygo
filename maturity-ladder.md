@@ -11,11 +11,11 @@
 | 级 | 名字 | 一句话定位 | 启用条件 | 核心产物 | 退出标准 / 升格判据 | validation | 首版状态 |
 |---|---|---|---|---|---|---|---|
 | **L0** | 播种 | 让"决策"有一个可寻址的家，哪怕只记一条 | 项目从零起步，尚无任何治理载体 | `.meta/` 治理根目录存在 | `.meta/` 存在 且 `meta.yaml` 含 `level` 字段 | 机械 | 已交付 |
-| **L1** | 决策入册 | 非平凡决策落成带 lifecycle × class 路径编码的记录 | L0 成立，且出现第一条值得记的非平凡变更 | `decisions/{lifecycle}/{class}/yyyy-mm-dd-topic-title.md` | decisions/ 下文件数 > 0 且路径两轴合法 | 机械 | 已交付 |
+| **L1** | 决策入册 | 非平凡决策落成带 lifecycle × class 路径编码的记录 | L0 成立，且出现第一条值得记的非平凡变更 | `notes/{lifecycle}/{class}/yyyy-mm-dd-topic-title.md` | notes/ 下文件数 > 0 且路径两轴合法 | 机械 | 已交付 |
 | **L2** | 承诺可验 | 把"必须/禁止"转成非零退出的门禁命令 | L1 成立，且出现需要被跨提交守住的硬约束 | `gates/` 门禁脚本 + 负样本 spec + 本地钩子 | format/classification 门禁可跑且拒绝非法样本 | 机械 | 已交付 |
 | **L3** | 文档分层 | 每个事实一个家（tier 分类）+ 文档不再漂移 | L2 成立，且文档量开始互相重复/腐烂 | `docs-tier/` + 放置速查 + doc-sync 门 | 文档 dupe/漂移能被命令查出并拒绝 | 部分机械 | 目标画像（依赖 doc-sync 门） |
 | **L4** | 流程资产 | 高频+高判断力流程沉淀为带触发式 description 的技能 | L2 成立，且同一流程第三次重复 | `skills/` SKILL.md（触发内联 + 校准样例） | 技能元数据门禁 + 触发条件可路由 | 靠 review + 部分机械 | 目标画像（依赖 skill 资产化） |
-| **L5** | 负空间 | 删除/归档/遗忘成为有验证的独立工程 | L3 或 L2 成立，且语料开始腐烂需要 GC（垃圾回收） | `decisions/archived/` + 哈希封印 manifest + supersession 审计 | 归档冻结可查、supersession 同变更处理 | 部分机械 | 目标画像（依赖归档哈希封印 + supersession 审计） |
+| **L5** | 负空间 | 删除/归档/遗忘成为有验证的独立工程 | L3 或 L2 成立，且语料开始腐烂需要 GC（垃圾回收） | `notes/archived/` + 哈希封印 manifest + supersession 审计 | 归档冻结可查、supersession 同变更处理 | 部分机械 | 目标画像（依赖归档哈希封印 + supersession 审计） |
 | **L6** | 领域定制 | 架构不变量 + 生成物漂移门等按领域量体裁衣 | 各领域问题已稳定出现，值得投资更贵捍卫层 | 运行时不变量 + gen-\* 漂移门 + 分层 CI | 不变量有捍卫者且漂移被命令拦住 | 靠 review + 部分机械 | 目标画像（依赖运行时不变量） |
 
 > **validation 列诚实标注**：L0→L1→L2 的可判定判据标「机械」（可被现成 `git`/`test`/`grep`/`find` 命令判定，见 §5）；L3–L6 标「靠 review」或「部分机械」——它们的判据要么依赖尚未交付的脚本，要么依赖语义判断，首版不复检。
@@ -117,20 +117,20 @@ L0–L2 的每条退出标准，落到**布尔检查项 + 锚定命令**。这�
 
 | # | 布尔检查项 | 锚定命令 | 判读 |
 |---|---|---|---|
-| 1.1 | `decisions/` 目录存在 | `test -d .meta/decisions && echo PASS \|\| echo FAIL` | PASS |
-| 1.2 | 决策文件数 > 0 | `find .meta/decisions -name '*.md' ! -name 'README.md' ! -name '*.zh.md' \| wc -l` | 结果 > 0 |
-| 1.3 | lifecycle 轴只含封闭集合 `proposed/implemented/rejected/archived` | `find .meta/decisions -mindepth 1 -maxdepth 1 -type d -printf '%f\n' \| sort \| uniq` | 输出 ⊆ 上述四值 |
-| 1.4 | class 轴来自封闭集合（`feature/bug-fix/simplification/architecture/process/testing`）∪ `decisions/classes.local` 实例扩展 | `find .meta/decisions -mindepth 2 -maxdepth 2 -type d -printf '%f\n' \| sort \| uniq` | 输出 ⊆ 六值 ∪ classes.local |
-| 1.5 | 路径深度卡死为 `{lifecycle}/{class}/…`（class 必须嵌在 lifecycle 下） | `find .meta/decisions -type f -name '*.md'` 逐条人工核对深度 | 无根层级裸 `.md` |
-| 1.6 | 文件名匹配 `yyyy-mm-dd-topic-title.md` | `find .meta/decisions -name '*.md' -printf '%f\n' \| grep -vE '^[0-9]{4}-[0-9]{2}-[0-9]{2}-.+\\.md$'` | 输出为空 |
-| 1.7 | 每条决策含 `Status:` 行且与所在 lifecycle 一致 | `grep -Rl '^Status:' .meta/decisions/proposed` / `…/implemented` 等，交叉验证 | 无不一致 |
-| 1.8 | 正文骨架与 lifecycle 匹配：proposed/rejected 含 `## Proposal` 且无现在时 `## Decision`；implemented 无提案时代标题 | `grep -rE '^## (Proposal\|Plan\|Migration plan\|Acceptance criteria)([[:space:]]\|$)' .meta/decisions/implemented` 应为空；`grep -rLE '^## Proposal([[:space:]]\|$)' .meta/decisions/proposed .meta/decisions/rejected` 应为空 | 无错位 |
+| 1.1 | `notes/` 目录存在 | `test -d .agents/notes && echo PASS \|\| echo FAIL` | PASS |
+| 1.2 | 决策文件数 > 0 | `find .agents/notes -name '*.md' ! -name 'README.md' ! -name '*.zh.md' \| wc -l` | 结果 > 0 |
+| 1.3 | lifecycle 轴只含封闭集合 `proposed/implemented/rejected/archived` | `find .agents/notes -mindepth 1 -maxdepth 1 -type d -printf '%f\n' \| sort \| uniq` | 输出 ⊆ 上述四值 |
+| 1.4 | class 轴来自封闭集合（`feature/bug-fix/simplification/architecture/process/testing`）∪ `notes/classes.local` 实例扩展 | `find .agents/notes -mindepth 2 -maxdepth 2 -type d -printf '%f\n' \| sort \| uniq` | 输出 ⊆ 六值 ∪ classes.local |
+| 1.5 | 路径深度卡死为 `{lifecycle}/{class}/…`（class 必须嵌在 lifecycle 下） | `find .agents/notes -type f -name '*.md'` 逐条人工核对深度 | 无根层级裸 `.md` |
+| 1.6 | 文件名匹配 `yyyy-mm-dd-topic-title.md` | `find .agents/notes -name '*.md' -printf '%f\n' \| grep -vE '^[0-9]{4}-[0-9]{2}-[0-9]{2}-.+\\.md$'` | 输出为空 |
+| 1.7 | 每条决策含 `Status:` 行且与所在 lifecycle 一致 | `grep -Rl '^Status:' .agents/notes/proposed` / `…/implemented` 等，交叉验证 | 无不一致 |
+| 1.8 | 正文骨架与 lifecycle 匹配：proposed/rejected 含 `## Proposal` 且无现在时 `## Decision`；implemented 无提案时代标题 | `grep -rE '^## (Proposal\|Plan\|Migration plan\|Acceptance criteria)([[:space:]]\|$)' .agents/notes/implemented` 应为空；`grep -rLE '^## Proposal([[:space:]]\|$)' .agents/notes/proposed .agents/notes/rejected` 应为空 | 无错位 |
 
 > 1.5 的机械化实现为"每个决策 `.md` **恰好**位于 `{lifecycle}/{class}/` 两级之内"——depth 1-2 的裸文件与 depth ≥4 的过深层均违例；`README.md` 豁免。
 > 1.6 的 `grep -vE` 命令豁免 `README.md`（占位说明不算决策记录）；文件名中的日期必须真为 `yyyy-mm-dd` 而非占位符。1.6 的 `grep -vE` 只查格式；日期**合法性**可再机械判一条：
-> `find .meta/decisions -name '*.md' -printf '%f\n' | sed -E 's/^([0-9]{4}-[0-9]{2}-[0-9]{2})-.*/\1/' | while read d; do date -d "$d" >/dev/null 2>&1 || echo "非法日期: $d"; done`
+> `find .agents/notes -name '*.md' -printf '%f\n' | sed -E 's/^([0-9]{4}-[0-9]{2}-[0-9]{2})-.*/\1/' | while read d; do date -d "$d" >/dev/null 2>&1 || echo "非法日期: $d"; done`
 > 输出为空即法合法。命令不可解析的环境（如无 GNU date）降级为 review——不得自称"机械判过"。
-> 1.4 的扩展口：L6 领域定制常需新增 class——在 `.meta/decisions/classes.local` 每行写一个额外 class 名（小写字母/数字/连字符，`#` 起注释）即被 1.4 认可；封闭集本身不放开，扩展须显式落盘留有审计载体。
+> 1.4 的扩展口：L6 领域定制常需新增 class——在 `.agents/notes/classes.local` 每行写一个额外 class 名（小写字母/数字/连字符，`#` 起注释）即被 1.4 认可；封闭集本身不放开，扩展须显式落盘留有审计载体。
 > 1.8 的豁免规则：`archived/` 冻结豁免（保持归档时原貌）；`README.md` 豁免。原理：时态与状态一致——提案用现在时 `## Decision` 等于未批准的方案伪装成已落地的决定，状态轴在正文层失真；proposed → implemented 迁移时必须把 `## Proposal` 改写为现在时（Acceptance criteria / Risks 折叠进 `## Consequences`）。该判据源自 ponyllm 实例的实证漂移（proposed ADR 误用 `## Decision`，1.1–1.7 全 PASS——路径/文件名/Status 三重影子锁不到正文骨架）。
 > 1.7 的 `archived/` 豁免规则：archived/ 下决策的 `Status:` ∈ {`implemented`, `archived`} 均判一致（冻结归档保留原 implemented 态）；`README.md` 豁免。`*.zh.md`（双语配对）**不在豁免之列**——须独立满足头部契约。CLI 实现对带引号（`level: "2"`）与 CRLF 行尾比上方锚定命令更宽容（归一后判定），复判时以 `ponygo status` 输出为准。
 
@@ -161,7 +161,7 @@ L0–L2 的每条退出标准，落到**布尔检查项 + 锚定命令**。这�
 | 2–5 人 | L1 + L2 启动，L3–L6 按 §3 选装 1–2 项，其余挂起 |
 | ≥ 5 人或多服务/monorepo | L2 + 至少一项 L6 不变量 + L5 归档（语料腐烂速度随人数指数上升） |
 
-**「纯 L0 长驻模式」定义**：`.meta/` + `meta.yaml`（`level: 0`）+ `decisions/` 目录保留（历史决策不删），但**停止一切强制新增和门禁**。这是一个合法的长期状态，不是"半成品"——它的判据是"规模不值当"，而非"没时间做完"。
+**「纯 L0 长驻模式」定义**：`.meta/` + `meta.yaml`（`level: 0`）+ `.agents/notes/` 目录保留（历史决策不删），但**停止一切强制新增和门禁**。这是一个合法的长期状态，不是"半成品"——它的判据是"规模不值当"，而非"没时间做完"。
 
 **停止线是双向的**：规模涨过头就升，规模跌破阈值就退。升级和降级都走同一个判据（§4 的退场条件），都记录为一条 decision。
 

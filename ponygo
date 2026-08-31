@@ -3,7 +3,7 @@
 # ponygo —— 项目工程化治理元框架的命令行入口（单文件、零依赖 shell）
 #
 # 用法：
-#   ponygo init     [--yes] [--dry-run]   在项目根建立/注入 .meta/ 治理骨架
+#   ponygo init     [--yes] [--dry-run]   在项目根建立/注入 .agents/ + .meta/ 治理骨架
 #   ponygo audit    [--level S|M] [--dry-run]  自适应体检：打分 + 缺口 + 最小改进动作（有治理根时内嵌级自洽验证，判据不符 exit 1）
 #   ponygo status                         查看成熟度级与骨架完整度（骨架缺口或声明级判据不符 exit 1）
 #   ponygo upgrade                        跟随框架升级指引（首版不实际合并，见 -h）
@@ -15,10 +15,15 @@
 # ============================================================
 set -u
 
-# ---------- 常量（与 .meta/ 骨架、README、maturity-ladder.md 对齐） ----------
+# ---------- 常量（与骨架 v2、README、maturity-ladder.md 对齐） ----------
+# 分家原则（见 .agents/notes/implemented/architecture/2026-08-31-agents-runtime-vs-meta-truth.md）：
+#   .agents/ = AI agent 运行时读写的资产（notes 决策记录、skills 流程技能）——须在工具发现路径上
+#   .meta/   = 治理的机器态与真源（meta.yaml / constitution / gates / docs-tier）——经投影或钩子消费
 META_DIR=".meta"
+AGENTS_RUNTIME_DIR=".agents"
 META_YAML="$META_DIR/meta.yaml"
-DECISIONS_DIR="$META_DIR/decisions"
+DECISIONS_DIR="$AGENTS_RUNTIME_DIR/notes"
+SKILLS_DIR="$AGENTS_RUNTIME_DIR/skills"
 CONSTITUTION="$META_DIR/constitution/constitution.md"
 
 # decisions lifecycle 四态 + class 封闭集合（唯一真源，供 audit 与 status 复用）
@@ -40,7 +45,7 @@ count_decisions() {
   find "$DECISIONS_DIR" -type f -name '*.md' ! -name 'README.md' ! -name '*.zh.md' 2>/dev/null | wc -l | tr -d ' '
 }
 
-# 实例扩展 class（L6 领域定制的开放口）：decisions/classes.local 每行一个额外 class 名
+# 实例扩展 class（L6 领域定制的开放口）：notes/classes.local 每行一个额外 class 名
 # （小写字母/数字/连字符；# 起注释与空行忽略）。封闭集本身不放开，扩展必须显式落盘成文件——
 # 扩展是一次治理决策，留有可审计的载体，而非随手 mkdir。
 extra_classes() {
@@ -103,12 +108,20 @@ confirm_or_skip() {
 write_skeleton() {
   local lvl="${1:-0}"
   mkdir -p "$DECISIONS_DIR"/{proposed,implemented,rejected,archived}
-  mkdir -p "$META_DIR"/{constitution,gates,skills,docs-tier}
+  mkdir -p "$META_DIR"/{constitution,gates,docs-tier}
+  mkdir -p "$SKILLS_DIR"
 
-  # decisions/README.md：缺失时生成与模板仓库 eol 归一后逐字节一致的全量版（内容源收敛为本 heredoc 常量）
+  # 归档搜索隔离（DSH 实证：防陈旧事实按词法命中挤掉当前结果）；已有 .rgignore 则追加不覆盖
+  if [ -f .rgignore ]; then
+    grep -qF '/.agents/notes/archived/' .rgignore 2>/dev/null || printf '/.agents/notes/archived/\n' >> .rgignore
+  else
+    printf '/.agents/notes/archived/\n' > .rgignore
+  fi
+
+  # notes/README.md：缺失时生成与模板仓库 eol 归一后逐字节一致的全量版（内容源收敛为本 heredoc 常量）
   if [ ! -f "$DECISIONS_DIR/README.md" ]; then
     cat > "$DECISIONS_DIR/README.md" <<'PONYGO_EOF'
-# decisions/ —— 决策记录（ADR / Agent Note）
+# notes/ —— 决策记录（ADR / Agent Note）
 
 这是治理根的**记忆**：任何"为什么这样 / 为什么不那样"的决定，都落到这里，
 而不是散落在人脑、聊天记录或 PR（拉取请求）线程里。
@@ -116,7 +129,7 @@ write_skeleton() {
 ## 路径规范
 
 ```
-decisions/{lifecycle}/{class}/yyyy-mm-dd-topic-title.md
+notes/{lifecycle}/{class}/yyyy-mm-dd-topic-title.md
 ```
 
 两个轴都编码进**路径**（文件夹即标签，内容里不必重复声明，二者永不漂移）：
@@ -177,7 +190,7 @@ PONYGO_EOF
 
   # meta.yaml：仅 level 字段（其余由 git / 目录存在性派生，不冗余声明）
   if [ ! -f "$META_YAML" ]; then
-    printf '# ponygo 治理根状态文件（唯一真值源：level）\n# 版本由 git 派生；组件清单由 .meta/ 目录存在性充当；演进由 git + decisions/ 的 ADR 充当。\n\nlevel: %s\n' "$lvl" > "$META_YAML"
+    printf '# ponygo 治理根状态文件（唯一真值源：level）\n# 版本由 git 派生；组件清单由 .meta/ + .agents/ 目录存在性充当；演进由 git + .agents/notes/ 的 ADR 充当。\n\nlevel: %s\n' "$lvl" > "$META_YAML"
   fi
 
   # 空目录占位说明（只在目录为空时写入 README，避免覆盖用户已有内容）
@@ -186,13 +199,13 @@ PONYGO_EOF
     printf '# gates/ —— 门禁（把承诺转成非零退出命令）\n\n首版（L2 及以下）此目录为空。升到 L2 时放你的第一个门禁，并同步 meta.yaml 的 level 改为 2。\n' > "$META_DIR/gates/README.md"
 
   # skills/README.md：缺失时生成与模板仓库 eol 归一后逐字节一致的全量版（内容源收敛为本 heredoc 常量）
-  if [ ! -f "$META_DIR/skills/README.md" ]; then
-    cat > "$META_DIR/skills/README.md" <<'PONYGO_EOF'
+  if [ ! -f "$SKILLS_DIR/README.md" ]; then
+    cat > "$SKILLS_DIR/README.md" <<'PONYGO_EOF'
 # skills/ —— 流程资产（高频 + 高判断力流程的可复用技能）
 
 这是治理根的**重复程序库**：一个流程当第**三次**重复出现（Rule of three，三次法则），
 就把它从"口传 / 现写"资产化为这里的一篇 `SKILL.md`；当技能失去真实消费者（对应流程
-不再发生），删掉它——删除是一次决策，需录 `.meta/decisions/`。
+不再发生），删掉它——删除是一次决策，需录 `.agents/notes/`。
 
 **为什么首版只有 write-adr**：流程资产化是 L4 的产物，依赖"已经有重复发生的流程"
 这一事实；首版不预置通用技能（空技能是被永久引用的死重）。唯一例外是 `write-adr/`：
@@ -257,19 +270,19 @@ PONYGO_EOF
   # skills/write-adr/SKILL.md：框架交付的唯一预置技能（Rule of three 唯一例外——
   # 写决策记录是 L1 判据强制的高频流程，消费者由框架自身创造；见 revisions/accepted/
   # 2026-08-31-preset-write-adr-skill.md）。缺失时生成与模板仓库逐字节一致的全量版。
-  if [ ! -f "$META_DIR/skills/write-adr/SKILL.md" ]; then
-    mkdir -p "$META_DIR/skills/write-adr"
-    cat > "$META_DIR/skills/write-adr/SKILL.md" <<'PONYGO_EOF'
+  if [ ! -f "$SKILLS_DIR/write-adr/SKILL.md" ]; then
+    mkdir -p "$SKILLS_DIR/write-adr"
+    cat > "$SKILLS_DIR/write-adr/SKILL.md" <<'PONYGO_EOF'
 ---
 name: write-adr
 description: 何时用：出现任何非平凡变更（行为变更 / 架构 / 跨文件或跨包契约 / 流程与工具链 / 测试策略 / 磁盘-线-配置格式 / 维护者可能再访的决定，命中任一）需要落决策记录时；或把记录迁移状态（proposed → implemented / rejected / archived）时。纯机械或局部编辑豁免。
 ---
 
-# write-adr —— 把一次非平凡决策落成 .meta/decisions/ 记录
+# write-adr —— 把一次非平凡决策落成 .agents/notes/ 记录
 
 ## 真相源
 
-- `.meta/decisions/README.md` —— 路径规范、格式契约、触发规则（唯一真源，冲突时以它为准）
+- `.agents/notes/README.md` —— 路径规范、格式契约、触发规则（唯一真源，冲突时以它为准）
 - `.meta/constitution/constitution.md` —— 常载命约第 1 条（决策必须入册且带 Alternatives）
 - ponygo 框架仓库 `maturity-ladder.md` §5 —— L1 判据（status 机械校验的逐项定义）：<https://github.com/lanhui100/ponygo/blob/main/maturity-ladder.md>
 
@@ -277,8 +290,8 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 
 1. **判触发**：对照 description 的枚举，命中任一即写。拿不准 → 写（多记成本一段文字，漏记成本永久丢失）。
 2. **选 lifecycle**：`proposed/`（未实现）或 `implemented/`（随本次变更落地）。
-3. **选 class**：`feature`（新能力）/ `bug-fix`（修缺陷）/ `simplification`（减复杂度）/ `architecture`（交付源码的结构）/ `process`（代码周围的工具与流程）/ `testing`（测试策略）。都不够 → 考虑在 `decisions/classes.local` 登记领域扩展（扩展即一次治理决策，须评审）。
-4. **建文件**：`.meta/decisions/{lifecycle}/{class}/$(date +%F)-<topic-title>.md`，topic 用 kebab-case。
+3. **选 class**：`feature`（新能力）/ `bug-fix`（修缺陷）/ `simplification`（减复杂度）/ `architecture`（交付源码的结构）/ `process`（代码周围的工具与流程）/ `testing`（测试策略）。都不够 → 考虑在 `notes/classes.local` 登记领域扩展（扩展即一次治理决策，须评审）。
+4. **建文件**：`.agents/notes/{lifecycle}/{class}/$(date +%F)-<topic-title>.md`，topic 用 kebab-case。
 5. **头部**：第一行 `# Agent Note: <title>`，空行，`Status: <与所在目录一致>`（rejected 可带一行理由：`rejected — <理由>`）。
 6. **正文**：`## Problem` 开头（先写动机，脱离方案也成立），随后**按 lifecycle 选骨架**（判据 1.8 机械校验，选错即 FAIL）：
 
@@ -328,7 +341,7 @@ PONYGO_EOF
 |---|---|---|---|
 | 常载命约 | 每次会话必载的 standing orders，1-3 行每条，链到 home | 故事/示例/复述 | 【TODO，如 根 AGENTS.md】 |
 | 架构地图 | 组合、核心模块、接缝、扩展点（有序地图） | 类型细节/决策理由/状态标注 | 【TODO】 |
-| 决策记录 | 活动决策（当前态现在时） | 迁移计划/验收清单 | `.meta/decisions/` |
+| 决策记录 | 活动决策（当前态现在时） | 迁移计划/验收清单 | `.agents/notes/` |
 | 事故复盘 | 事故年表、证据、因果链、预防 | 教学叙事 | 【TODO，如 docs/postmortem/】 |
 | how-to | 带编号验证步的操作指引 | 设计理由（→ 决策记录） | 【TODO，如 docs/cookbook/】 |
 | 用户文档 | 产品面向指南 | 贡献流程/决策史 | 【TODO】 |
@@ -371,7 +384,7 @@ PONYGO_EOF
 <!-- sync-body --><!-- 投影体起点：ponygo sync 从此锚点之后抽取（语言无关；勿删，删了回退中文标题匹配） -->
 
 ## 常载命约（Standing Orders）
-1. 任何非平凡变更都要落为 `.meta/decisions/` 下一条带 `## Alternatives considered` 的决策记录。
+1. 任何非平凡变更都要落为 `.agents/notes/` 下一条带 `## Alternatives considered` 的决策记录（程序与校准样例见 `.agents/skills/write-adr/SKILL.md`）。
 2. 凡机械可查的承诺，配一条非零退出的命令；机器到不了的，显式标注"靠 review"。
 3. 删除代码前先搜消费者；恢复条件立法，拒绝"以后可能用得上"式怀旧。
 
@@ -393,9 +406,9 @@ cat <<'PONYGO_EOF'
 
 1. **填宪法槽位**：读 `.meta/constitution/constitution.md`，替换全部 `【TODO: …】`——项目名（取仓库名）、一句话定位（读 README/源码推断，不确定就给草案并原地注明"草案，待人确认"）、技术栈（从 manifest 推断：package.json / go.mod / pyproject.toml / Cargo.toml 等）、成熟度目标（默认填 `2`）。Mission 节的 level TODO 填同一值。
 2. **重投影**：运行 `ponygo sync`——本引导自动被常载命约替换。
-3. **第一篇决策**：照 `.meta/skills/write-adr/SKILL.md` 落第一条 ADR（建议主题 `adopt-ponygo-governance`，class: `process`），并把 `.meta/meta.yaml` 的 `level` 改为 `1`。
+3. **第一篇决策**：照 `.agents/skills/write-adr/SKILL.md` 落第一条 ADR（建议主题 `adopt-ponygo-governance`，class: `process`），并把 `.meta/meta.yaml` 的 `level` 改为 `1`。
 4. **自证**：运行 `ponygo status`——L1 判据必须全绿（exit 1 即未达标，按逐项提示修）。
-5. **日常**：每次非平凡变更按 write-adr 技能判触发写 ADR；随时 `ponygo audit` 体检。升级路径见 `.meta/` 各目录 README（L2 门禁 → `gates/README.md`，L3 文档分层 → `docs-tier/README.md`，L4 技能 → `skills/README.md`）。
+5. **日常**：每次非平凡变更按 write-adr 技能判触发写 ADR；随时 `ponygo audit` 体检。升级路径见各目录 README（L2 门禁 → `.meta/gates/README.md`，L3 文档分层 → `.meta/docs-tier/README.md`，L4 技能 → `.agents/skills/README.md`）。
 
 若用户明确表示本项目不需要治理（一次性原型 / 纯实验），运行 `ponygo retire --level off` 并录一条 decision 说明。
 PONYGO_EOF
@@ -492,21 +505,21 @@ verify_ladder() {
     # ---- L1（1.1-1.7，声明级 ≥1 时验；决策计数排除集 {README.md, *.zh.md}）----
     if [ "$lv" -ge 1 ]; then
       verified_range="L0-L1"
-      [ -d "$DECISIONS_DIR" ] || vl_fail "1.1 .meta/decisions/ 缺失 → 建 decisions/ 与四态子目录"
+      [ -d "$DECISIONS_DIR" ] || vl_fail "1.1 .agents/notes/ 缺失 → 建 notes/ 与四态子目录"
       local n_dec=0
       n_dec=$(count_decisions)
       [ "${n_dec:-0}" -gt 0 ] || vl_fail "1.2 无决策记录（排除 README.md / *.zh.md）→ 写第一篇 ADR 落 proposed/ 或 implemented/"
       # 1.3 顶层目录 ⊆ 四态封闭集（路径即标签，杂项目录即违例）
       while IFS= read -r d; do
         case " $LIFECYCLES " in *" $d "*) ;; *)
-          vl_fail "1.3 decisions/ 顶层目录越界：$d → 只允许 proposed/implemented/rejected/archived（移走或改名）"
+          vl_fail "1.3 notes/ 顶层目录越界：$d → 只允许 proposed/implemented/rejected/archived（移走或改名）"
         ;; esac
       done < <(find "$DECISIONS_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null)
       # 1.4 二级目录 ⊆ 六类封闭集 ∪ classes.local 实例扩展
       local classes_all="$CLASSES $(extra_classes | tr '\n' ' ')"
       while IFS= read -r d; do
         case " $classes_all " in *" $d "*) ;; *)
-          vl_fail "1.4 二级目录越界：$d → 只允许 feature/bug-fix/simplification/architecture/process/testing（领域扩展请写入 decisions/classes.local）"
+          vl_fail "1.4 二级目录越界：$d → 只允许 feature/bug-fix/simplification/architecture/process/testing（领域扩展请写入 notes/classes.local）"
         ;; esac
       done < <(find "$DECISIONS_DIR" -mindepth 2 -maxdepth 2 -type d -printf '%f\n' 2>/dev/null)
       # 1.5 每个决策 .md 恰好位于 {lifecycle}/{class}/ 两级（深度 1-2 与 ≥4 均违例；README 豁免）
@@ -655,7 +668,7 @@ cmd_init() {
 
   if looks_empty; then
     info "探测：空项目 / 新项目 → 全新铺骨架"
-    confirm_or_skip "在新项目根建立 .meta/ 治理骨架（level: 0）" || exit 0
+    confirm_or_skip "在新项目根建立 .agents/ + .meta/ 治理骨架（level: 0）" || exit 0
     write_skeleton 0
   else
     local alt
@@ -667,7 +680,7 @@ cmd_init() {
     else
       info "探测：有代码但无治理 → 注入骨架（不碰业务代码）"
     fi
-    confirm_or_skip "注入 .meta/ 治理骨架到既有代码仓库（只增不改业务文件）" || exit 0
+    confirm_or_skip "注入 .agents/ + .meta/ 治理骨架到既有代码仓库（只增不改业务文件）" || exit 0
     write_skeleton 0
   fi
 
@@ -774,7 +787,7 @@ cmd_audit() {
 
   # 问③ 重复劳动怎么复用
   total=$((total+1))
-  [ -d "$META_DIR/skills" ] && [ -n "$(ls -A "$META_DIR/skills" 2>/dev/null | grep -vE '^(README\.md|\.gitkeep)$')" ] && hit=$((hit+1))
+  [ -d "$SKILLS_DIR" ] && [ -n "$(ls -A "$SKILLS_DIR" 2>/dev/null | grep -vE '^(README\.md|\.gitkeep)$')" ] && hit=$((hit+1))
 
   # 问④ 过时怎么退场
   total=$((total+1))
@@ -793,7 +806,7 @@ cmd_audit() {
   fi
   local lv="$(read_level)"
   if [ -d "$DECISIONS_DIR" ] && [ "${n_dec:-0}" -eq 0 ]; then
-    echo "  - decisions/ 无任何决策 → 写第一篇 ADR，落 proposed/ 或 implemented/"
+    echo "  - notes/ 无任何决策 → 写第一篇 ADR，落 proposed/ 或 implemented/"
   fi
   if [ -z "${hook_path:-}" ] && [ ! -f .githooks/pre-commit ]; then
     echo "  - 无本地钩子（core.hooksPath 未设）→ 这是「强制层」缺口，优先补（放大器）"
@@ -802,7 +815,7 @@ cmd_audit() {
   echo "提示：程序只判「有无/对不对」，不判「值不值」——是否值得建某机制，靠 review（P6）。"
   echo ""
   echo "替代物认可：若你用非 ponygo 形态达成同等效果（如 CONTRIBUTING.md + CODEOWNERS + CI，"
-  echo "或 docs/adr 而非 .meta/decisions），本命令只做机械形状探测、不裁决价值——请按"
+  echo "或 docs/adr 而非 .agents/notes），本命令只做机械形状探测、不裁决价值——请按"
   echo "checklists/audit.md「已认可替代物」条款自评为命中，勿把形状分当价值分。"
   if [ "$comp" -ge 1 ]; then
     echo ""
@@ -833,7 +846,7 @@ cmd_status() {
   echo ""
   echo "骨架完整度："
   local missing=0
-  for d in "$META_DIR" "$META_DIR/constitution" "$DECISIONS_DIR" "$META_DIR/gates" "$META_DIR/skills" "$META_DIR/docs-tier"; do
+  for d in "$META_DIR" "$META_DIR/constitution" "$META_DIR/gates" "$META_DIR/docs-tier" "$AGENTS_RUNTIME_DIR" "$DECISIONS_DIR" "$SKILLS_DIR"; do
     if [ -d "$d" ]; then printf '  [ok]  %s\n' "$d"; else printf '  [缺]  %s\n' "$d"; missing=$((missing+1)); fi
   done
   [ -f "$META_YAML" ] && printf '  [ok]  %s\n' "$META_YAML" || { printf '  [缺]  %s\n' "$META_YAML"; missing=$((missing+1)); }
@@ -881,7 +894,7 @@ cmd_retire() {
     echo "用法：ponygo retire --level <N|off>   （注意 off 必须挂在 --level 后：ponygo retire --level off）"
     echo "  N     把 meta.yaml 的 level 改写为目标档（降级，如 2 → 1），并提示移除超档机制"
     echo "  off   整体退场：ai-surface 置 off（不再生成 AI 投影）+ level 归 0（纯 L0 长驻模式）"
-    echo "说明：删除是独立工程（P9）——退级须录一条 decision 到 .meta/decisions/。"
+    echo "说明：删除是独立工程（P9）——退级须录一条 decision 到 .agents/notes/。"
     return 0
   fi
   has_meta || die "无 .meta/ 治理根（meta.yaml 缺失）——先 'ponygo init' 再退级"
@@ -913,7 +926,7 @@ usage() {
 ponygo —— 项目工程化治理元框架命令行（单文件、零依赖）
 
 用法：
-  ponygo init     [--yes] [--dry-run]    建立/注入 .meta/ 治理骨架（自判新/旧项目）
+  ponygo init     [--yes] [--dry-run]    建立/注入 .agents/ + .meta/ 治理骨架（自判新/旧项目）
   ponygo audit    [--level S|M]          自适应体检：打分 + 缺口 + 最小改进动作（判据不符 exit 1）
   ponygo status                          查看成熟度级与骨架完整度（骨架缺口或声明级判据不符 exit 1）
   ponygo upgrade                         跟随框架升级指引（首版不实际合并）

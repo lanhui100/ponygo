@@ -1,4 +1,4 @@
-# decisions/ —— 决策记录（ADR / Agent Note）
+# notes/ —— 决策记录（ADR / Agent Note）
 
 这是治理根的**记忆**：任何"为什么这样 / 为什么不那样"的决定，都落到这里，
 而不是散落在人脑、聊天记录或 PR（拉取请求）线程里。
@@ -6,7 +6,7 @@
 ## 路径规范
 
 ```
-decisions/{lifecycle}/{class}/yyyy-mm-dd-topic-title.md
+notes/{lifecycle}/{class}/yyyy-mm-dd-topic-title.md
 ```
 
 两个轴都编码进**路径**（文件夹即标签，内容里不必重复声明，二者永不漂移）：
