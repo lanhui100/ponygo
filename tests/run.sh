@@ -82,6 +82,31 @@ what
 other
 EOF
 }
+write_proposal_decision() { # $1=case目录 $2=相对 decisions/ 的子路径（含文件名）
+  local dir
+  dir="$1/.meta/decisions/$(dirname "$2")"
+  mkdir -p "$dir"
+  cat > "$dir/$(basename "$2")" <<'EOF'
+# Agent Note: test proposal
+
+Status: proposed
+
+## Problem
+why
+
+## Proposal
+what
+
+## Alternatives considered
+other
+
+## Acceptance criteria
+how verified
+
+## Risks
+what could go wrong
+EOF
+}
 
 # ============================================================
 s01_help() {
@@ -318,6 +343,28 @@ s11_l1_criteria() {
   sed -i 's/$/\r/' "$T/.meta/decisions/implemented/feature/2026-01-02-crlf.md"
   run_cli "$T" status
   assert_eq "CRLF 决策文件不假 FAIL（1.7）→ exit 0" 0 "$R_RC"
+
+  # 1.8 正文骨架与 lifecycle 匹配（ponyllm 实证漂移回归）
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/feature/2026-01-02-x.md"
+  write_proposal_decision "$T" "proposed/architecture/2026-01-02-y.md"
+  run_cli "$T" status
+  assert_eq "1.8 合法（Decision+Proposal 各归其位）→ exit 0" 0 "$R_RC"
+
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "proposed/architecture/2026-01-02-y.md"
+  run_cli "$T" status
+  assert_eq "1.8 proposed 误用 ## Decision → exit 1" 1 "$R_RC"
+  assert_contains "报 1.8" "$R_OUT" "1.8"
+
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_proposal_decision "$T" "implemented/feature/2026-01-02-x.md"
+  run_cli "$T" status
+  assert_eq "1.8 implemented 含提案时代标题 → exit 1" 1 "$R_RC"
+  assert_contains "报 1.8" "$R_OUT" "1.8"
 }
 
 s12_l2_criteria() {

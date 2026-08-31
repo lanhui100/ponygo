@@ -39,9 +39,19 @@ Status: <status>
 
 - `Status:` 三选一，必须与所在文件夹一致：`proposed` / `implemented` / `rejected — <一行理由>`。
 - 正文从 `## Problem` 开始（先写动机，脱离方案也成立）。
-- `implemented/` 用现在时 `## Decision`；禁止提案时代标题（`## Proposal` / `## Plan` /
-  `## Migration plan` / `## Acceptance criteria`）。
+- **正文骨架按 lifecycle 分态**（时态与状态一致，判据 1.8 机械校验）：
+
+  | lifecycle | 正文骨架 |
+  |---|---|
+  | `proposed/` | `## Proposal`（可将来时）→ `## Alternatives considered` → `## Acceptance criteria` → `## Risks`；禁止现在时 `## Decision` |
+  | `implemented/` | `## Decision`（现在时）→ `## Alternatives considered` → `## Consequences`（可选）；禁止提案时代标题（`## Proposal` / `## Plan` / `## Migration plan` / `## Acceptance criteria`） |
+  | `rejected/` | 提案原文冻结（保留 `## Proposal`），verdict 只在 `Status:` 行；禁止现在时 `## Decision` |
+  | `archived/` | 冻结豁免（保持归档时原貌，不改一字） |
+
 - 每条必含 `## Alternatives considered`（候选方案与落选原因）——记录无备选的决策是在邀请重开争执。
+- **迁移即改写**：proposed → implemented 时，移动文件的那次变更必须把 `## Proposal`
+  改写为现在时 `## Decision`（Acceptance criteria / Risks 折叠进 `## Consequences`）；
+  提案用现在时等于"未批准的方案伪装成已落地的决定"，状态轴在正文层失真。
 
 ## 触发规则（谁在什么时候必须写）
 

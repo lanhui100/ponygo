@@ -124,12 +124,14 @@ L0–L2 的每条退出标准，落到**布尔检查项 + 锚定命令**。这�
 | 1.5 | 路径深度卡死为 `{lifecycle}/{class}/…`（class 必须嵌在 lifecycle 下） | `find .meta/decisions -type f -name '*.md'` 逐条人工核对深度 | 无根层级裸 `.md` |
 | 1.6 | 文件名匹配 `yyyy-mm-dd-topic-title.md` | `find .meta/decisions -name '*.md' -printf '%f\n' \| grep -vE '^[0-9]{4}-[0-9]{2}-[0-9]{2}-.+\\.md$'` | 输出为空 |
 | 1.7 | 每条决策含 `Status:` 行且与所在 lifecycle 一致 | `grep -Rl '^Status:' .meta/decisions/proposed` / `…/implemented` 等，交叉验证 | 无不一致 |
+| 1.8 | 正文骨架与 lifecycle 匹配：proposed/rejected 含 `## Proposal` 且无现在时 `## Decision`；implemented 无提案时代标题 | `grep -rE '^## (Proposal\|Plan\|Migration plan\|Acceptance criteria)([[:space:]]\|$)' .meta/decisions/implemented` 应为空；`grep -rLE '^## Proposal([[:space:]]\|$)' .meta/decisions/proposed .meta/decisions/rejected` 应为空 | 无错位 |
 
 > 1.5 的机械化实现为"每个决策 `.md` **恰好**位于 `{lifecycle}/{class}/` 两级之内"——depth 1-2 的裸文件与 depth ≥4 的过深层均违例；`README.md` 豁免。
 > 1.6 的 `grep -vE` 命令豁免 `README.md`（占位说明不算决策记录）；文件名中的日期必须真为 `yyyy-mm-dd` 而非占位符。1.6 的 `grep -vE` 只查格式；日期**合法性**可再机械判一条：
 > `find .meta/decisions -name '*.md' -printf '%f\n' | sed -E 's/^([0-9]{4}-[0-9]{2}-[0-9]{2})-.*/\1/' | while read d; do date -d "$d" >/dev/null 2>&1 || echo "非法日期: $d"; done`
 > 输出为空即法合法。命令不可解析的环境（如无 GNU date）降级为 review——不得自称"机械判过"。
 > 1.4 的扩展口：L6 领域定制常需新增 class——在 `.meta/decisions/classes.local` 每行写一个额外 class 名（小写字母/数字/连字符，`#` 起注释）即被 1.4 认可；封闭集本身不放开，扩展须显式落盘留有审计载体。
+> 1.8 的豁免规则：`archived/` 冻结豁免（保持归档时原貌）；`README.md` 豁免。原理：时态与状态一致——提案用现在时 `## Decision` 等于未批准的方案伪装成已落地的决定，状态轴在正文层失真；proposed → implemented 迁移时必须把 `## Proposal` 改写为现在时（Acceptance criteria / Risks 折叠进 `## Consequences`）。该判据源自 ponyllm 实例的实证漂移（proposed ADR 误用 `## Decision`，1.1–1.7 全 PASS——路径/文件名/Status 三重影子锁不到正文骨架）。
 > 1.7 的 `archived/` 豁免规则：archived/ 下决策的 `Status:` ∈ {`implemented`, `archived`} 均判一致（冻结归档保留原 implemented 态）；`README.md` 豁免。`*.zh.md`（双语配对）**不在豁免之列**——须独立满足头部契约。CLI 实现对带引号（`level: "2"`）与 CRLF 行尾比上方锚定命令更宽容（归一后判定），复判时以 `ponygo status` 输出为准。
 
 ### L2 本身的退出标准（升到 L3+ 前，L2 必须自洽）

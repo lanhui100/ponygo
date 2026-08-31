@@ -18,7 +18,13 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 3. **选 class**：`feature`（新能力）/ `bug-fix`（修缺陷）/ `simplification`（减复杂度）/ `architecture`（交付源码的结构）/ `process`（代码周围的工具与流程）/ `testing`（测试策略）。都不够 → 考虑在 `decisions/classes.local` 登记领域扩展（扩展即一次治理决策，须评审）。
 4. **建文件**：`.meta/decisions/{lifecycle}/{class}/$(date +%F)-<topic-title>.md`，topic 用 kebab-case。
 5. **头部**：第一行 `# Agent Note: <title>`，空行，`Status: <与所在目录一致>`（rejected 可带一行理由：`rejected — <理由>`）。
-6. **正文**：`## Problem` 开头（先写动机，脱离方案也成立）→ `## Decision`（implemented 用现在时；禁止 `## Proposal` / `## Plan` / `## Acceptance criteria` 等提案时代标题）→ `## Alternatives considered`（候选方案 + 落选原因，**必填**）→ `## Consequences`（可选）。
+6. **正文**：`## Problem` 开头（先写动机，脱离方案也成立），随后**按 lifecycle 选骨架**（判据 1.8 机械校验，选错即 FAIL）：
+
+   | lifecycle | 骨架 |
+   |---|---|
+   | `proposed/` | `## Proposal`（将来时）→ `## Alternatives considered` → `## Acceptance criteria` → `## Risks` |
+   | `implemented/` | `## Decision`（现在时）→ `## Alternatives considered`（必填）→ `## Consequences`（可选） |
+   | `rejected/` | 提案原文冻结（保留 `## Proposal`），verdict 只写 `Status:` 行 |
 7. **迁移状态** = 移动文件到目标 lifecycle + 改 `Status:` 行 + 把提案时代标题改写为现在时——三件事在同一次变更内完成。
 
 ## 校准样例
@@ -29,6 +35,7 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 - 反例（豁免）：改 README 错别字、调整测试断言文案 → 纯机械/局部编辑，不写。
 - 反例（豁免）：格式化重排、重命名局部变量 → 无行为/契约/结构/流程变化，不写。
 - 边界（靠 review）：重构归哪个 class？判别器是"可观察行为是否改变"——改变 → feature/bug-fix；只为减复杂度 → simplification（`refactor` 刻意缺席，与之重叠）。
+- 反例（时态错位，判据 1.8）：proposed/ 下用现在时 `## Decision` → 未批准的提案伪装成已落地的决定；proposed 必须用 `## Proposal`，迁移到 implemented 时再改写为现在时。
 
 ## 验证与报告
 
