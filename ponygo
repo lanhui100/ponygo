@@ -499,7 +499,7 @@ cmd_audit() {
   local heavy=0 reasons=""
   # 信号1：贡献者数 >= 3
   local contrib=0
-  if [ -d .git ]; then contrib=$(git shortlog -sne 2>/dev/null | wc -l | tr -d ' '); fi
+  if [ -d .git ] && git rev-parse --verify HEAD >/dev/null 2>&1; then contrib=$(git shortlog -sne HEAD 2>/dev/null | wc -l | tr -d ' '); fi
   [ "${contrib:-0}" -ge 3 ] && { heavy=1; reasons="$reasons 贡献者≥3($contrib)"; }
   # 信号2：多技术栈（多种 manifest 并存）
   local manifests=0
