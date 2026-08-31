@@ -364,7 +364,7 @@ s13_meta_violations() {
 }
 
 s14_decisions_readme() {
-  echo "--- 场景14：生成 decisions/README 与模板 eol 归一逐字节一致（F3）"
+  echo "--- 场景14：生成 decisions/ skills/ README 与模板 eol 归一逐字节一致（F3 + skills 契约）"
   local T; T=$(new_case)
   run_cli "$T" init --yes
   if diff <(tr -d '\r' < "$T/.meta/decisions/README.md") \
@@ -373,6 +373,13 @@ s14_decisions_readme() {
   else
     bad "生成 decisions/README 与模板不一致"
   fi
+  if diff <(tr -d '\r' < "$T/.meta/skills/README.md") \
+          <(tr -d '\r' < "$ROOT/.meta/skills/README.md") >/dev/null 2>&1; then
+    ok "生成 skills/README 与模板 eol 归一后一致（含五要素契约）"
+  else
+    bad "生成 skills/README 与模板不一致"
+  fi
+  grep -q '五要素' "$T/.meta/skills/README.md" && ok "skills 契约含五要素" || bad "skills 契约缺五要素"
 }
 
 s15_upgrade() {

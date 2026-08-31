@@ -81,6 +81,11 @@
 | 3.3 | 技能带触发式 description | description 内联触发条件 | `grep -l '何时用\|trigger\|When to use' .meta/skills/*/SKILL.md 2>/dev/null` | 补触发式 description |
 | 3.4 | 技能带校准样例 | 正反例成对 | `grep -l '校准样例\|calibration\|Examples' .meta/skills/*/SKILL.md 2>/dev/null` | 补校准样例 |
 
+> **L4 解冻前置**：SKILL.md 的完整格式契约（五要素 + 契约头部示例 + 三条纪律）见
+> `.meta/skills/README.md`；skill 元数据门禁（frontmatter/触发/样例的机械校验）与
+> "第三次重复"计数机制属 L4 依赖的未交付物（maturity-ladder §2），解冻 L4 前逐项
+> 满足 3.2–3.4 即可，不预建门禁（空门禁是被永久引用的死重）。
+
 ### 精微层（`[future]`）
 
 - 3.5 调用权限分层（`disable-model-invocation`）。
