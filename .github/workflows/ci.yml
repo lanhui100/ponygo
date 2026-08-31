@@ -1,0 +1,37 @@
+# ponygo 自测门禁：tests/run.sh 是唯一回归入口，双平台看守
+# （ubuntu = GNU 用户态；windows = Git Bash，覆盖 README §6.2 承诺的两个平台）
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  selftest-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: bash tests/run.sh
+        run: bash tests/run.sh
+
+  selftest-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: bash tests/run.sh (Git Bash)
+        shell: bash
+        run: bash tests/run.sh
+
+  # 聚合门：分支保护只依赖这一个检查，防 skipped 被计为通过
+  all-checks-passed:
+    if: always()
+    needs: [selftest-linux, selftest-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: aggregate
+        run: |
+          set -e
+          result="${{ needs.selftest-linux.result }} ${{ needs.selftest-windows.result }}"
+          echo "job results: $result"
+          [ "$result" = "success success" ]

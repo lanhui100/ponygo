@@ -380,6 +380,12 @@ s14_decisions_readme() {
     bad "生成 skills/README 与模板不一致"
   fi
   grep -q '五要素' "$T/.meta/skills/README.md" && ok "skills 契约含五要素" || bad "skills 契约缺五要素"
+  if diff <(tr -d '\r' < "$T/.meta/docs-tier/README.md") \
+          <(tr -d '\r' < "$ROOT/.meta/docs-tier/README.md") >/dev/null 2>&1; then
+    ok "生成 docs-tier/README 与模板 eol 归一后一致（含 tier 模板）"
+  else
+    bad "生成 docs-tier/README 与模板不一致"
+  fi
 }
 
 s15_upgrade() {
@@ -493,6 +499,26 @@ s20_installer() {
   local help_out
   help_out=$("$target_bin/ponygo" --help 2>&1)
   echo "$help_out" | grep -q "ponygo" && ok "已安装 ponygo 可正常执行 --help" || bad "安装后无法执行"
+
+  # 3. 完整性校验（P0-3）：SHA256 正确通过 / 错误拒绝并删文件
+  if command -v sha256sum >/dev/null 2>&1; then
+    local good
+    good=$(sha256sum "$target_bin/ponygo" | awk '{print $1}')
+    if PONYGO_SHA256="$good" bash "$ROOT/install.sh" "$target_bin" >/dev/null 2>&1; then
+      ok "SHA256 正确 → 安装成功"
+    else
+      bad "SHA256 正确却被拒"
+    fi
+    if PONYGO_SHA256="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" \
+         bash "$ROOT/install.sh" "$target_bin" >/dev/null 2>&1; then
+      bad "SHA256 错误未被拒"
+    else
+      ok "SHA256 错误 → 拒绝安装"
+    fi
+    [ ! -f "$target_bin/ponygo" ] && ok "校验失败后可疑文件已删除" || bad "校验失败后文件残留"
+  else
+    ok "无 sha256sum，跳过校验和场景（CI 双平台均有）"
+  fi
 }
 
 # ============================================================
@@ -515,7 +541,55 @@ s16_status_no_meta
 s17_dry_run
 s18_repo_consistency
 s19_boundary_regress
+s21_external001_regress() {
+  echo "--- 场景21：EXTERNAL-001 回归（空 level 0.4 / classes.local / sync 锚点 / audit 内嵌验级 / 深度信号4）"
+  local T G
+  # P1-4：空 level 不假 L0 PASS
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: \n' > "$T/.meta/meta.yaml"
+  run_cli "$T" status
+  assert_eq "空 level → exit 1" 1 "$R_RC"
+  assert_contains "报 0.4" "$R_OUT" "0.4"
+  # P2-1：classes.local 扩展 class
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/domain-x/2026-01-02-ext.md"
+  run_cli "$T" status
+  assert_eq "未登记的扩展 class → exit 1" 1 "$R_RC"
+  assert_contains "报 1.4" "$R_OUT" "1.4"
+  printf '# 领域扩展\ndomain-x\n' > "$T/.meta/decisions/classes.local"
+  run_cli "$T" status
+  assert_eq "classes.local 登记后 → exit 0" 0 "$R_RC"
+  # P1-3：sync 锚点（英文标题 + <!-- sync-body -->）
+  T=$(new_case); run_cli "$T" init --yes
+  cat > "$T/.meta/constitution/constitution.md" <<'EOF'
+# Constitution
+
+<!-- sync-body -->
+
+## Standing Orders
+1. Decisions must be recorded.
+EOF
+  run_cli "$T" sync
+  assert_eq "sync 锚点（英文标题）exit 0" 0 "$R_RC"
+  grep -q 'Standing Orders' "$T/AGENTS.md" && ok "英文投影体生成" || bad "英文投影体未生成"
+  G=$(sanitize_git)
+  # P1-1：audit 内嵌验级（声明 L1 无决策 → exit 1）
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G audit --level S
+  assert_eq "audit 内嵌验级（L1 无决策）→ exit 1" 1 "$R_RC"
+  assert_contains "audit 输出级自洽 FAIL" "$R_OUT" "级自洽验证：未通过"
+  # P1-2：深度信号4 仅 .meta 不升 M 档
+  T=$(new_case); run_cli "$T" init --yes
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G audit
+  assert_contains "仅 .meta 仍 S 档" "$R_OUT" "审计深度：S 档"
+}
+
 s20_installer
+s21_external001_regress
 
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="

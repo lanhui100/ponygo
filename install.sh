@@ -2,7 +2,10 @@
 # ponygo 一键安装脚本：零依赖，单文件安装与全局配置引导
 set -euo pipefail
 
-REPO_RAW_URL="${PONYGO_SOURCE_URL:-https://raw.githubusercontent.com/lanhui100/ponygo/main/ponygo}"
+# 版本钉住（P0-3）：PONYGO_VERSION 指定 git ref（tag/分支/commit），默认 main。
+# 生产环境建议钉 tag + 配 PONYGO_SHA256 校验和，避免"curl|bash 拉的是未知内容"。
+VERSION="${PONYGO_VERSION:-main}"
+REPO_RAW_URL="${PONYGO_SOURCE_URL:-https://raw.githubusercontent.com/lanhui100/ponygo/$VERSION/ponygo}"
 BIN_DIR="${PONYGO_INSTALL_DIR:-${1:-$HOME/.local/bin}}"
 
 info() { printf "\033[32m[ponygo:install]\033[0m %s\n" "$*"; }
@@ -29,6 +32,24 @@ else
   else
     die "未找到 curl 或 wget，请先安装网络下载工具。"
   fi
+fi
+
+# 1.5 完整性校验（P0-3）：设置了 PONYGO_SHA256 就必须校验通过；
+# 找不到校验工具时 fail-closed（拒绝未校验安装），不降级为跳过。
+if [ -n "${PONYGO_SHA256:-}" ]; then
+  actual=""
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual=$(sha256sum "$TARGET" | awk '{print $1}')
+  elif command -v shasum >/dev/null 2>&1; then
+    actual=$(shasum -a 256 "$TARGET" | awk '{print $1}')
+  else
+    die "已设置 PONYGO_SHA256 但找不到 sha256sum/shasum，无法校验——拒绝未校验安装。"
+  fi
+  if [ "$actual" != "$PONYGO_SHA256" ]; then
+    rm -f "$TARGET"
+    die "SHA-256 校验失败：期望 $PONYGO_SHA256，实得 $actual。已删除可疑文件。"
+  fi
+  info "SHA-256 校验通过。"
 fi
 
 chmod +x "$TARGET" || die "无法赋予执行权限: $TARGET"

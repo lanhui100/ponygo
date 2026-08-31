@@ -41,13 +41,20 @@
 curl -fsSL https://raw.githubusercontent.com/lanhui100/ponygo/main/install.sh | bash
 ```
 
+生产环境建议钉版本 + 校验和（防"curl|bash 拉的是未知内容"）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lanhui100/ponygo/main/install.sh | \
+  PONYGO_VERSION=v1.1.0 PONYGO_SHA256=<公布的校验和> bash
+```
+
 **方式 B：源码目录一键安装（clone 本仓库后）**
 
 ```bash
 ./install.sh
 ```
 
-**方式 C：保留 git 血缘手动挂载（方便后续 `ponygo upgrade` 跟随升级）**
+**方式 C：保留 git 血缘手动挂载（跟随升级靠 `git fetch && git merge`；`ponygo upgrade` 首版只打印升级纪律、不做合并）**
 
 ```bash
 git clone https://github.com/lanhui100/ponygo.git && export PATH="$PWD/ponygo:$PATH"
@@ -60,7 +67,7 @@ git clone https://github.com/lanhui100/ponygo.git && export PATH="$PWD/ponygo:$P
 
 ```bash
 ponygo init      # 新项目：在仓库根生成 .meta/ 治理骨架 + meta.yaml（level: 0）
-ponygo audit     # 旧项目改造（或随时体检）：按自适应审计打分，输出缺口与最小改进动作
+ponygo audit     # 旧项目改造（或随时体检）：按自适应审计打分，输出缺口与最小改进动作；有治理根时内嵌级自洽验证，判据不符 exit 1
 ponygo status    # 查看当前成熟度级（L0-L6）与骨架完整性，并对声明级（L0-L2）判据逐项机械验证，不符即非零退出
 ponygo upgrade   # 跟随框架升级：把本仓库新版 ponygo 的命令面/判据同步进已有治理根
 ponygo sync      # 把 constitution 投影到根 AGENTS.md / CLAUDE.md（生成物，勿手编）
@@ -95,7 +102,7 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
 - `meta.yaml` 仅 `level` 与 `ai-surface` 两个合法键 + 注释（其它键是规格违例）；**版本由 git 派生，组件清单由 `.meta/` 目录存在性充当**——不冗余声明能被机械推导的东西。
 - 决策文件路径：`decisions/{lifecycle}/{class}/yyyy-mm-dd-topic-title.md`，其中
   - `lifecycle ∈ {proposed, implemented, rejected, archived}`
-  - `class ∈ {feature, bug-fix, simplification, architecture, process, testing}`
+  - `class ∈ {feature, bug-fix, simplification, architecture, process, testing}`（领域扩展：`decisions/classes.local` 每行追加一个 class，见 `.meta/decisions/README.md`）
 - 文件夹即标签：lifecycle/class 编码进路径，文件内容里无需重复声明，二者永不漂移。
 
 ### 4.2 成熟度阶梯（L0–L6）
@@ -171,6 +178,7 @@ CLI 从不假设项目是空仓；它对"已有治理"与"零治理但历史厚�
 | `README.md` | 门面 + 使用总纲：命令面、路径、阶梯、边界 | 所有人；第一入口 |
 | `ponygo` | 单文件 CLI（shell、零依赖），六条命令 | 使用者；执行入口 |
 | `tests/run.sh` | CLI 自测（纯 bash、零依赖、18+ 场景），`bash tests/run.sh` 全绿为准 | 维护者；回归门禁 |
+| `.github/workflows/ci.yml` | 回归门禁挂载：ubuntu + windows Git Bash 双平台跑 tests/run.sh + 聚合门 | 维护者；分支保护依赖 |
 | `docs/methodology.md` | 原理层：方法论设计依据（源自 deepseek-harness） | 想懂"为什么"的人；机制层的理论源头 |
 | `.meta/` | 治理根骨架：constitution / decisions / gates / skills / docs-tier / meta.yaml | 实例化产物；由 `ponygo init` 生成进用户项目 |
 | `maturity-ladder.md` | 成熟度阶梯定义（L0–L6 逐档判据） | `ponygo status` 与 review 的判定来源 |
@@ -178,3 +186,4 @@ CLI 从不假设项目是空仓；它对"已有治理"与"零治理但历史厚�
 | `audit/checklist.md` | 分层细目（骨架 / 机制 / 精微三层条目） | 审计打分时的逐项参照 |
 | `checklists/` | 双入口清单：init（冷启动）+ audit（改造） | 使用者；落地动作指引 |
 | `revisions/` | 框架自身演进记录：proposed / accepted | 维护者；框架"吃自己狗粮"的 ADR |
+| `LICENSE` | MIT 许可证 | 分发与二次使用依据 |
