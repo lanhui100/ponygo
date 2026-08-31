@@ -28,6 +28,8 @@
 
 ---
 
+<!-- sync-body --><!-- 投影体起点：ponygo sync 从此锚点之后抽取（语言无关；勿删，删了回退中文标题匹配） -->
+
 ## 常载命约（Standing Orders）
 
 > 每条命约 1-3 行，必须是"约定"而非"故事"；每条链到 `docs/methodology.md` 的原理层。

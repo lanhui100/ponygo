@@ -22,6 +22,9 @@ decisions/{lifecycle}/{class}/yyyy-mm-dd-topic-title.md
   - class 目录由**写入时创建**，不预建空目录——空目录既不承载事实、又制造"有决策"的假象。
   - **lifecycle 四态目录由 `ponygo init` 预建**（`proposed/ implemented/ rejected/ archived/`）：
     状态轴的空态是合法的——它代表治理根已播种；而 class 是类别轴，空目录不承载事实，故不预建。
+  - **领域扩展（L6 开放口）**：六类不够用（领域定制的第一个诉求常是加一个 class）时，
+    在本目录放 `classes.local`，每行一个额外 class 名（小写字母/数字/连字符；`#` 起注释）。
+    封闭集本身不放开——扩展必须显式落盘成文件，留有可审计的载体，而非随手 mkdir。
 
 ## 文件格式契约
 
