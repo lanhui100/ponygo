@@ -21,17 +21,21 @@ git rev-parse --is-inside-work-tree 2>/dev/null   # 是否在 git 仓库内
 - [ ] 运行 `ponygo init`，确认它正确识别了"空项目 / 有代码无治理"两场景之一
 - [ ] 验证骨架落地：`ponygo status` 应显示 `[ok]` 满格、`level: 0`
 - [ ] 核对 `.meta/meta.yaml` 只有 `level: 0` 一个字段（版本/组件别手填，git 和目录说了算）
+- [ ] 确认根 `AGENTS.md` / `CLAUDE.md` 已生成且内容为**初始引导（bootstrap）**——这是 AI agent 进场的指引入口
 
-### 阶段 B：填宪法槽位（人做，1 次）
+### 阶段 B：填宪法槽位（AI agent 做，人只确认草案）
 
-- [ ] 编辑 `.meta/constitution/constitution.md`，填 4 个槽位（项目名 / 一句话定位 / 技术栈 / 成熟度目标）
-- [ ] 勾掉常载命约里不适用项，但保留最少 3 条预设命约
+init 投影的**初始引导（bootstrap）**已把本阶段写成 AI coding agent 的进场任务——
+agent 读根 `AGENTS.md` / `CLAUDE.md` 即知该做什么，无需人传话：
+
+- [ ] agent 编辑 `.meta/constitution/constitution.md`，填 4 个槽位（项目名 / 一句话定位 / 技术栈 / 成熟度目标，推断不了的给草案并原地注明"草案，待人确认"）
+- [ ] 人确认槽位草案；勾掉常载命约里不适用项，但保留最少 3 条预设命约
 - [ ] 确认停止线理解到位：`level` 是硬上限，达到前不抢跑下一档
 
-### 阶段 C：投影（机械）
+### 阶段 C：重投影（机械，bootstrap → 常载命约）
 
-- [ ] 运行 `ponygo sync`，把填好的宪法投影到根 `AGENTS.md` / `CLAUDE.md`
-- [ ] 验证投影标记区存在：`grep -l "BEGIN constitution" AGENTS.md CLAUDE.md`
+- [ ] agent 运行 `ponygo sync`——初始引导自动被常载命约整体替换，无需手删
+- [ ] 验证引导已消失、命约已就位：`grep -L "初始引导" AGENTS.md CLAUDE.md && grep -l "常载命约" AGENTS.md`
 
 ### 阶段 D：写下第一篇决策（升 L1 的起手）
 
@@ -48,7 +52,7 @@ git rev-parse --is-inside-work-tree 2>/dev/null   # 是否在 git 仓库内
 
 ## 停手条件
 
-- **槽位未填完** → 别投影、别抢跑，回到阶段 B。
+- **槽位未填完** → 停在 bootstrap 态即可（引导投影会在仓库里等 agent 来填），别手编投影区。
 - **规模太小（单文件脚本/一次性原型/无持续维护者）** → 别建 `.meta/`，见 README §6.1 停止线。
 
 ---

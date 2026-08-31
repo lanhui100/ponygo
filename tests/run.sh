@@ -113,7 +113,8 @@ s02_init() {
   [ -f "$T/.meta/decisions/README.md" ] && ok "decisions/README.md 生成" || bad "decisions/README.md 缺失"
   [ -f "$T/.meta/skills/write-adr/SKILL.md" ] && ok "预置 write-adr 技能" || bad "write-adr 技能缺失"
   grep -q '何时用' "$T/.meta/skills/write-adr/SKILL.md" && ok "write-adr 含触发式 description" || bad "write-adr 缺触发式 description"
-  [ ! -f "$T/AGENTS.md" ] && [ ! -f "$T/CLAUDE.md" ] && ok "模板态不投影" || bad "模板态不应投影"
+  [ -f "$T/AGENTS.md" ] && [ -f "$T/CLAUDE.md" ] && ok "模板态投影初始引导（bootstrap）" || bad "模板态未投影初始引导"
+  grep -q '初始引导' "$T/AGENTS.md" && ok "投影含 bootstrap 标记" || bad "投影缺 bootstrap 标记"
   run_cli "$T" init --yes
   assert_eq "重复 init exit 0（不覆盖）" 0 "$R_RC"
   assert_contains "重复 init 提示已存在" "$R_OUT" "已存在"
@@ -130,14 +131,19 @@ s03_status() {
   assert_contains "级自洽验证通过" "$R_OUT" "级自洽验证：通过"
 }
 
-s04_todo_reject() {
-  echo "--- 场景4：TODO 拒投影"
+s04_bootstrap_projection() {
+  echo "--- 场景4：TODO 模板 → bootstrap 引导投影；填槽后自动替换为常载命约"
   local T; T=$(new_case)
   run_cli "$T" init --yes
+  [ -f "$T/AGENTS.md" ] && [ -f "$T/CLAUDE.md" ] && ok "模板态生成 bootstrap 投影" || bad "模板态未生成 bootstrap 投影"
+  assert_contains "含初始引导标记" "$(cat "$T/AGENTS.md")" "初始引导"
+  assert_contains "引导含填槽步骤" "$(cat "$T/AGENTS.md")" "填宪法槽位"
+  assert_contains "引导指向 write-adr 技能" "$(cat "$T/AGENTS.md")" "write-adr"
+  write_constitution_filled "$T"
   run_cli "$T" sync
-  [ "$R_RC" -ne 0 ] && ok "TODO 模板 sync exit 非 0" || bad "TODO 模板 sync 应拒绝"
-  assert_contains "报槽位未填" "$R_OUT" "槽位未填"
-  [ ! -f "$T/AGENTS.md" ] && [ ! -f "$T/CLAUDE.md" ] && ok "无投影文件" || bad "不应生成投影文件"
+  assert_eq "填槽后 sync exit 0" 0 "$R_RC"
+  assert_not_contains "引导已被替换" "$(cat "$T/AGENTS.md")" "初始引导"
+  assert_contains "替换为常载命约" "$(cat "$T/AGENTS.md")" "常载命约"
 }
 
 s05_sync_idempotent() {
@@ -157,14 +163,17 @@ s05_sync_idempotent() {
 
 s06_ai_surface_off() {
   echo "--- 场景6：ai-surface off 跳投影（含 Off 大小写，F8）"
+  # 注意次序：init 会投影（模板态投 bootstrap），故先清掉投影文件再置 off 验 sync 拦截
   local T T2; T=$(new_case); T2=$(new_case)
   run_cli "$T" init --yes; write_constitution_filled "$T"
+  rm -f "$T/AGENTS.md" "$T/CLAUDE.md"
   printf 'ai-surface: off\n' >> "$T/.meta/meta.yaml"
   run_cli "$T" sync
   assert_eq "ai-surface: off → sync exit 0" 0 "$R_RC"
   [ ! -f "$T/AGENTS.md" ] && [ ! -f "$T/CLAUDE.md" ] && ok "off 不投影" || bad "off 仍投影"
   assert_contains "提示 off 跳投影" "$R_OUT" "ai-surface: off"
   run_cli "$T2" init --yes; write_constitution_filled "$T2"
+  rm -f "$T2/AGENTS.md" "$T2/CLAUDE.md"
   printf 'ai-surface: Off\n' >> "$T2/.meta/meta.yaml"
   run_cli "$T2" sync
   assert_eq "ai-surface: Off → sync exit 0" 0 "$R_RC"
@@ -533,7 +542,7 @@ s20_installer() {
 s01_help
 s02_init
 s03_status
-s04_todo_reject
+s04_bootstrap_projection
 s05_sync_idempotent
 s06_ai_surface_off
 s07_retire

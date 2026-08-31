@@ -70,7 +70,7 @@ ponygo init      # 新项目：在仓库根生成 .meta/ 治理骨架 + meta.yam
 ponygo audit     # 旧项目改造（或随时体检）：按自适应审计打分，输出缺口与最小改进动作；有治理根时内嵌级自洽验证，判据不符 exit 1
 ponygo status    # 查看当前成熟度级（L0-L6）与骨架完整性，并对声明级（L0-L2）判据逐项机械验证，不符即非零退出
 ponygo upgrade   # 跟随框架升级：把本仓库新版 ponygo 的命令面/判据同步进已有治理根
-ponygo sync      # 把 constitution 投影到根 AGENTS.md / CLAUDE.md（生成物，勿手编）
+ponygo sync      # 把 constitution 投影到根 AGENTS.md / CLAUDE.md（生成物，勿手编；槽位未填的模板态投影初始引导 bootstrap）
 ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|off>
 ```
 
@@ -86,7 +86,8 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
 .meta/
 ├── meta.yaml                  # 合法键仅两个：level（成熟度级，整数 0-6，如 level: 2）与 ai-surface；版本由 git 派生，组件清单由目录存在性充当
 ├── constitution/              # 宪法：语义规范（"什么是好的"），供投影到 AGENTS.md / CLAUDE.md
-│   └── constitution.md
+│   └── constitution.md        #    模板态（槽位未填）时 sync 投影初始引导 bootstrap：AI agent 进场即有指引，
+│                              #    由 agent 完成填槽/重投影/首篇 ADR；填槽后重跑 sync，引导自动被常载命约替换
 ├── decisions/                 # 决策记录（ADR）：路径即标签，文件夹即 lifecycle × class
 │   ├── proposed/
 │   ├── implemented/

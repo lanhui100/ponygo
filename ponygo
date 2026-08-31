@@ -7,7 +7,7 @@
 #   ponygo audit    [--level S|M] [--dry-run]  自适应体检：打分 + 缺口 + 最小改进动作（有治理根时内嵌级自洽验证，判据不符 exit 1）
 #   ponygo status                         查看成熟度级与骨架完整度（骨架缺口或声明级判据不符 exit 1）
 #   ponygo upgrade                        跟随框架升级指引（首版不实际合并，见 -h）
-#   ponygo sync                           把 constitution 投影到根 AGENTS.md / CLAUDE.md
+#   ponygo sync                           把 constitution 投影到根 AGENTS.md / CLAUDE.md（模板态投影初始引导）
 #
 # 设计约束：判定优先只读；破坏性动作前必须确认（或 --yes）。
 #           非零退出（non-zero exit）语义：凡机器可查的缺口，命令 exit 1。
@@ -350,12 +350,31 @@ PONYGO_EOF
 3. 删除代码前先搜消费者；恢复条件立法，拒绝"以后可能用得上"式怀旧。
 
 ## 停止线
-槽位未填时本文件为模板态，不投影。成熟度目标（meta.yaml level）是硬上限，达到前不抢跑下一档。
+槽位未填时本文件为模板态：sync 投影的是**引导内容（bootstrap）**而非命约——指引 AI agent 完成填槽与首篇决策；槽位填妥重跑 sync 后引导自动被命约替换。成熟度目标（meta.yaml level）是硬上限，达到前不抢跑下一档。
 EOF
   fi
 }
 
 # ---------- 投影同步（constitution → AGENTS.md / CLAUDE.md） ----------
+# 初始引导（bootstrap）：宪法槽位未填（模板态）时投影的临时内容。
+# 受众是进入仓库的 AI coding agent——进场即有治理指引，由 agent 自己完成填槽、
+# 重投影、写第一篇 ADR；槽位填妥后重跑 sync，标记区整体替换为常载命约，引导自动消失。
+bootstrap_body() {
+cat <<'PONYGO_EOF'
+> ⚠️ 本节是 **ponygo 初始引导（bootstrap）**：`.meta/constitution/constitution.md` 槽位未填期间的临时投影。槽位填妥并重跑 `ponygo sync` 后，本节自动被常载命约整体替换——无需手删，也不要手编本标记区。
+
+你是进入本仓库的 AI coding agent。本项目采用 ponygo 工程化治理（治理根 `.meta/`）。**在开始任何业务任务之前，先一次性完成治理引导**：
+
+1. **填宪法槽位**：读 `.meta/constitution/constitution.md`，替换全部 `【TODO: …】`——项目名（取仓库名）、一句话定位（读 README/源码推断，不确定就给草案并原地注明"草案，待人确认"）、技术栈（从 manifest 推断：package.json / go.mod / pyproject.toml / Cargo.toml 等）、成熟度目标（默认填 `2`）。Mission 节的 level TODO 填同一值。
+2. **重投影**：运行 `ponygo sync`——本引导自动被常载命约替换。
+3. **第一篇决策**：照 `.meta/skills/write-adr/SKILL.md` 落第一条 ADR（建议主题 `adopt-ponygo-governance`，class: `process`），并把 `.meta/meta.yaml` 的 `level` 改为 `1`。
+4. **自证**：运行 `ponygo status`——L1 判据必须全绿（exit 1 即未达标，按逐项提示修）。
+5. **日常**：每次非平凡变更按 write-adr 技能判触发写 ADR；随时 `ponygo audit` 体检。升级路径见 `.meta/` 各目录 README（L2 门禁 → `gates/README.md`，L3 文档分层 → `docs-tier/README.md`，L4 技能 → `skills/README.md`）。
+
+若用户明确表示本项目不需要治理（一次性原型 / 纯实验），运行 `ponygo retire --level off` 并录一条 decision 说明。
+PONYGO_EOF
+}
+
 do_sync() {
   # AI 适配开关：meta.yaml 里 ai-surface: off 时，不生成 AGENTS.md / CLAUDE.md（禁 AI 团队整体退场）
   if grep -qiE '^ai-surface:[[:space:]]*off' "$META_YAML" 2>/dev/null; then
@@ -363,22 +382,26 @@ do_sync() {
     return 0
   fi
   [ -f "$CONSTITUTION" ] || die "无 $CONSTITUTION，无法投影"
-  # 守卫：对整个 constitution 文件判 TODO（不能只判截断后的 body——槽位在「## 常载命约」之前）
-  if grep -q 'TODO:' "$CONSTITUTION"; then
-    die "constitution 槽位未填（仍含 TODO），模板态不投影。请先填槽位再 'ponygo sync'。"
-  fi
   local begin='<!-- BEGIN constitution -->'
   local end='<!-- END constitution -->'
-  # 抽取投影体：优先 <!-- sync-body --> 锚点（语言无关，EXTERNAL-001 P1-3）；
-  # 无锚点回退中文「## 常载命约」标题（兼容旧模板）。槽位表与头部 H1 均被跳过。
   local body
-  if grep -q '<!-- sync-body -->' "$CONSTITUTION"; then
-    body=$(awk 'BEGIN{ok=0} /<!-- sync-body -->/{ok=1; next} ok' "$CONSTITUTION")
+  # 对整个 constitution 文件判 TODO（不能只判截断后的 body——槽位在「## 常载命约」之前）：
+  # 模板态不再拒绝投影，而是投影初始引导（bootstrap）——AI agent 进场即有指引（见
+  # revisions/accepted/2026-08-31-bootstrap-projection.md）。
+  if grep -q 'TODO:' "$CONSTITUTION"; then
+    body=$(bootstrap_body)
+    info "宪法槽位未填（模板态）：投影初始引导（bootstrap）。槽位填妥后重跑 'ponygo sync' 自动替换为常载命约。"
   else
-    body=$(awk 'BEGIN{ok=0} /^## 常载命约/{ok=1} ok' "$CONSTITUTION")
-  fi
-  if [ -z "${body//[[:space:]]/}" ]; then
-    die "constitution 缺投影体锚点（<!-- sync-body --> 或「## 常载命约」节），无法投影"
+    # 抽取投影体：优先 <!-- sync-body --> 锚点（语言无关，EXTERNAL-001 P1-3）；
+    # 无锚点回退中文「## 常载命约」标题（兼容旧模板）。槽位表与头部 H1 均被跳过。
+    if grep -q '<!-- sync-body -->' "$CONSTITUTION"; then
+      body=$(awk 'BEGIN{ok=0} /<!-- sync-body -->/{ok=1; next} ok' "$CONSTITUTION")
+    else
+      body=$(awk 'BEGIN{ok=0} /^## 常载命约/{ok=1} ok' "$CONSTITUTION")
+    fi
+    if [ -z "${body//[[:space:]]/}" ]; then
+      die "constitution 缺投影体锚点（<!-- sync-body --> 或「## 常载命约」节），无法投影"
+    fi
   fi
   for target in AGENTS.md CLAUDE.md; do
     if [ -f "$target" ]; then
@@ -599,12 +622,8 @@ cmd_init() {
     write_skeleton 0
   fi
 
-  # 铺完骨架后，若宪法模板槽位未填，则不投影（模板态不投影）
-  if grep -q 'TODO:' "$CONSTITUTION" 2>/dev/null; then
-    info "宪法模板含未填槽位，跳过投影。填好宪法后再 'ponygo sync'。"
-  else
-    confirm_or_skip "把 constitution 投影到根 AGENTS.md / CLAUDE.md" && do_sync
-  fi
+  # 铺完骨架后始终投影：模板态投初始引导（bootstrap），已填槽投常载命约
+  confirm_or_skip "把 constitution 投影到根 AGENTS.md / CLAUDE.md（模板态投影初始引导）" && do_sync
   info "完成。当前 level=$(read_level)。下一步：ponygo status 查看骨架完整度。"
 }
 
@@ -849,7 +868,7 @@ ponygo —— 项目工程化治理元框架命令行（单文件、零依赖）
   ponygo audit    [--level S|M]          自适应体检：打分 + 缺口 + 最小改进动作（判据不符 exit 1）
   ponygo status                          查看成熟度级与骨架完整度（骨架缺口或声明级判据不符 exit 1）
   ponygo upgrade                         跟随框架升级指引（首版不实际合并）
-  ponygo sync                            把 constitution 投影到 AGENTS.md / CLAUDE.md
+  ponygo sync                            把 constitution 投影到 AGENTS.md / CLAUDE.md（模板态投影初始引导）
   ponygo retire   --level <N|off>        退级 / 整体退场（停止线执行器）
 
 选项：
