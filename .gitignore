@@ -1,0 +1,9 @@
+# ponygo 最小 .gitignore（栈无关）
+# OS/编辑器噪声：
+.DS_Store
+Thumbs.db
+*~
+# 构建产物/依赖目录按栈补充，例如：
+# target/         # Rust
+# node_modules/   # Node
+# __pycache__/    # Python

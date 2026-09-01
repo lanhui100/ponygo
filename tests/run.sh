@@ -135,6 +135,7 @@ s02_init() {
   done
   [ -d "$T/.agents/skills" ] && ok ".agents/skills 存在" || bad ".agents/skills 缺失"
   grep -qF '/.agents/notes/archived/' "$T/.rgignore" && ok ".rgignore 归档隔离" || bad ".rgignore 缺归档隔离"
+  [ -f "$T/.gitignore" ] && ok ".gitignore 生成" || bad ".gitignore 缺失"
   [ -f "$T/.meta/meta.yaml" ] && ok "meta.yaml 存在" || bad "meta.yaml 缺失"
   grep -q '^level: 0' "$T/.meta/meta.yaml" && ok "level: 0" || bad "level 字段异常"
   [ -f "$T/.agents/notes/README.md" ] && ok "decisions/README.md 生成" || bad "decisions/README.md 缺失"
@@ -416,7 +417,9 @@ s13_meta_violations() {
   run_cli "$T" status
   assert_contains "缩进 level: 行告警" "$R_OUT" "WARN"
 
+  # 注意：非 git 场景会触发卫生 WARN（s22），本例在 git 仓库内隔离出 meta 键 WARN 单变量
   T=$(new_case); run_cli "$T" init --yes
+  ( cd "$T" && git init -q ) >/dev/null 2>&1
   printf '# comment\r\n\r\nlevel: 0\r\n' > "$T/.meta/meta.yaml"
   run_cli "$T" status
   assert_not_contains "CRLF meta.yaml 不假 WARN" "$R_OUT" "WARN"
@@ -654,8 +657,39 @@ EOF
   assert_contains "仅 .meta 仍 S 档" "$R_OUT" "审计深度：S 档"
 }
 
+s22_hygiene_warn() {
+  echo "--- 场景22：治理卫生 WARN（非 git / 游离计划 / 缺 .gitignore；exit 不变）"
+  local T
+  # 非 git 仓库 WARN + bootstrap 第 0 步与自证线
+  T=$(new_case); run_cli "$T" init --yes
+  run_cli "$T" status
+  assert_eq "非 git status 仍 exit 0" 0 "$R_RC"
+  assert_contains "WARN 非 git 仓库" "$R_OUT" "不在 git 仓库"
+  grep -q 'git init' "$T/AGENTS.md" && ok "bootstrap 含第 0 步 git init" || bad "bootstrap 缺 git init"
+  grep -q '无 FAIL 且无 WARN' "$T/AGENTS.md" && ok "bootstrap 自证线含无 WARN" || bad "bootstrap 自证线未升级"
+  # 游离计划文档 WARN（git 仓库内，与上一条 WARN 隔离）
+  T=$(new_case); run_cli "$T" init --yes
+  ( cd "$T" && git init -q ) >/dev/null 2>&1
+  printf '# plan\n' > "$T/IMPLEMENTATION_PLAN.md"
+  run_cli "$T" status
+  assert_eq "游离计划 status 仍 exit 0" 0 "$R_RC"
+  assert_contains "WARN 游离计划文档" "$R_OUT" "游离计划文档"
+  # git 仓库无 .gitignore WARN（init 已生成，删掉再测）
+  T=$(new_case); run_cli "$T" init --yes
+  ( cd "$T" && git init -q ) >/dev/null 2>&1
+  rm -f "$T/.gitignore"
+  run_cli "$T" status
+  assert_contains "WARN 缺 .gitignore" "$R_OUT" "无 .gitignore"
+  # 干净场景无卫生 WARN
+  T=$(new_case); run_cli "$T" init --yes
+  ( cd "$T" && git init -q ) >/dev/null 2>&1
+  run_cli "$T" status
+  assert_not_contains "干净场景无卫生 WARN" "$R_OUT" "WARN"
+}
+
 s20_installer
 s21_external001_regress
+s22_hygiene_warn
 
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="

@@ -118,6 +118,11 @@ write_skeleton() {
     printf '/.agents/notes/archived/\n' > .rgignore
   fi
 
+  # 最小 .gitignore（栈无关；构建产物按栈自行补充；已存在则不覆盖）
+  if [ ! -f .gitignore ]; then
+    printf '# ponygo 最小 .gitignore（栈无关）\n# OS/编辑器噪声：\n.DS_Store\nThumbs.db\n*~\n# 构建产物/依赖目录按栈补充，例如：\n# target/         # Rust\n# node_modules/   # Node\n# __pycache__/    # Python\n' > .gitignore
+  fi
+
   # notes/README.md：缺失时生成与模板仓库 eol 归一后逐字节一致的全量版（内容源收敛为本 heredoc 常量）
   if [ ! -f "$DECISIONS_DIR/README.md" ]; then
     cat > "$DECISIONS_DIR/README.md" <<'PONYGO_EOF'
@@ -181,6 +186,12 @@ Status: <status>
 非平凡变更 = 命中任一：行为变更 / 架构 / 跨文件或跨包契约 / 流程与工具链 /
 测试策略 / 磁盘-线-配置格式 / 维护者可能再访的决定。
 命中即同一次变更内新增或更新记录。纯机械或局部编辑豁免。
+
+**时序**：先 ADR 后代码（先于或同一提交）；事后补记是债务，不是常态。
+
+**计划文档的家**：实施计划 = `proposed/` note（`## Proposal` + `## Acceptance criteria`）。
+禁止根目录游离 `*plan*.md` / `ROADMAP.md`——计划烂在根目录永远不会被迁移，
+且是 spec-speak 的滋生地（status/audit 对游离计划文件输出 WARN）。
 
 ## 与下一级的关系
 
@@ -289,6 +300,8 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 ## 步骤
 
 1. **判触发**：对照 description 的枚举，命中任一即写。拿不准 → 写（多记成本一段文字，漏记成本永久丢失）。
+   **时序**：决策记录必须**先于对应代码变更、或与代码变更同一提交**——先 ADR 后代码；
+   事后补记是债务，不是常态（时序本身是语义判断、靠 review，用 `git log` 对照 ADR 提交与代码提交校准）。
 2. **选 lifecycle**：`proposed/`（未实现）或 `implemented/`（随本次变更落地）。
 3. **选 class**：`feature`（新能力）/ `bug-fix`（修缺陷）/ `simplification`（减复杂度）/ `architecture`（交付源码的结构）/ `process`（代码周围的工具与流程）/ `testing`（测试策略）。都不够 → 考虑在 `notes/classes.local` 登记领域扩展（扩展即一次治理决策，须评审）。
 4. **建文件**：`.agents/notes/{lifecycle}/{class}/$(date +%F)-<topic-title>.md`，topic 用 kebab-case。
@@ -402,13 +415,14 @@ bootstrap_body() {
 cat <<'PONYGO_EOF'
 > ⚠️ 本节是 **ponygo 初始引导（bootstrap）**：`.meta/constitution/constitution.md` 槽位未填期间的临时投影。槽位填妥并重跑 `ponygo sync` 后，本节自动被常载命约整体替换——无需手删，也不要手编本标记区。
 
-你是进入本仓库的 AI coding agent。本项目采用 ponygo 工程化治理（治理根 `.meta/`）。**在开始任何业务任务之前，先一次性完成治理引导**：
+你是进入本仓库的 AI coding agent。本项目采用 ponygo 工程化治理（治理根 `.meta/` + `.agents/`）。**在开始任何业务任务之前，先一次性完成治理引导**：
 
+0. **建载体**：若不在 git 仓库（`git rev-parse --is-inside-work-tree` 失败），先 `git init` 并提交骨架——版本派生、提交边界、"同一次变更"的锚定、L2 钩子挂载，全部依赖 git；无 git 则治理时序在物理上不可判定。
 1. **填宪法槽位**：读 `.meta/constitution/constitution.md`，替换全部 `【TODO: …】`——项目名（取仓库名）、一句话定位（读 README/源码推断，不确定就给草案并原地注明"草案，待人确认"）、技术栈（从 manifest 推断：package.json / go.mod / pyproject.toml / Cargo.toml 等）、成熟度目标（默认填 `2`）。Mission 节的 level TODO 填同一值。
 2. **重投影**：运行 `ponygo sync`——本引导自动被常载命约替换。
 3. **第一篇决策**：照 `.agents/skills/write-adr/SKILL.md` 落第一条 ADR（建议主题 `adopt-ponygo-governance`，class: `process`），并把 `.meta/meta.yaml` 的 `level` 改为 `1`。
-4. **自证**：运行 `ponygo status`——L1 判据必须全绿（exit 1 即未达标，按逐项提示修）。
-5. **日常**：每次非平凡变更按 write-adr 技能判触发写 ADR；随时 `ponygo audit` 体检。升级路径见各目录 README（L2 门禁 → `.meta/gates/README.md`，L3 文档分层 → `.meta/docs-tier/README.md`，L4 技能 → `.agents/skills/README.md`）。
+4. **自证**：运行 `ponygo status`——**无 FAIL 且无 WARN 才算引导完成**（WARN 指向治理卫生缺口：非 git 仓库 / 根目录游离计划文档 / 缺 .gitignore，逐项按提示修）。
+5. **日常**：每次非平凡变更**先 ADR 后代码**（先于或同一提交，按 write-adr 技能判触发）；随时 `ponygo audit` 体检。升级路径见各目录 README（L2 门禁 → `.meta/gates/README.md`，L3 文档分层 → `.meta/docs-tier/README.md`，L4 技能 → `.agents/skills/README.md`）。
 
 若用户明确表示本项目不需要治理（一次性原型 / 纯实验），运行 `ponygo retire --level off` 并录一条 decision 说明。
 PONYGO_EOF
@@ -462,6 +476,30 @@ do_sync() {
     fi
     info "已投影 → $target"
   done
+}
+
+# ---------- 治理卫生 WARN（status 与 audit 双挂；形状可查、价值靠 review，不改退出码） ----------
+# 三条机械 WARN：非 git 仓库 / 根目录游离计划文档 / git 仓库内无 .gitignore。
+# "先 ADR 后代码"的时序不可机械判（语义，靠 review 用 git log 校准）——机械锁的是时序的可判定性载体。
+warn_governance_hygiene() {
+  # 1. 治理根已建但不在 git 仓库内（版本派生/提交边界/钩子挂载全部悬空）
+  if { [ -d "$META_DIR" ] || [ -d "$AGENTS_RUNTIME_DIR" ]; } && \
+     ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    printf 'ponygo: WARN 治理根已建但不在 git 仓库内——版本派生/提交边界/钩子挂载全部悬空 → git init（bootstrap 第 0 步）\n' >&2
+  fi
+  # 2. 根目录游离计划文档（实施计划的家是 .agents/notes/proposed/）
+  local p
+  for p in *.md; do
+    [ -e "$p" ] || continue
+    case "$p" in
+      plan.md|Plan.md|PLAN.md|plan-*.md|plan_*.md|*-plan.md|*_plan.md|PLAN*.md|Implementation*.md|IMPLEMENTATION*.md|ROADMAP*.md|Roadmap*.md|roadmap*.md)
+        printf 'ponygo: WARN 根目录游离计划文档：%s → 实施计划的家是 .agents/notes/proposed/（## Proposal + ## Acceptance criteria），迁移后删除游离件\n' "$p" >&2 ;;
+    esac
+  done
+  # 3. git 仓库内无 .gitignore
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && [ ! -f .gitignore ]; then
+    printf 'ponygo: WARN git 仓库内无 .gitignore——构建产物/编辑器噪声将裸放进版本库 → 建 .gitignore\n' >&2
+  fi
 }
 
 # ---------- meta.yaml 违例键告警（合法键仅 level / ai-surface；status 与 audit 双挂同一函数） ----------
@@ -799,6 +837,7 @@ cmd_audit() {
   echo "命中 $hit / $total 项"
   info "当前治理级：$(fmt_level "$(read_level)")"
   warn_meta_violations
+  warn_governance_hygiene
   echo ""
   echo "缺口与最小改进动作（按杠杆排序，优先「强制层」）："
   if [ ! -f "$META_YAML" ]; then
@@ -843,6 +882,7 @@ cmd_status() {
   echo "===== ponygo status ====="
   echo "治理级：$(fmt_level "$lv")"
   warn_meta_violations
+  warn_governance_hygiene
   echo ""
   echo "骨架完整度："
   local missing=0

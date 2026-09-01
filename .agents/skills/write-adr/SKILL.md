@@ -14,6 +14,8 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 ## 步骤
 
 1. **判触发**：对照 description 的枚举，命中任一即写。拿不准 → 写（多记成本一段文字，漏记成本永久丢失）。
+   **时序**：决策记录必须**先于对应代码变更、或与代码变更同一提交**——先 ADR 后代码；
+   事后补记是债务，不是常态（时序本身是语义判断、靠 review，用 `git log` 对照 ADR 提交与代码提交校准）。
 2. **选 lifecycle**：`proposed/`（未实现）或 `implemented/`（随本次变更落地）。
 3. **选 class**：`feature`（新能力）/ `bug-fix`（修缺陷）/ `simplification`（减复杂度）/ `architecture`（交付源码的结构）/ `process`（代码周围的工具与流程）/ `testing`（测试策略）。都不够 → 考虑在 `notes/classes.local` 登记领域扩展（扩展即一次治理决策，须评审）。
 4. **建文件**：`.agents/notes/{lifecycle}/{class}/$(date +%F)-<topic-title>.md`，topic 用 kebab-case。
