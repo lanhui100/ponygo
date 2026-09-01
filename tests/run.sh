@@ -141,6 +141,7 @@ s02_init() {
   [ -f "$T/.agents/notes/README.md" ] && ok "decisions/README.md 生成" || bad "decisions/README.md 缺失"
   [ -f "$T/.agents/skills/write-adr/SKILL.md" ] && ok "预置 write-adr 技能" || bad "write-adr 技能缺失"
   grep -q '何时用' "$T/.agents/skills/write-adr/SKILL.md" && ok "write-adr 含触发式 description" || bad "write-adr 缺触发式 description"
+  [ -f "$T/.agents/skills/write-adr/verify-note.sh" ] && ok "verify-note.sh 随骨架生成" || bad "verify-note.sh 缺失"
   [ -f "$T/AGENTS.md" ] && [ -f "$T/CLAUDE.md" ] && ok "模板态投影初始引导（bootstrap）" || bad "模板态未投影初始引导"
   grep -q '初始引导' "$T/AGENTS.md" && ok "投影含 bootstrap 标记" || bad "投影缺 bootstrap 标记"
   run_cli "$T" init --yes
@@ -455,6 +456,12 @@ s14_decisions_readme() {
   else
     bad "生成 write-adr/SKILL.md 与模板不一致"
   fi
+  if diff <(tr -d '\r' < "$T/.agents/skills/write-adr/verify-note.sh") \
+          <(tr -d '\r' < "$ROOT/.agents/skills/write-adr/verify-note.sh") >/dev/null 2>&1; then
+    ok "生成 write-adr/verify-note.sh 与模板 eol 归一后一致"
+  else
+    bad "生成 write-adr/verify-note.sh 与模板不一致"
+  fi
 }
 
 s15_upgrade() {
@@ -687,9 +694,29 @@ s22_hygiene_warn() {
   assert_not_contains "干净场景无卫生 WARN" "$R_OUT" "WARN"
 }
 
+s23_verify_note() {
+  echo "--- 场景23：write-adr/verify-note.sh 机械校验器正反例"
+  local T; T=$(new_case)
+  run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/feature/2026-01-02-x.md"
+  write_proposal_decision "$T" "proposed/architecture/2026-01-02-y.md"
+  ( cd "$T" && bash .agents/skills/write-adr/verify-note.sh >/dev/null 2>&1 )
+  assert_eq "合规树 exit 0" 0 "$?"
+  write_valid_decision "$T" "implemented/feature/badname.md"
+  ( cd "$T" && bash .agents/skills/write-adr/verify-note.sh >/dev/null 2>&1 )
+  assert_eq "坏文件名 exit 1" 1 "$?"
+  write_proposal_decision "$T" "implemented/feature/2026-01-03-z.md"
+  ( cd "$T" && bash .agents/skills/write-adr/verify-note.sh >/dev/null 2>&1 )
+  assert_eq "implemented 含提案标题 exit 1" 1 "$?"
+  ( cd "$T" && bash .agents/skills/write-adr/verify-note.sh .agents/notes/implemented/feature/2026-01-03-z.md >/dev/null 2>&1 )
+  assert_eq "指定单文件也能抓违例 exit 1" 1 "$?"
+}
+
 s20_installer
 s21_external001_regress
 s22_hygiene_warn
+s23_verify_note
 
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="

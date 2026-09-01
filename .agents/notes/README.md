@@ -61,6 +61,9 @@ Status: <status>
 
 **时序**：先 ADR 后代码（先于或同一提交）；事后补记是债务，不是常态。
 
+**多类拆条**：一次变更命中多个类别（如"采纳治理 + 架构设计"）→ **拆多条记录，
+不合并**——混装会把未实施的方案伪装成已落地（状态轴失真），并污染 class 轴的检索面。
+
 **计划文档的家**：实施计划 = `proposed/` note（`## Proposal` + `## Acceptance criteria`）。
 禁止根目录游离 `*plan*.md` / `ROADMAP.md`——计划烂在根目录永远不会被迁移，
 且是 spec-speak 的滋生地（status/audit 对游离计划文件输出 WARN）。

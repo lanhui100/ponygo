@@ -189,6 +189,9 @@ Status: <status>
 
 **时序**：先 ADR 后代码（先于或同一提交）；事后补记是债务，不是常态。
 
+**多类拆条**：一次变更命中多个类别（如"采纳治理 + 架构设计"）→ **拆多条记录，
+不合并**——混装会把未实施的方案伪装成已落地（状态轴失真），并污染 class 轴的检索面。
+
 **计划文档的家**：实施计划 = `proposed/` note（`## Proposal` + `## Acceptance criteria`）。
 禁止根目录游离 `*plan*.md` / `ROADMAP.md`——计划烂在根目录永远不会被迁移，
 且是 spec-speak 的滋生地（status/audit 对游离计划文件输出 WARN）。
@@ -324,11 +327,121 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 - 反例（豁免）：格式化重排、重命名局部变量 → 无行为/契约/结构/流程变化，不写。
 - 边界（靠 review）：重构归哪个 class？判别器是"可观察行为是否改变"——改变 → feature/bug-fix；只为减复杂度 → simplification（`refactor` 刻意缺席，与之重叠）。
 - 反例（时态错位，判据 1.8）：proposed/ 下用现在时 `## Decision` → 未批准的提案伪装成已落地的决定；proposed 必须用 `## Proposal`，迁移到 implemented 时再改写为现在时。
+- 反例（混合 ADR）：把"治理已采纳"（implemented/process）与"架构尚在设计中、零代码"（proposed/architecture）写进同一条 implemented note → 状态轴失真（未实施伪装成已落地）+ class 污染；**多类拆条**（notes/README 触发规则）：已落地的记 implemented，未实施的记 proposed。
 
 ## 验证与报告
 
-- 跑 `ponygo status`：决策数应 +1，L1 判据 1.2–1.7 全绿（路径两级、文件名日期、Status 与目录一致）。
-- 报告格式：新记录路径 + lifecycle/class + 一句话 Problem。
+- 跑 **`bash .agents/skills/write-adr/verify-note.sh`**（无参 = 整树；或跟单个相对路径）——机械影子 1.1–1.8 全部通过（路径两轴/文件名/日期/Status/骨架标题），exit 0 才算完成；FAIL 项逐条修复重跑。
+- 再跑 `ponygo status`：决策数 +1、L1 判据全绿、无卫生 WARN。
+- 报告格式：新记录路径 + lifecycle/class + 一句话 Problem + verify-note.sh 的通过输出。
+PONYGO_EOF
+  fi
+
+  # skills/write-adr/verify-note.sh：write-adr 的机械验证器（对应 verify_ladder 1.1–1.8；
+  # 影子来自 DSH verify-agent-note-format/classification）。缺失时生成与模板仓库逐字节一致版本。
+  if [ ! -f "$SKILLS_DIR/write-adr/verify-note.sh" ]; then
+    cat > "$SKILLS_DIR/write-adr/verify-note.sh" <<'PONYGO_EOF'
+#!/usr/bin/env bash
+# ============================================================
+# verify-note.sh —— 决策记录机械校验器（write-adr 技能的验证脚本）
+#
+# 用法：bash .agents/skills/write-adr/verify-note.sh [<notes 相对路径>…]
+#   无参     = 校验整个 .agents/notes/ 树（推荐；等价 ponygo status 的 L1 判据）
+#   带路径   = 只校验给定文件（如 .agents/notes/proposed/architecture/xxx.md）
+#
+# 退出码：全部通过 exit 0；任一违例 exit 1（逐项打印 FAIL）。
+# 对应判据：ponygo verify_ladder 1.1–1.8（maturity-ladder §5），
+# 影子来自 DSH verify-agent-note-format / verify-agent-note-classification。
+#
+# 语义边界（P6 诚实条款）：本脚本只锁**机械可查的影子**——路径两轴、文件名、
+# 日期合法性、Status 与目录一致、骨架标题与 lifecycle 匹配。
+# 不判"implemented 内容是否真的已落地"（真实性）与"多类是否该拆条"
+# （分类）——这两者是语义判断，靠 review + write-adr 校准样例。
+# ============================================================
+set -u
+
+NOTES_DIR=".agents/notes"
+LIFECYCLES="proposed implemented rejected archived"
+CLASSES="feature bug-fix simplification architecture process testing"
+FAIL=0
+fail() { printf 'FAIL  %s\n' "$*" >&2; FAIL=1; }
+
+[ -d "$NOTES_DIR" ] || { echo "verify-note: 无 $NOTES_DIR（先 ponygo init）" >&2; exit 1; }
+
+# 实例扩展 class（classes.local，与 CLI extra_classes 同构）
+extra_classes() {
+  [ -f "$NOTES_DIR/classes.local" ] || return 0
+  sed 's/\r$//' "$NOTES_DIR/classes.local" | grep -vE '^[[:space:]]*(#|$)' | grep -E '^[a-z0-9][a-z0-9-]*$'
+}
+
+# 1.3 顶层目录 ⊆ 四态封闭集
+while IFS= read -r d; do
+  case " $LIFECYCLES " in *" $d "*) ;; *) fail "1.3 顶层目录越界：$d" ;; esac
+done < <(find "$NOTES_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null)
+
+# 1.4 二级目录 ⊆ 六类封闭集 ∪ classes.local
+classes_all=" $CLASSES $(extra_classes | tr '\n' ' ') "
+while IFS= read -r d; do
+  case "$classes_all" in *" $d "*) ;; *) fail "1.4 class 越界：$d" ;; esac
+done < <(find "$NOTES_DIR" -mindepth 2 -maxdepth 2 -type d -printf '%f\n' 2>/dev/null)
+
+# DATE_OK：GNU date 可用才机械判日期，否则降级"靠 review"（与 CLI 同款诚实条款）
+DATE_OK=0
+date -d @0 '+%Y' >/dev/null 2>&1 && DATE_OK=1
+
+check_one() { # $1 = 决策文件路径
+  local f="$1" b rel lc slashes st d8
+  b="${f##*/}"
+  [ "$b" = "README.md" ] && return 0
+  rel="${f#"$NOTES_DIR"/}"
+  [ "$rel" = "$f" ] && rel="$f"
+  lc="${rel%%/*}"
+  # 1.5 深度：恰好 {lifecycle}/{class}/ 两级
+  slashes="${rel//[!\/]/}"
+  [ "${#slashes}" -eq 2 ] || { fail "1.5 $f：未恰好位于 {lifecycle}/{class}/ 两级"; return 0; }
+  # 1.6 文件名 + 日期合法性
+  if ! printf '%s\n' "$b" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}-.+\.md$'; then
+    fail "1.6 $f：文件名不符 yyyy-mm-dd-topic.md"
+    return 0
+  fi
+  if [ "$DATE_OK" = "1" ]; then
+    d8="${b:0:10}"
+    date -d "$d8" >/dev/null 2>&1 || fail "1.6 $f：日期不合法（$d8）"
+  fi
+  # 1.7 Status 首词与所在 lifecycle 一致（archived 允许 implemented/archived）
+  st=$(sed -n 's/\r$//;s/^Status:[[:space:]]*//p' "$f" 2>/dev/null | head -n1 | awk '{print $1}')
+  if [ -z "$st" ]; then
+    fail "1.7 $f：缺 Status: 行"
+  elif [ "$lc" = "archived" ]; then
+    [ "$st" = "implemented" ] || [ "$st" = "archived" ] || fail "1.7 $f：archived 下 Status 应为 implemented/archived，实得 $st"
+  elif [ "$st" != "$lc" ]; then
+    fail "1.7 $f：Status($st) 与目录($lc) 不一致"
+  fi
+  # 1.8 骨架标题与 lifecycle 匹配
+  case "$lc" in
+    implemented)
+      grep -qE '^## (Proposal|Plan|Migration plan|Acceptance criteria)([[:space:]]|$)' "$f" \
+        && fail "1.8 $f：implemented 含提案时代标题（## Proposal/## Plan/## Migration plan/## Acceptance criteria）" ;;
+    proposed|rejected)
+      grep -qE '^## Proposal([[:space:]]|$)' "$f" || fail "1.8 $f：$lc 缺 ## Proposal"
+      grep -qE '^## Decision([[:space:]]|$)' "$f" && fail "1.8 $f：$lc 含现在时 ## Decision（提案伪装成决定）" ;;
+  esac
+  return 0
+}
+
+if [ $# -gt 0 ]; then
+  for f in "$@"; do check_one "$f"; done
+else
+  while IFS= read -r -d '' f; do check_one "$f"; done \
+    < <(find "$NOTES_DIR" -type f -name '*.md' -print0 2>/dev/null)
+fi
+
+if [ "$FAIL" = "0" ]; then
+  echo "verify-note: 全部通过（机械影子 1.1–1.8；真实性/分类靠 review）"
+  exit 0
+fi
+echo "verify-note: 未通过（见上方 FAIL 项；逐项修复后重跑）" >&2
+exit 1
 PONYGO_EOF
   fi
 

@@ -38,8 +38,10 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 - 反例（豁免）：格式化重排、重命名局部变量 → 无行为/契约/结构/流程变化，不写。
 - 边界（靠 review）：重构归哪个 class？判别器是"可观察行为是否改变"——改变 → feature/bug-fix；只为减复杂度 → simplification（`refactor` 刻意缺席，与之重叠）。
 - 反例（时态错位，判据 1.8）：proposed/ 下用现在时 `## Decision` → 未批准的提案伪装成已落地的决定；proposed 必须用 `## Proposal`，迁移到 implemented 时再改写为现在时。
+- 反例（混合 ADR）：把"治理已采纳"（implemented/process）与"架构尚在设计中、零代码"（proposed/architecture）写进同一条 implemented note → 状态轴失真（未实施伪装成已落地）+ class 污染；**多类拆条**（notes/README 触发规则）：已落地的记 implemented，未实施的记 proposed。
 
 ## 验证与报告
 
-- 跑 `ponygo status`：决策数应 +1，L1 判据 1.2–1.7 全绿（路径两级、文件名日期、Status 与目录一致）。
-- 报告格式：新记录路径 + lifecycle/class + 一句话 Problem。
+- 跑 **`bash .agents/skills/write-adr/verify-note.sh`**（无参 = 整树；或跟单个相对路径）——机械影子 1.1–1.8 全部通过（路径两轴/文件名/日期/Status/骨架标题），exit 0 才算完成；FAIL 项逐条修复重跑。
+- 再跑 `ponygo status`：决策数 +1、L1 判据全绿、无卫生 WARN。
+- 报告格式：新记录路径 + lifecycle/class + 一句话 Problem + verify-note.sh 的通过输出。
