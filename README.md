@@ -92,9 +92,11 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
 │   ├── implemented/
 │   ├── rejected/
 │   └── archived/              # .rgignore 隔离：防陈旧事实挤掉当前搜索结果
-└── skills/                    # 流程资产：高频+高判断力流程的可复用技能（预置 write-adr，其余按 Rule of three 生长）
+└── skills/                    # 流程资产：高频+高判断力流程的可复用技能（预置 write-adr 自动路由 +
+                                #   governance-review 用户点名调用，其余按 Rule of three 生长）
     ├── README.md              #    SKILL.md 五要素契约
-    └── write-adr/SKILL.md     #    框架交付的唯一预置技能
+    ├── write-adr/SKILL.md     #    框架交付的自动路由技能（写 ADR）
+    └── governance-review/SKILL.md  # 框架交付的用户点名技能（全面治理审查）
 .meta/
 ├── meta.yaml                  # 合法键仅两个：level（成熟度级，整数 0-6，如 level: 2）与 ai-surface；版本由 git 派生，组件清单由目录存在性充当
 ├── constitution/              # 宪法：语义规范（"什么是好的"），供投影到 AGENTS.md / CLAUDE.md

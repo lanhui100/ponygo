@@ -142,6 +142,8 @@ s02_init() {
   [ -f "$T/.agents/skills/write-adr/SKILL.md" ] && ok "预置 write-adr 技能" || bad "write-adr 技能缺失"
   grep -q '何时用' "$T/.agents/skills/write-adr/SKILL.md" && ok "write-adr 含触发式 description" || bad "write-adr 缺触发式 description"
   [ -f "$T/.agents/skills/write-adr/verify-note.sh" ] && ok "verify-note.sh 随骨架生成" || bad "verify-note.sh 缺失"
+  [ -f "$T/.agents/skills/governance-review/SKILL.md" ] && ok "governance-review 预置" || bad "governance-review 缺失"
+  grep -q 'disable-model-invocation: true' "$T/.agents/skills/governance-review/SKILL.md" && ok "governance-review 禁自主路由" || bad "governance-review 未禁自主路由"
   [ -f "$T/AGENTS.md" ] && [ -f "$T/CLAUDE.md" ] && ok "模板态投影初始引导（bootstrap）" || bad "模板态未投影初始引导"
   grep -q '初始引导' "$T/AGENTS.md" && ok "投影含 bootstrap 标记" || bad "投影缺 bootstrap 标记"
   run_cli "$T" init --yes
@@ -461,6 +463,12 @@ s14_decisions_readme() {
     ok "生成 write-adr/verify-note.sh 与模板 eol 归一后一致"
   else
     bad "生成 write-adr/verify-note.sh 与模板不一致"
+  fi
+  if diff <(tr -d '\r' < "$T/.agents/skills/governance-review/SKILL.md") \
+          <(tr -d '\r' < "$ROOT/.agents/skills/governance-review/SKILL.md") >/dev/null 2>&1; then
+    ok "生成 governance-review/SKILL.md 与模板 eol 归一后一致"
+  else
+    bad "生成 governance-review/SKILL.md 与模板不一致"
   fi
 }
 

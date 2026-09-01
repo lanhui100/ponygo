@@ -4,11 +4,16 @@
 就把它从"口传 / 现写"资产化为这里的一篇 `SKILL.md`；当技能失去真实消费者（对应流程
 不再发生），删掉它——删除是一次决策，需录 `.agents/notes/`。
 
-**为什么首版只有 write-adr**：流程资产化是 L4 的产物，依赖"已经有重复发生的流程"
-这一事实；首版不预置通用技能（空技能是被永久引用的死重）。唯一例外是 `write-adr/`：
-写决策记录是 L1 判据强制的高频流程，消费者由框架自身创造，第一次重复就值得资产化
-（Rule of three 对它天然满足）。它是**框架交付物，不计入** L4"实例已长出流程资产"
-的证据——L4 仍要求你的项目按 Rule of three 自己长出第一个 skill。
+**为什么首版只有 write-adr 与 governance-review**：流程资产化是 L4 的产物，依赖
+"已经有重复发生的流程"这一事实；首版不预置通用技能（空技能是被永久引用的死重）。
+两个框架交付技能各有豁免理由：
+- `write-adr/`：写决策记录是 L1 判据强制的高频流程，消费者由框架自身创造，
+  自动路由成立（Rule of three 天然满足）；
+- `governance-review/`：治理审查是重型 review 流程，**用户点名调用**而非自动路由
+  （`disable-model-invocation: true`，dsh-translate-docs 范式）——不满足 Rule of three，
+  但它是框架对"用户随时想做治理体检"这一刚需的入口封装。
+两者都是**框架交付物，不计入** L4"实例已长出流程资产"的证据——L4 仍要求你的项目
+按 Rule of three 自己长出第一个 skill。
 
 > **「原理」引用的出处**：本文及实例骨架中的 methodology 引用，均指向 ponygo 框架仓库的
 > `docs/methodology.md`：<https://github.com/lanhui100/ponygo/blob/main/docs/methodology.md>。
