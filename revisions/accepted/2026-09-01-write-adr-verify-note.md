@@ -37,3 +37,17 @@ ponyllm 试点：agent 把"采纳治理"（真实已落地）与"架构设计"�
   指定单文件抓违例 exit 1；s02 断言脚本随骨架生成。
 - 存量实例（如 ponyllm）：技能目录缺 verify-note.sh 属 init 前特性，重 init 或
   从框架仓库复制即可获得。
+
+## 设计快照补充（2026-09-01 复核问答留存）
+
+**为何 .sh 而非 .ts/.py**：bash 与 CLI 同源（单文件、零依赖铁律，
+`2026-08-30-single-file-zero-dependency-cli.md`）。ponygo 是栈无关元框架，
+实例可能是任意语言栈——只要装了 ponygo，bash 必然存在；TS/Python 脚本会要求
+实例自带 Node/Python 工具链，把门禁变成实例的进入税。DSH 用 TS 因其本身是
+Node monorepo，工具链现成——两种定位的正确分岔，已写入 verify-note.sh 头注。
+
+**为何一个脚本而非 dsh 的 format/classification 两个**：dsh 拆两个 gate 是服务
+其门禁矩阵的粒度（分开挂钩子/CI、独立负样本 spec）；ponygo 的判据真源合一
+（maturity-ladder §5 一张表，CLI 的 verify_ladder 本就合在同一个函数），且
+verify-note.sh 的消费者是 write-adr 的"写一条验证一次"自证步——单出口优于
+双出口。未来实例升 L2 建门禁矩阵时再按 format/classification 拆分，YAGNI。

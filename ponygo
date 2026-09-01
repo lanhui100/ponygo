@@ -353,10 +353,24 @@ PONYGO_EOF
 # 对应判据：ponygo verify_ladder 1.1–1.8（maturity-ladder §5），
 # 影子来自 DSH verify-agent-note-format / verify-agent-note-classification。
 #
+# 设计快照（为何是 bash、为何一个脚本）：
+# - 语言：bash 与 ponygo CLI 同源（单文件、零依赖铁律，见 notes/
+#   implemented/architecture/2026-08-30-single-file-zero-dependency-cli.md）。
+#   ponygo 是栈无关元框架，实例可能是任意语言——只有 bash 是装了 ponygo 就
+#   保证存在的运行时。DSH 用 TS 是因为其本身就是 Node monorepo，工具链现成；
+#   两种定位的正确分岔，非能力差异。
+# - 合并一脚本：DSH 拆 format/classification 两个 gate 是服务其门禁矩阵的粒度
+#   （分开挂钩子/CI、独立 spec）；ponygo 的真源合一（maturity-ladder §5 一张表），
+#   且本脚本的消费者是 write-adr 的"写一条验证一次"自证步——单出口优于双出口。
+#   未来实例升 L2 建门禁矩阵时再拆分，YAGNI。
+#
 # 语义边界（P6 诚实条款）：本脚本只锁**机械可查的影子**——路径两轴、文件名、
 # 日期合法性、Status 与目录一致、骨架标题与 lifecycle 匹配。
 # 不判"implemented 内容是否真的已落地"（真实性）与"多类是否该拆条"
 # （分类）——这两者是语义判断，靠 review + write-adr 校准样例。
+#
+# 对齐契约：本脚本与 CLI 的 verify_ladder 1.1–1.8 逐项对齐；若发现行为不一致，
+# 以 maturity-ladder §5 判据真源为准并回改两者。
 # ============================================================
 set -u
 
