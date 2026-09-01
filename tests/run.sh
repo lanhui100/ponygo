@@ -470,6 +470,13 @@ s14_decisions_readme() {
   else
     bad "生成 governance-review/SKILL.md 与模板不一致"
   fi
+  if diff <(tr -d '\r' < "$T/.meta/gates/README.md") \
+          <(tr -d '\r' < "$ROOT/.meta/gates/README.md") >/dev/null 2>&1; then
+    ok "生成 gates/README 与模板 eol 归一后一致（含 P7 时间经济三层）"
+  else
+    bad "生成 gates/README 与模板不一致"
+  fi
+  grep -q 'pre-commit' "$T/.meta/gates/README.md" && ok "gates 模板含 P7 分层" || bad "gates 模板缺 P7 分层"
 }
 
 s15_upgrade() {
@@ -721,10 +728,38 @@ s23_verify_note() {
   assert_eq "指定单文件也能抓违例 exit 1" 1 "$?"
 }
 
+s24_gate_layers() {
+  echo "--- 场景24：门禁分层报告（P7 时间经济性：pre-commit/pre-push/CI）"
+  local T G; G=$(sanitize_git)
+  # 零门禁：audit 应报三层全无 + 缺层引导
+  T=$(new_case); run_cli "$T" init --yes
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G audit --level S
+  assert_contains "audit 含门禁分层参考" "$R_OUT" "门禁分层参考"
+  assert_contains "本地层 pre-commit 无" "$R_OUT" "本地层 pre-commit（秒级）：无"
+  assert_contains "中继层 pre-push 无" "$R_OUT" "中继层 pre-push（10秒级）：无"
+  assert_contains "远端层 CI 无" "$R_OUT" "远端层 CI（分钟级）：无"
+  assert_contains "缺本地层引导" "$R_OUT" "缺本地层"
+  # 三层齐备：audit 应报三层全有、无缺层引导
+  T=$(new_case); run_cli "$T" init --yes
+  ( cd "$T" && mkdir -p .githooks .github/workflows \
+      && printf '#!/usr/bin/env bash\necho fmt\n' > .githooks/pre-commit \
+      && printf '#!/usr/bin/env bash\necho typecheck\n' > .githooks/pre-push \
+      && printf 'name: ci\n' > .github/workflows/ci.yml \
+      && git init -q && git config core.hooksPath .githooks ) >/dev/null 2>&1
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G audit --level S
+  assert_contains "本地层 pre-commit 有" "$R_OUT" "本地层 pre-commit（秒级）：有"
+  assert_contains "中继层 pre-push 有" "$R_OUT" "中继层 pre-push（10秒级）：有"
+  assert_contains "远端层 CI 有" "$R_OUT" "远端层 CI（分钟级）：有"
+  assert_not_contains "三层齐备无缺层引导" "$R_OUT" "缺本地层"
+}
+
 s20_installer
 s21_external001_regress
 s22_hygiene_warn
 s23_verify_note
+s24_gate_layers
 
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="

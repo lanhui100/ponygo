@@ -207,10 +207,32 @@ PONYGO_EOF
     printf '# ponygo 治理根状态文件（唯一真值源：level）\n# 版本由 git 派生；组件清单由 .meta/ + .agents/ 目录存在性充当；演进由 git + .agents/notes/ 的 ADR 充当。\n\nlevel: %s\n' "$lvl" > "$META_YAML"
   fi
 
-  # 空目录占位说明（只在目录为空时写入 README，避免覆盖用户已有内容）
-  [ ! -s "$META_DIR/gates/README.md" ] 2>/dev/null && \
-    [ -z "$(ls -A "$META_DIR/gates" 2>/dev/null)" ] && \
-    printf '# gates/ —— 门禁（把承诺转成非零退出命令）\n\n首版（L2 及以下）此目录为空。升到 L2 时放你的第一个门禁，并同步 meta.yaml 的 level 改为 2。\n' > "$META_DIR/gates/README.md"
+  # gates/README.md：缺失时生成与模板仓库 eol 归一后逐字节一致的全量版（内容源收敛为本 heredoc 常量）
+  if [ ! -s "$META_DIR/gates/README.md" ] 2>/dev/null && [ -z "$(ls -A "$META_DIR/gates" 2>/dev/null)" ]; then
+    cat > "$META_DIR/gates/README.md" <<'PONYGO_EOF'
+# gates/ —— 门禁（把承诺转成非零退出命令）
+
+**首版（L2 及以下）此目录为空。** 升到 L2 时放你的第一个门禁，并同步 meta.yaml 的 level 改为 2。
+
+## 门禁分层的三个时间经济层（P7，dsh 实证）
+
+| 层 | 触发时机 | 时间预算 | 该抓什么（示例） |
+|---|---|---|---|
+| 本地层 | pre-commit | 秒级 | 格式（fmt --check）、空白、快速 lint 子集、暂存内容检查 |
+| 中继层 | pre-push | 10 秒级 | typecheck、全量 lint——推送前的次级过滤 |
+| 远端层 | CI | 分钟级 | 全仓质量矩阵、构建、测试、聚合门（防 skipped 计为通过） |
+
+**核心原则**：每层只抓该层性价比最高的缺陷；本地窄、CI 全，两层跑同样检查 = 白付延迟（P7）。
+分层是「值不值」的价值判断（P6）——小项目只上 CI 也合法，别为分层而分层。
+
+## 每个门禁的落地形态
+
+- 脚本放本目录（`<name>.sh` 或等价），必须**非零退出 = 拒绝**语义；
+- 配一个负样本 spec（`*.spec.*`，构造非法样例证明门会拒绝）；
+- 挂载：`git config core.hooksPath .githooks` + 在 .githooks/ 放 pre-commit / pre-push；
+- 每门一条"承诺 → 命令"的对应（凡机械可查的承诺必配命令，P2）。
+PONYGO_EOF
+  fi
 
   # skills/README.md：缺失时生成与模板仓库 eol 归一后逐字节一致的全量版（内容源收敛为本 heredoc 常量）
   if [ ! -f "$SKILLS_DIR/README.md" ]; then
@@ -717,6 +739,41 @@ warn_governance_hygiene() {
   fi
 }
 
+# ---------- 门禁分层报告（P7 分层强制原理操作化；audit 调用，报告性非硬判据） ----------
+# dsh 实证：pre-commit（秒级）→ pre-push（10秒级）→ CI（分钟级）三层各抓各的；
+# 本地窄、CI 全，两层跑同样检查 = 白付延迟。时间经济性是"值不值"（P6），只报告不 FAIL。
+gate_layers_report() {
+  local local_layer=0 med_layer=0 remote_layer=0
+  local hp="" cf="" f
+  # 远端层（分钟级 CI）：跨平台探测
+  for cf in .github/workflows .gitlab-ci.yml bitbucket-pipelines.yml azure-pipelines.yml .drone.yml Jenkinsfile ci; do
+    [ -e "$cf" ] && remote_layer=1 && break
+  done
+  # 本地层（秒级 pre-commit）：hooksPath 非空钩子 / lefthook / pre-commit / husky
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    hp=$(git config core.hooksPath 2>/dev/null)
+  fi
+  if { [ -n "$hp" ] && [ -d "$hp" ] && [ -n "$(ls -A "$hp" 2>/dev/null)" ]; } || \
+     [ -e lefthook.yml ] || [ -e .pre-commit-config.yaml ] || [ -e .husky ]; then
+    local_layer=1
+  fi
+  # 中继层（10秒级 pre-push）：hooksPath 下有 pre-push / lefthook 声明 pre-push
+  if { [ -n "$hp" ] && [ -f "$hp/pre-push" ]; } || \
+     { [ -e lefthook.yml ] && grep -q 'pre-push' lefthook.yml; }; then
+    med_layer=1
+  fi
+  echo ""
+  echo "===== 门禁分层参考（P7 时间经济性，dsh 实证） ====="
+  printf '  本地层 pre-commit（秒级）：%s\n' "$([ "$local_layer" = "1" ] && echo 有 || echo 无)"
+  printf '  中继层 pre-push（10秒级）：%s\n' "$([ "$med_layer" = "1" ] && echo 有 || echo 无)"
+  printf '  远端层 CI（分钟级）：%s\n' "$([ "$remote_layer" = "1" ] && echo 有 || echo 无)"
+  echo "  每层只抓该层性价比最高的缺陷：本地窄、CI 全，两层跑同样检查 = 白付延迟（P7）。"
+  [ "$local_layer" = "0" ] && echo "  → 缺本地层：建议补秒级 pre-commit（格式/空白/快速 lint 子集），让高频问题提交时就拦住，而非等 CI 跑分钟级。"
+  [ "$med_layer" = "0" ] && echo "  → 缺中继层：按需补 10 秒级 pre-push（如 typecheck/全量 lint），作为推送前的次级过滤。"
+  [ "$remote_layer" = "0" ] && echo "  → 缺远端层：建议加最小 CI（聚合门），守住跨提交的全仓质量矩阵。"
+  echo "  注：分层是「值不值」的价值判断（P6）——小项目只上 CI 也合法；本表仅机械探测形状、供 review 参考。"
+}
+
 # ---------- meta.yaml 违例键告警（合法键仅 level / ai-surface；status 与 audit 双挂同一函数） ----------
 warn_meta_violations() {
   [ -f "$META_YAML" ] || return 0
@@ -1077,6 +1134,8 @@ cmd_audit() {
     echo "爬满 L6 不构成任何监管合规背书（FDA、ISO 13485/26262、SOC2、PIPL 等），"
     echo "不替代贵组织的质控与审计流程——合规评判请交由合规流程（P6）。"
   fi
+  # ---- 门禁分层报告（P7 时间经济性；报告性，非硬判据） ----
+  gate_layers_report
   # ---- 级自洽验证（EXTERNAL-001 P1-1：audit 不再把判据推给 status，直接内嵌）----
   # 有治理根且声明了 level 时，audit 顺手验级：判据不符 → 列 FAIL 项并 exit 1
   # （机器可查缺口 = 非零退出；audit 的"打分"语义不变，只是不再漏掉判据级结论）。
