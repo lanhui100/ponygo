@@ -45,7 +45,7 @@ curl -fsSL https://raw.githubusercontent.com/lanhui100/ponygo/main/install.sh | 
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/lanhui100/ponygo/main/install.sh | \
-  PONYGO_VERSION=v1.1.0 PONYGO_SHA256=<公布的校验和> bash
+  PONYGO_VERSION=v2.0.0 PONYGO_SHA256=<公布的校验和> bash
 ```
 
 **方式 B：源码目录一键安装（clone 本仓库后）**
@@ -114,19 +114,18 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
   - `class ∈ {feature, bug-fix, simplification, architecture, process, testing}`（领域扩展：`notes/classes.local` 每行追加一个 class，见 `.agents/notes/README.md`）
 - 文件夹即标签：lifecycle/class 编码进路径，文件内容里无需重复声明，二者永不漂移。
 
-### 4.2 成熟度阶梯（L0–L6）
+### 4.2 成熟度阶梯（L0–L5，v2.0：文档治理前置）
 
 | 级 | 名称 | 判据类型 |
 |---|---|---|
-| L0 | 播种 | 真判据（机械可判） |
-| L1 | 决策入册 | 真判据（机械可判） |
-| L2 | 承诺可验 | 真判据（机械可判） |
-| L3 | 文档分层 | 目标画像（靠 review） |
-| L4 | 流程资产 | 目标画像（靠 review） |
-| L5 | 负空间 | 目标画像（靠 review） |
-| L6 | 领域定制 | 目标画像（靠 review） |
+| L0 | 播种 + 最小文档家 | 真判据（机械可判） |
+| L1 | 决策入册 + 文档有家 | 真判据（机械可判） |
+| L2 | 承诺可验 + 文档分层 | 真判据（机械可判，分层激活形状） |
+| L3 | 流程资产 | 目标画像（靠 review） |
+| L4 | 负空间 | 目标画像（靠 review） |
+| L5 | 领域定制 | 目标画像（靠 review） |
 
-> L0–L2 的判据以 `maturity-ladder.md` §5 的真值表为准，`ponygo status` 已对声明级（L0-L2）的判据逐项机械验证（v1.1 起），判据不符时非零退出。L3–L6 是"目标画像"，靠 review 校准。
+> L0–L2 的判据以 `maturity-ladder.md` §5 的真值表为准，`ponygo status` 已对声明级（L0-L2）的判据逐项机械验证（v1.1 起；v2.0 起文档判据 0.5/1.9/2.5 并入），判据不符时非零退出。L3–L5 是"目标画像"，靠 review 校准。
 
 ### 4.3 自适应审计（首版两档）
 

@@ -144,6 +144,8 @@ s02_init() {
   [ -f "$T/.agents/skills/write-adr/verify-note.sh" ] && ok "verify-note.sh 随骨架生成" || bad "verify-note.sh 缺失"
   [ -f "$T/.agents/skills/governance-review/SKILL.md" ] && ok "governance-review 预置" || bad "governance-review 缺失"
   grep -q 'disable-model-invocation: true' "$T/.agents/skills/governance-review/SKILL.md" && ok "governance-review 禁自主路由" || bad "governance-review 未禁自主路由"
+  [ -f "$T/docs/AGENTS.md" ] && ok "文档标准家 docs/AGENTS.md 生成（agent 自动加载）" || bad "docs/AGENTS.md 缺失"
+  [ -f "$T/README.md" ] && ok "根 README 人读契约生成" || bad "根 README 缺失"
   [ -f "$T/AGENTS.md" ] && [ -f "$T/CLAUDE.md" ] && ok "模板态投影初始引导（bootstrap）" || bad "模板态未投影初始引导"
   grep -q '初始引导' "$T/AGENTS.md" && ok "投影含 bootstrap 标记" || bad "投影缺 bootstrap 标记"
   run_cli "$T" init --yes
@@ -371,6 +373,41 @@ s11_l1_criteria() {
   run_cli "$T" status
   assert_eq "1.8 implemented 含提案时代标题 → exit 1" 1 "$R_RC"
   assert_contains "报 1.8" "$R_OUT" "1.8"
+
+  # 1.9 文档有家（v2.0）：删掉 docs/AGENTS.md → FAIL；根 AGENTS.md 断链 → FAIL
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/feature/2026-01-02-x.md"
+  rm -f "$T/docs/AGENTS.md"
+  run_cli "$T" status
+  assert_eq "缺 docs/AGENTS.md → exit 1" 1 "$R_RC"
+  assert_contains "报 1.9" "$R_OUT" "1.9"
+
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/feature/2026-01-02-x.md"
+  sed -i 's/docs\/AGENTS\.md//g' "$T/AGENTS.md"
+  run_cli "$T" status
+  assert_eq "根 AGENTS.md 断链（无 docs/AGENTS.md 引用）→ exit 1" 1 "$R_RC"
+  assert_contains "报 1.9" "$R_OUT" "1.9"
+
+  # 1.9c 包文档缺失：packages/ 下子目录无 AGENTS.md/README.md → FAIL；豁免清单可免
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/feature/2026-01-02-x.md"
+  mkdir -p "$T/packages/mod-a" "$T/packages/mod-b"
+  run_cli "$T" status
+  assert_eq "包文档缺失 → exit 1" 1 "$R_RC"
+  assert_contains "报 1.9" "$R_OUT" "1.9"
+
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/feature/2026-01-02-x.md"
+  mkdir -p "$T/packages/mod-a" "$T/packages/mod-b"
+  printf '# mod-a\n' > "$T/packages/mod-a/README.md"
+  printf '# mod-b\n' > "$T/packages/mod-b/AGENTS.md"
+  run_cli "$T" status
+  assert_eq "包文档齐全 → exit 0" 0 "$R_RC"
 }
 
 s12_l2_criteria() {
@@ -384,8 +421,10 @@ s12_l2_criteria() {
       && mkdir -p .githooks && printf '#!/usr/bin/env bash\necho hook\n' > .githooks/pre-commit ) >/dev/null 2>&1
   printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
   printf 'purpose: negative sample spec\n' > "$T/.meta/gates/format.spec.md"
+  # 2.5 文档分层激活：把 docs-tier/README.md 从模板态推进为已激活清单态
+  printf '## 已激活文档家清单\n' >> "$T/.meta/docs-tier/README.md"
   run_cli "$T" status
-  assert_eq "门禁+spec+钩子齐 → exit 0" 0 "$R_RC"
+  assert_eq "门禁+spec+钩子+文档分层齐 → exit 0" 0 "$R_RC"
   assert_contains "L0-L2 通过" "$R_OUT" "L0-L2"
   assert_contains "2.2 标注代理判据" "$R_OUT" "代理判据"
 
@@ -400,6 +439,19 @@ s12_l2_criteria() {
   run_cli_env "$T" $(sanitize_git) status
   assert_eq "缺钩子（非 git 目录 + 消毒）→ exit 1" 1 "$R_RC"
   assert_contains "报 2.4" "$R_OUT" "2.4"
+
+  # 2.5 文档分层未激活 → FAIL（L2 判据新增）
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
+  printf 'level: 2\n' > "$T/.meta/meta.yaml"
+  ( cd "$T" && git init -q && git config core.hooksPath .githooks \
+      && mkdir -p .githooks && printf '#!/usr/bin/env bash\necho hook\n' > .githooks/pre-commit ) >/dev/null 2>&1
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
+  printf 'x\n' > "$T/.meta/gates/format.spec.md"
+  run_cli "$T" status
+  assert_eq "docs-tier 模板态（未激活）→ exit 1" 1 "$R_RC"
+  assert_contains "报 2.5" "$R_OUT" "2.5"
 }
 
 s13_meta_violations() {
@@ -755,11 +807,37 @@ s24_gate_layers() {
   assert_not_contains "三层齐备无缺层引导" "$R_OUT" "缺本地层"
 }
 
+s25_doc_home_audit() {
+  echo "--- 场景25：v2.0 文档有家——audit 对既有项目（旧项目接入）检测文档家缺失（0.5/1.9/2.5 双保证）"
+  local T G; G=$(sanitize_git)
+  # 旧项目接入：init 后声明 L1 但删掉 docs/AGENTS.md → audit exit 1 并报 0.5/1.9
+  T=$(new_case); run_cli "$T" init --yes
+  ( cd "$T" && git init -q ) >/dev/null 2>&1
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/process/2026-01-02-adopt-governance.md"
+  rm -f "$T/docs/AGENTS.md"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G audit --level S
+  assert_eq "audit 检测缺 docs/AGENTS.md → exit 1" 1 "$R_RC"
+  assert_contains "audit 报 0.5" "$R_OUT" "0.5"
+  assert_contains "audit 报 1.9" "$R_OUT" "1.9"
+
+  # 文档家齐全（init 生成）→ audit exit 0
+  T=$(new_case); run_cli "$T" init --yes
+  ( cd "$T" && git init -q ) >/dev/null 2>&1
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/process/2026-01-02-adopt-governance.md"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G audit --level S
+  assert_eq "文档家齐全 audit exit 0" 0 "$R_RC"
+}
+
 s20_installer
 s21_external001_regress
 s22_hygiene_warn
 s23_verify_note
 s24_gate_layers
+s25_doc_home_audit
 
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="

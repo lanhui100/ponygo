@@ -30,8 +30,9 @@ CONSTITUTION="$META_DIR/constitution/constitution.md"
 LIFECYCLES="proposed implemented rejected archived"
 CLASSES="feature bug-fix simplification architecture process testing"
 
-# 成熟的阶梯六级（L3-L6 为"靠 review"的目标画像，机械判定只见 L0-L2）
-LEVELS="L0[播种] L1[决策入册] L2[承诺可验] L3[文档分层] L4[流程资产] L5[负空间] L6[领域定制]"
+# 成熟的阶梯六级（v2.0：文档治理前置——L1 文档有家判据、L2 文档分层激活；L3-L5 为"靠 review"的目标画像）
+# 原 L3[文档分层] 并入 L2，原 L4-L6 顺延为 L3-L5（见 revisions/accepted/2026-09-02-doc-governance-frontloaded-to-l0-l1.md）
+LEVELS="L0[播种] L1[决策入册+文档有家] L2[承诺可验+文档分层] L3[流程资产] L4[负空间] L5[领域定制]"
 
 # ---------- 工具函数 ----------
 die() { printf 'ponygo: %s\n' "$*" >&2; exit 1; }
@@ -45,7 +46,7 @@ count_decisions() {
   find "$DECISIONS_DIR" -type f -name '*.md' ! -name 'README.md' ! -name '*.zh.md' 2>/dev/null | wc -l | tr -d ' '
 }
 
-# 实例扩展 class（L6 领域定制的开放口）：notes/classes.local 每行一个额外 class 名
+# 实例扩展 class（L5 领域定制的开放口）：notes/classes.local 每行一个额外 class 名
 # （小写字母/数字/连字符；# 起注释与空行忽略）。封闭集本身不放开，扩展必须显式落盘成文件——
 # 扩展是一次治理决策，留有可审计的载体，而非随手 mkdir。
 extra_classes() {
@@ -151,7 +152,7 @@ notes/{lifecycle}/{class}/yyyy-mm-dd-topic-title.md
   - class 目录由**写入时创建**，不预建空目录——空目录既不承载事实、又制造"有决策"的假象。
   - **lifecycle 四态目录由 `ponygo init` 预建**（`proposed/ implemented/ rejected/ archived/`）：
     状态轴的空态是合法的——它代表治理根已播种；而 class 是类别轴，空目录不承载事实，故不预建。
-  - **领域扩展（L6 开放口）**：六类不够用（领域定制的第一个诉求常是加一个 class）时，
+  - **领域扩展（L5 开放口）**：六类不够用（领域定制的第一个诉求常是加一个 class）时，
     在本目录放 `classes.local`，每行一个额外 class 名（小写字母/数字/连字符；`#` 起注释）。
     封闭集本身不放开——扩展必须显式落盘成文件，留有可审计的载体，而非随手 mkdir。
 
@@ -207,6 +208,77 @@ PONYGO_EOF
     printf '# ponygo 治理根状态文件（唯一真值源：level）\n# 版本由 git 派生；组件清单由 .meta/ + .agents/ 目录存在性充当；演进由 git + .agents/notes/ 的 ADR 充当。\n\nlevel: %s\n' "$lvl" > "$META_YAML"
   fi
 
+  # 最小文档家播种（v2.0：文档治理前置到 L0/L1，判据 0.5/1.9）——家载体分工：
+  #   AGENTS.md = agent 自动加载的治理规则（docs/AGENTS.md 是文档标准的家）
+  #   README    = 人读契约（根 README + 各包 README），agent 不主动读不进上下文
+  # 原则：不覆盖既有文件（init 常注入已有代码仓库），只在缺失时生成占位。
+  mkdir -p docs
+  if [ ! -f "docs/AGENTS.md" ]; then
+    cat > "docs/AGENTS.md" <<'PONYGO_EOF'
+# docs/AGENTS.md —— 文档标准（每个事实一个家）
+
+> 本文是文档体系的**家索引**：tier 分类法、写作规则、slop checklist 的真相源。
+> 文档治理规则的家载体是 **AGENTS.md**（agent 处理 docs/ 子树时自动并入上下文）；
+> **README** 给人读（根 README + 各包 README 承载 config/semantics/limitations），
+> agent 不主动读不进上下文——两者分工，不混用（原理：methodology §5.1，实证 dsh）。
+
+## Tier 分类法（升 L2 时把"已激活"的家在此标出，并把下方「家」列填实）
+
+| tier | Job（该承载） | 不承载 | 本项目家（待填 / 已激活标「✓」） |
+|---|---|---|---|
+| 根 AGENTS.md | 常载 standing orders（每次会话必载，1-3 行每条，链到 home） | 故事/示例/复述 | `AGENTS.md` ✓（sync 投影） |
+| 文档标准 | tier 分类 / 写作规则 / slop checklist | 具体文档正文 | `docs/AGENTS.md` ✓（本文件） |
+| 架构地图 | 有序地图：组合、核心模块、接缝、扩展点 | 类型细节/决策理由/状态标注 | 待填 |
+| 决策记录 | 活动决策（当前态现在时） | 迁移计划/验收清单 | `.agents/notes/` ✓ |
+| 包/模块契约 | 单模块配置/语义/限制/扩展点 | 逐行注释复述 | 各包 README（待补） |
+| how-to | 带编号验证步的操作指引 | 设计理由（→ 决策记录） | 待填 |
+| 事故复盘 | 事故年表、证据、因果链、预防 | 教学叙事 | 待填 |
+| 用户文档 | 产品面向指南 | 贡献流程/决策史 | 待填 |
+
+**放置速查**：bug→事故复盘；理由→决策记录；过程→how-to；契约→包 README；
+standing orders→根 AGENTS.md + 理由链。
+
+## 写作规则
+
+- **当前状态，不写变更历史**：durable prose 禁 "previously/now/no longer"、禁 PR/提交/栈位；
+  变更故事进 commit/PR/决策记录/postmortem；
+- **文档与代码同提交**：改行为/契约/配置的那次提交必须同步更新对应文档的家
+  （dsh same-commit 规则）；纯机械/局部编辑豁免；
+- 注释与 JSDoc 陈述**完整契约**（行为/失败/时序/归属/模态/例外/后果），删叙事/走查/复述。
+
+## Slop checklist（审计清单）
+
+- 同一条规则出现在多个家（grep 特色短语，留一个家链其余）；
+- 叙述历史/战争故事（previously/now/no longer/renamed/PRs/commits）；
+- 实现状态标注（"implemented!"/"future:"——状态会腐烂，布局与 manifest 携带它）；
+- 手抄目录/JSDoc/测试包状态清单（源码或生成器是权威）；
+- 段落墙、强调通胀（bold 到处都是 = 没有强调）。
+
+## 词数预算（doc-sync 门，L2 选装）
+
+超大文档（如 >1000 词）应拆到它的家或压缩；具体上限在 L2 doc-sync 门落地。
+PONYGO_EOF
+  fi
+
+  # 根 README.md：人读层契约（不覆盖既有 README；缺失时生成占位 + 文档家索引链）
+  if [ ! -f "README.md" ]; then
+    cat > "README.md" <<'PONYGO_EOF'
+# <项目名>
+
+> 一句话定位（TODO：替换为项目的一句话描述）。
+
+## 文档家（每个事实一个家）
+
+- 文档标准 / tier 分类 / 写作规则：`docs/AGENTS.md`（agent 自动加载）
+- 决策记录（ADR）：`.agents/notes/`
+- 本 README：人读契约（config / semantics / limitations）
+
+## 快速开始
+
+（TODO：安装 / 用法 / 示例）
+PONYGO_EOF
+  fi
+
   # gates/README.md：缺失时生成与模板仓库 eol 归一后逐字节一致的全量版（内容源收敛为本 heredoc 常量）
   if [ ! -s "$META_DIR/gates/README.md" ] 2>/dev/null && [ -z "$(ls -A "$META_DIR/gates" 2>/dev/null)" ]; then
     cat > "$META_DIR/gates/README.md" <<'PONYGO_EOF'
@@ -243,7 +315,7 @@ PONYGO_EOF
 就把它从"口传 / 现写"资产化为这里的一篇 `SKILL.md`；当技能失去真实消费者（对应流程
 不再发生），删掉它——删除是一次决策，需录 `.agents/notes/`。
 
-**为什么首版只有 write-adr 与 governance-review**：流程资产化是 L4 的产物，依赖
+**为什么首版只有 write-adr 与 governance-review**：流程资产化是 L3 的产物，依赖
 "已经有重复发生的流程"这一事实；首版不预置通用技能（空技能是被永久引用的死重）。
 两个框架交付技能各有豁免理由：
 - `write-adr/`：写决策记录是 L1 判据强制的高频流程，消费者由框架自身创造，
@@ -251,7 +323,7 @@ PONYGO_EOF
 - `governance-review/`：治理审查是重型 review 流程，**用户点名调用**而非自动路由
   （`disable-model-invocation: true`，dsh-translate-docs 范式）——不满足 Rule of three，
   但它是框架对"用户随时想做治理体检"这一刚需的入口封装。
-两者都是**框架交付物，不计入** L4"实例已长出流程资产"的证据——L4 仍要求你的项目
+两者都是**框架交付物，不计入** L3"实例已长出流程资产"的证据——L3 仍要求你的项目
 按 Rule of three 自己长出第一个 skill。
 
 > **「原理」引用的出处**：本文及实例骨架中的 methodology 引用，均指向 ponygo 框架仓库的
@@ -358,13 +430,13 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 
 ## 验证与报告
 
-- 跑 **`bash .agents/skills/write-adr/verify-note.sh`**（无参 = 整树；或跟单个相对路径）——机械影子 1.1–1.8 全部通过（路径两轴/文件名/日期/Status/骨架标题），exit 0 才算完成；FAIL 项逐条修复重跑。
+- 跑 **`bash .agents/skills/write-adr/verify-note.sh`**（无参 = 整树；或跟单个相对路径）——机械影子 1.1–1.8（路径两轴/文件名/日期/Status/骨架标题）+ 整树 1.9（文档有家：docs/AGENTS.md 存在）全部通过，exit 0 才算完成；FAIL 项逐条修复重跑。
 - 再跑 `ponygo status`：决策数 +1、L1 判据全绿、无卫生 WARN。
 - 报告格式：新记录路径 + lifecycle/class + 一句话 Problem + verify-note.sh 的通过输出。
 PONYGO_EOF
   fi
 
-  # skills/write-adr/verify-note.sh：write-adr 的机械验证器（对应 verify_ladder 1.1–1.8；
+  # skills/write-adr/verify-note.sh：write-adr 的机械验证器（对应 verify_ladder 1.1–1.9；
   # 影子来自 DSH verify-agent-note-format/classification）。缺失时生成与模板仓库逐字节一致版本。
   if [ ! -f "$SKILLS_DIR/write-adr/verify-note.sh" ]; then
     cat > "$SKILLS_DIR/write-adr/verify-note.sh" <<'PONYGO_EOF'
@@ -377,7 +449,7 @@ PONYGO_EOF
 #   带路径   = 只校验给定文件（如 .agents/notes/proposed/architecture/xxx.md）
 #
 # 退出码：全部通过 exit 0；任一违例 exit 1（逐项打印 FAIL）。
-# 对应判据：ponygo verify_ladder 1.1–1.8（maturity-ladder §5），
+# 对应判据：ponygo verify_ladder 1.1–1.9（maturity-ladder §5），
 # 影子来自 DSH verify-agent-note-format / verify-agent-note-classification。
 #
 # 设计快照（为何是 bash、为何一个脚本）：
@@ -396,7 +468,7 @@ PONYGO_EOF
 # 不判"implemented 内容是否真的已落地"（真实性）与"多类是否该拆条"
 # （分类）——这两者是语义判断，靠 review + write-adr 校准样例。
 #
-# 对齐契约：本脚本与 CLI 的 verify_ladder 1.1–1.8 逐项对齐；若发现行为不一致，
+# 对齐契约：本脚本与 CLI 的 verify_ladder 1.1–1.9 逐项对齐；若发现行为不一致，
 # 以 maturity-ladder §5 判据真源为准并回改两者。
 # ============================================================
 set -u
@@ -475,10 +547,13 @@ if [ $# -gt 0 ]; then
 else
   while IFS= read -r -d '' f; do check_one "$f"; done \
     < <(find "$NOTES_DIR" -type f -name '*.md' -print0 2>/dev/null)
+  # 1.9 文档有家（v2.0，整树模式才判）：docs/AGENTS.md 是文档标准的家（agent 自动加载）。
+  # 与 1.1-1.8 同属 L1 判据；docs/AGENTS.md 由 ponygo init 骨架播种。
+  [ -f "docs/AGENTS.md" ] || fail "1.9 缺文档标准家 docs/AGENTS.md（agent 自动加载）→ 补 docs/AGENTS.md（tier 分类 + 写作规则 + slop checklist）"
 fi
 
 if [ "$FAIL" = "0" ]; then
-  echo "verify-note: 全部通过（机械影子 1.1–1.8；真实性/分类靠 review）"
+  echo "verify-note: 全部通过（机械影子 1.1–1.9；真实性/分类靠 review）"
   exit 0
 fi
 echo "verify-note: 未通过（见上方 FAIL 项；逐项修复后重跑）" >&2
@@ -508,13 +583,14 @@ disable-model-invocation: true
 - `.agents/notes/README.md` —— 决策契约：双轴路径 / 格式 / 时序 / 多类拆条 / 计划文档的家
 - `.agents/skills/write-adr/SKILL.md` + `verify-note.sh` —— 写 ADR 的程序与机械校验
 - `.meta/constitution/constitution.md` + 根 `AGENTS.md` 投影体 —— 命约 / 停止线
-- `.meta/` 与 `.agents/` 各目录 README —— L2/L3/L4 升级契约
+- `docs/AGENTS.md` —— 文档标准的家（tier 分类 / 写作规则 / slop checklist，agent 自动加载）
+- `.meta/` 与 `.agents/` 各目录 README —— L1/L2/L3 升级契约
 
 ## 本审查不覆盖（显性边界，报告中必须复述）
 
 以下维度本技能**不查**，报告末尾须原文复述本节，防止"治理体检"结论被高估：
 
-- **文档分层漂移（L3）**：tier 放置 / slop / 同一事实多个家——卫生面只管游离文件与 ignore 有效性，tier 语义不查；
+- **文档分层漂移全量（L2 doc-sync 门）**：tier 放置语义 / slop 清单逐项 / 词数预算——本技能查"家是否存在且自动加载"（0.5/1.9/2.5），不查"内容是否放对家"（doc-sync 门，靠 review）；
 - **methodology 界外项**：供应链安全（audit/SBOM/许可证）、可观测性（遥测/告警/oncall）、发布与版本治理、开发环境可复现、API 契约演进治理——这些不在 ponygo 门禁语料内，需另行专项；
 - **语义真实性终审**：本技能对语义判断只列疑点 + 附原文，结论归用户（P6 形意分离）。
 
@@ -536,15 +612,20 @@ disable-model-invocation: true
 2. **逐面审查**：
    - **结构面（机械）**：骨架完整？status/audit/verify-note 全绿？WARN 有哪些（尤其游离计划文档 / 非 git / 缺 .gitignore）？
    - **决策面（语义 + 机械）**：每条 ADR 的 Status/class 与内容真实一致吗（implemented 是否真落地、proposed 是否未实施）？时序符合"先 ADR 后代码/同提交"吗（git log 对照）？有多类混装吗？Alternatives 是真实候选而非凑数吗？
+   - **文档面（v2.0，机械 + 语义）**：文档体系是否真正生效——
+     - 家载体对吗？`docs/AGENTS.md` 存在且是文档标准的家（agent 自动加载）？根 `AGENTS.md` 链到它了？（判据 0.5/1.9）
+     - 包文档有家吗？每个包目录有 `AGENTS.md` 或 `README.md`，或入豁免清单？（判据 1.9c）
+     - **文档与代码同提交吗？**（dsh same-commit 规则）`git log` 对照：改行为/契约的提交是否带了对应文档更新？文档家是不是空壳（有文件无内容/无索引）？
+     - 分层激活了吗？`.meta/docs-tier/README.md` 是模板态还是已激活清单？（判据 2.5）
    - **卫生面**：游离计划文档？.gitignore/.rgignore 有效性？构建产物入版本库？
    - **负空间面（语义 + 初筛机械）**：语料是否开始腐烂——
      - 初筛：`find .agents/notes/implemented -name '*.md' -mtime +180`（半年未动的 implemented note 清单，仅作候选，不作结论）；
      - supersession 检查：近 90 天新增的决策是否覆盖了旧决策却未处理旧条（`git log --since='90 days ago' --name-only .agents/notes/` 对照）；
      - `.rgignore` 是否含 `/.agents/notes/archived/` 隔离（`grep -qF '/.agents/notes/archived/' .rgignore`）；
      - 哪些候选该归档/保留是语义判断（判据：理由与负面保证是否还指导未来工作），标"靠 review"。
-   - **流程资产面（元审查）**：`.agents/skills/` 自身也要被审——每个技能的触发式 description 与实况一致吗？校准样例还锚得住当前判据吗？技能还有真实消费者吗（无消费者 + 无恢复计划 = 退场候选，按 L4 退场条件记录）？
-   - **升级面**：按 maturity-ladder 判据，到 L2 差哪几条（gates / 负样本 spec / hooksPath）？哪些"承诺"至今没有非零退出命令看守、全凭自觉（这是 L2 的信号清单）？
-   - **盲区声明**：明确列出"判据管不到、全靠自觉"的清单（至少包含负空间面的语义部分）。
+   - **流程资产面（元审查）**：`.agents/skills/` 自身也要被审——每个技能的触发式 description 与实况一致吗？校准样例还锚得住当前判据吗？技能还有真实消费者吗（无消费者 + 无恢复计划 = 退场候选，按 L3 退场条件记录）？
+   - **升级面**：按 maturity-ladder 判据，到 L2 差哪几条（gates / 负样本 spec / hooksPath / 文档分层激活 2.5）？哪些"承诺"至今没有非零退出命令看守、全凭自觉（这是 L2 的信号清单）？
+   - **盲区声明**：明确列出"判据管不到、全靠自觉"的清单（至少包含文档分层语义部分与负空间面的语义部分）。
 
 3. **输出报告**（表格）：
 
@@ -556,9 +637,12 @@ disable-model-invocation: true
 ## 校准样例
 
 - 正例：报告每条问题都附 `git show --stat <sha>`、`ponygo status` 输出、`find` 结果等硬证据；"游离计划文档"类结论直接指向文件名与 WARN 输出；拿不准的标"靠 review 待人工定夺"。
+- 正例（文档面）：`docs/` 目录存在但 `docs/AGENTS.md` 缺失（只有 README）→ 判"家载体选错/缺文档标准家——README 不进 agent 上下文，文档即使写了 agent 也不自动看"（实证：ponyllm 137 行 README 一个装五职责、0 个 docs 文件）。
+- 正例（文档面同提交）：`git log` 显示"改协议转译"提交只动了源码没动文档 → 列出提交 sha 与对应契约文档，标"same-commit 违例"。
 - 正例（负空间面）：`find` 初筛出 12 条半年未动的 implemented note，逐条列出路径 + 最后提交 sha，其中 3 条标"疑似被 <新 note 路径> 覆盖而未归档——靠 review"，不直接判"该归档"。
 - 反例：凭空断言"ADR 时序有问题"却不给 `git log` 对照；把"值不值升 L2"当结论输出（该做的只是列出判据差几条）；把 review 层能判的（真实性）说成"机器已验证"；把 `-mtime +180` 初筛结果直接当"腐烂"结论。
 - 反例（隐性盲区）：报告自称"全面治理审查通过"却未复述「本审查不覆盖」节——缺口不声明等于制造虚假安全感。
+- 反例（文档面）：看到 `docs/` 有 README 就判"文档治理 OK"——README 不进 agent 上下文，必须查 `docs/AGENTS.md`（自动加载的家）是否存在。
 - 边界（靠 review）：某条 ADR 的 Alternatives 是否"真实"——判据管不到，只列出疑点并附原文，让用户定夺。
 
 ## 验证与报告
@@ -572,30 +656,34 @@ PONYGO_EOF
   # docs-tier/README.md：缺失时生成与模板仓库 eol 归一后逐字节一致的全量版（内容源收敛为本 heredoc 常量）
   if [ ! -f "$META_DIR/docs-tier/README.md" ]; then
     cat > "$META_DIR/docs-tier/README.md" <<'PONYGO_EOF'
-# docs-tier/ —— 文档分层（按 tier 分类法给每个事实安一个家）
+# docs-tier/ —— 文档分层契约（按 tier 分类法给每个事实安一个家）
 
-**首版（L3 及以下）此目录只有本文件。** 文档分层是 L3 的产物，依赖"文档已经多到
-需要分层"这一事实——文档量少到读一遍就知道每个事实在哪时，tier 分层是净开销。
+**当前状态：模板态（L2 未激活）。** v2.0 起文档治理前置：`docs/AGENTS.md` 是文档标准的家
+（agent 自动加载），已在 L0 播种；本文件是 **tier 分层的契约**——升到 L2 时把它推进为
+「已激活文档家清单」（判据 2.5 机械检查），填写下方每个 tier 在本项目的家。
 
-升到 L3 时，把下方模板表填成你的 `tier-taxonomy.md`，并补 slop checklist 与词数预算。
+**如何激活（升 L2 时）**：把本文件顶部的『模板态』一词所在标题改为「已激活文档家清单」，
+并把下方表格「本项目家」列的 `【TODO】` 填成真实路径（已由骨架生成的标 `✓`）。
 
 > **「原理」引用的出处**：本文的 methodology 引用指向 ponygo 框架仓库的
 > `docs/methodology.md`：<https://github.com/lanhui100/ponygo/blob/main/docs/methodology.md>。
 > 原理层唯一真相源在框架仓库，实例不复制——复制即漂移。
 
-## tier 分类法模板（解冻 L3 时填写；原理：methodology §5.1）
+## tier 分类法（激活时填写；原理：methodology §5.1）
 
 每一 tier 的「该承载什么 / 不该承载什么」必须写死——只写"放什么文档"的 tier 表会漂移。
+家载体分工：**AGENTS.md**（agent 自动加载的治理规则）与 **README**（人读契约）不混用。
 
-| tier | Job（该承载） | 不承载 | 本项目的家（路径，待填） |
+| tier | Job（该承载） | 不承载 | 本项目家（待填 / 骨架已生成标 ✓） |
 |---|---|---|---|
-| 常载命约 | 每次会话必载的 standing orders，1-3 行每条，链到 home | 故事/示例/复述 | 【TODO，如 根 AGENTS.md】 |
+| 常载命约 | 每次会话必载的 standing orders，1-3 行每条，链到 home | 故事/示例/复述 | `AGENTS.md` ✓（sync 投影） |
+| 文档标准 | tier 分类 / 写作规则 / slop checklist | 具体文档正文 | `docs/AGENTS.md` ✓（init 播种） |
 | 架构地图 | 组合、核心模块、接缝、扩展点（有序地图） | 类型细节/决策理由/状态标注 | 【TODO】 |
-| 决策记录 | 活动决策（当前态现在时） | 迁移计划/验收清单 | `.agents/notes/` |
+| 决策记录 | 活动决策（当前态现在时） | 迁移计划/验收清单 | `.agents/notes/` ✓ |
 | 事故复盘 | 事故年表、证据、因果链、预防 | 教学叙事 | 【TODO，如 docs/postmortem/】 |
 | how-to | 带编号验证步的操作指引 | 设计理由（→ 决策记录） | 【TODO，如 docs/cookbook/】 |
 | 用户文档 | 产品面向指南 | 贡献流程/决策史 | 【TODO】 |
-| 包/模块契约 | 单模块配置/语义/限制/扩展点 | 逐行注释复述 | 【TODO，如各模块 README】 |
+| 包/模块契约 | 单模块配置/语义/限制/扩展点 | 逐行注释复述 | 各包 README（L1 判据 1.9 督促补齐） |
 | 生成参考 | 从源码再生成的参考 + 新鲜度门禁 | 手编生成源 | 【TODO】 |
 
 **放置速查**：bug→事故复盘；理由→决策记录；过程→how-to；契约→模块 README；
@@ -609,7 +697,7 @@ standing orders→常载命约 + 理由链。
 - 手抄目录/逐行注释复述（源码或生成器是权威）；
 - 段落墙、强调通胀（到处都是 bold = 没有强调）。
 
-## 词数预算（L3 选装）
+## 词数预算（doc-sync 门，L2 选装）
 
 standing-doc 设上限，超限按 **relocate → condense → raise** 顺序处理；
 上限是护栏不是压减目标，目标线下保留至少 5% 余量。
@@ -637,6 +725,7 @@ PONYGO_EOF
 1. 任何非平凡变更都要落为 `.agents/notes/` 下一条带 `## Alternatives considered` 的决策记录（程序与校准样例见 `.agents/skills/write-adr/SKILL.md`）。
 2. 凡机械可查的承诺，配一条非零退出的命令；机器到不了的，显式标注"靠 review"。
 3. 删除代码前先搜消费者；恢复条件立法，拒绝"以后可能用得上"式怀旧。
+4. 每个事实一个家：文档治理规则的家是 `docs/AGENTS.md`（agent 自动加载），人读契约是 README——写文档先找它的家，不另起炉灶；改行为/契约的那次提交同步更新对应文档（same-commit，dsh 实证）。
 
 ## 停止线
 槽位未填时本文件为模板态：sync 投影的是**引导内容（bootstrap）**而非命约——指引 AI agent 完成填槽与首篇决策；槽位填妥重跑 sync 后引导自动被命约替换。成熟度目标（meta.yaml level）是硬上限，达到前不抢跑下一档。
@@ -658,8 +747,9 @@ cat <<'PONYGO_EOF'
 1. **填宪法槽位**：读 `.meta/constitution/constitution.md`，替换全部 `【TODO: …】`——项目名（取仓库名）、一句话定位（读 README/源码推断，不确定就给草案并原地注明"草案，待人确认"）、技术栈（从 manifest 推断：package.json / go.mod / pyproject.toml / Cargo.toml 等）、成熟度目标（默认填 `2`）。Mission 节的 level TODO 填同一值。
 2. **重投影**：运行 `ponygo sync`——本引导自动被常载命约替换。
 3. **第一篇决策**：照 `.agents/skills/write-adr/SKILL.md` 落第一条 ADR（建议主题 `adopt-ponygo-governance`，class: `process`），并把 `.meta/meta.yaml` 的 `level` 改为 `1`。
-4. **自证**：运行 `ponygo status`——**无 FAIL 且无 WARN 才算引导完成**（WARN 指向治理卫生缺口：非 git 仓库 / 根目录游离计划文档 / 缺 .gitignore，逐项按提示修）。
-5. **日常**：每次非平凡变更**先 ADR 后代码**（先于或同一提交，按 write-adr 技能判触发）；随时 `ponygo audit` 体检，或**用户要求治理审查**时用 `governance-review` 技能跑全面体检。升级路径见各目录 README（L2 门禁 → `.meta/gates/README.md`，L3 文档分层 → `.meta/docs-tier/README.md`，L4 技能 → `.agents/skills/README.md`）。
+4. **文档有家（v2.0 起）**：确认骨架已生成 `docs/AGENTS.md`（文档标准的家，agent 自动加载）与根 `README.md`（人读契约）；有包/模块目录（packages/crates/src）则给每个包补 `README.md`（config/semantics/limitations）或列入 `.meta/docs-tier/exemptions` 豁免——这是 L1 判据 1.9，init 只播种 AGENTS.md 自动加载层，包文档按实例语言自行补齐。
+5. **自证**：运行 `ponygo status`——**无 FAIL 且无 WARN 才算引导完成**（WARN 指向治理卫生缺口：非 git 仓库 / 根目录游离计划文档 / 缺 .gitignore，逐项按提示修）。
+6. **日常**：每次非平凡变更**先 ADR 后代码**（先于或同一提交，按 write-adr 技能判触发），改行为/契约的那次提交**同步更新对应文档**（same-commit，dsh 实证）；随时 `ponygo audit` 体检，或**用户要求治理审查**时用 `governance-review` 技能跑全面体检。升级路径见各目录 README（L1 文档有家 → `docs/AGENTS.md`，L2 门禁 → `.meta/gates/README.md`，L2 文档分层激活 → `.meta/docs-tier/README.md`，L3 技能 → `.agents/skills/README.md`）。
 
 若用户明确表示本项目不需要治理（一次性原型 / 纯实验），运行 `ponygo retire --level off` 并录一条 decision 说明。
 PONYGO_EOF
@@ -793,10 +883,10 @@ vl_fail() { VL_FAILS="${VL_FAILS}  - $1"$'\n'; }
 verify_ladder() {
   local lv="$1"
   VL_FAILS=""
-  # 归一后不匹配 ^[0-6]$ → 只验 L0、报 0.4 FAIL、跳过 L1/L2（不对未验证值做算术比较）
+  # 归一后不匹配 ^[0-5]$ → 只验 L0、报 0.4 FAIL、跳过 L1/L2（不对未验证值做算术比较）
   local validated=0
   case "$lv" in
-    0|1|2|3|4|5|6) validated=1 ;;
+    0|1|2|3|4|5) validated=1 ;;
   esac
   # 日期合法性探测：GNU date 可用才机械判 1.6 日期，否则降级"靠 review"（P6 诚实条款）
   local DATE_OK=0
@@ -804,11 +894,13 @@ verify_ladder() {
   local verified_range="L0"
   local f rel slashes b d8 st lc d
 
-  # ---- L0（0.1-0.4）----
+  # ---- L0（0.1-0.5）----
   [ -d "$META_DIR" ] || vl_fail "0.1 .meta/ 缺失 → 跑 'ponygo init'"
   [ -f "$META_YAML" ] || vl_fail "0.2 .meta/meta.yaml 缺失 → 跑 'ponygo init' 或手工建"
   grep -q '^level:' "$META_YAML" 2>/dev/null || vl_fail "0.3 meta.yaml 缺 level 字段 → 补一行 'level: 0'"
-  [ "$validated" = "1" ] || vl_fail "0.4 level 取值非法（归一后：${lv:-空}）→ meta.yaml 的 level 改为 0-6 单个整数（不支持行内注释/缩进/其它形态）"
+  [ "$validated" = "1" ] || vl_fail "0.4 level 取值非法（归一后：${lv:-空}）→ meta.yaml 的 level 改为 0-5 单个整数（不支持行内注释/缩进/其它形态）"
+  # 0.5 最小文档家播种（v2.0）：docs/AGENTS.md 是文档标准的家（agent 自动加载）
+  [ -f "docs/AGENTS.md" ] || vl_fail "0.5 缺最小文档家 docs/AGENTS.md（文档标准的家，agent 自动加载）→ 跑 'ponygo init' 生成，或手工建（tier 分类 + 写作规则 + slop checklist）"
 
   if [ "$validated" = "1" ]; then
 
@@ -898,6 +990,29 @@ verify_ladder() {
         esac
       done < <(find "$DECISIONS_DIR" -type f -name '*.md' ! -name 'README.md' -print0 2>/dev/null)
       [ "$n18" -eq 0 ] || vl_fail "1.8 正文骨架与 lifecycle 不匹配（如：${names18%;}）→ proposed/rejected 用 ## Proposal（将来时），implemented 用现在时 ## Decision（proposed→implemented 迁移时改写）"
+      # 1.9 文档有家（v2.0）：docs/AGENTS.md 存在（文档标准的家）+ 根 AGENTS.md 含 docs/AGENTS.md 索引链
+      # + 包/模块文档覆盖（每个包目录有 AGENTS.md 或 README.md，或列入 .meta/docs-tier/exemptions 豁免）
+      [ -f "docs/AGENTS.md" ] || vl_fail "1.9 缺文档标准家 docs/AGENTS.md（agent 自动加载）→ 补 docs/AGENTS.md（tier 分类 + 写作规则 + slop checklist）"
+      if [ -f "AGENTS.md" ] && ! grep -q 'docs/AGENTS.md' "AGENTS.md"; then
+        vl_fail "1.9 根 AGENTS.md 未链到文档标准家 docs/AGENTS.md → 加一行索引（'文档标准 → docs/AGENTS.md'，重跑 'ponygo sync' 自动带）"
+      fi
+      # 1.9c 包文档覆盖：探测常见包根（packages/crates/src 的直接子目录），每个须有 AGENTS.md 或 README.md 或入豁免清单
+      local pkg_root="" pkg_d="" pkg_missing=0 pkg_names="" exempt_file=".meta/docs-tier/exemptions"
+      for pkg_root in packages crates src; do
+        [ -d "$pkg_root" ] || continue
+        while IFS= read -r pkg_d; do
+          b="${pkg_d##*/}"
+          # 豁免清单：每行一个包名，# 起注释
+          if [ -f "$exempt_file" ] && grep -qx "$b" <(sed 's/\r$//' "$exempt_file" | grep -vE '^[[:space:]]*(#|$)'); then
+            continue
+          fi
+          if [ ! -f "$pkg_d/AGENTS.md" ] && [ ! -f "$pkg_d/README.md" ]; then
+            pkg_missing=$((pkg_missing+1))
+            [ "$pkg_missing" -le 3 ] && pkg_names="${pkg_names}${pkg_d}；"
+          fi
+        done < <(find "$pkg_root" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
+      done
+      [ "$pkg_missing" -eq 0 ] || vl_fail "1.9 包文档缺失（如：${pkg_names%;}）→ 每包补 AGENTS.md 或 README.md（config/semantics/limitations），或列入 .meta/docs-tier/exemptions 豁免"
     fi
 
     # ---- L2（2.1-2.4，声明级 ≥2 时验；声明 L2 即视为已承诺钩子）----
@@ -927,6 +1042,14 @@ verify_ladder() {
         if [ -z "$hook_path" ] || [ ! -d "$hook_path" ] || [ -z "$(ls -A "$hook_path" 2>/dev/null)" ]; then
           vl_fail "2.4 已声明 L2 但本地钩子未挂（core.hooksPath 未设/钩子目录为空）→ git config core.hooksPath .githooks 并放入钩子脚本"
         fi
+      fi
+      # 2.5 文档分层已激活（v2.0）：docs-tier/README.md 非模板态（含独特标记"## 已激活文档家清单"）。
+      # 模板态 = init 生成的占位（标题为"模板态"）；升 L2 时把标题改为"## 已激活文档家清单"并填家。
+      # tier 放置正确性靠 review（§2 诚实声明）。
+      if [ -f "$META_DIR/docs-tier/README.md" ] && ! grep -q '## 已激活文档家清单' "$META_DIR/docs-tier/README.md"; then
+        vl_fail "2.5 文档分层未激活：.meta/docs-tier/README.md 仍是模板态 → 把标题改为 '## 已激活文档家清单' 并填写本项目的 tier 家清单"
+      elif [ ! -f "$META_DIR/docs-tier/README.md" ]; then
+        vl_fail "2.5 缺 .meta/docs-tier/README.md（文档分层契约）→ 跑 'ponygo init' 生成，升 L2 时推进为已激活清单"
       fi
     fi
 
@@ -1131,7 +1254,7 @@ cmd_audit() {
   if [ "$comp" -ge 1 ]; then
     echo ""
     echo "合规免责：检测到合规/追溯痕迹（compliance/traceability）。ponygo 是工程化治理脚手架，"
-    echo "爬满 L6 不构成任何监管合规背书（FDA、ISO 13485/26262、SOC2、PIPL 等），"
+    echo "爬满 L5 不构成任何监管合规背书（FDA、ISO 13485/26262、SOC2、PIPL 等），"
     echo "不替代贵组织的质控与审计流程——合规评判请交由合规流程（P6）。"
   fi
   # ---- 门禁分层报告（P7 时间经济性；报告性，非硬判据） ----
@@ -1181,7 +1304,7 @@ cmd_status() {
     case "$lv" in
       0|1) echo "去 L$((lv+1))：见 maturity-ladder.md（仓库根）对应级退出标准与布尔检查项。" ;;
       2)   echo "已达机械判定的上限。L3+ 为「靠 review」的目标画像，按需选装。" ;;
-      *)   echo "已声明 $(fmt_level "$lv")，但 L3-L6 属目标画像：请对照 maturity-ladder.md §2 的依赖清单自证，否则视为散文（P6 诚实条款）。" ;;
+      *)   echo "已声明 $(fmt_level "$lv")，但 L3-L5 属目标画像：请对照 maturity-ladder.md §2 的依赖清单自证，否则视为散文（P6 诚实条款）。" ;;
     esac
   fi
 }
@@ -1221,7 +1344,7 @@ cmd_retire() {
       sed -i 's/^ai-surface:.*/ai-surface: off/' "$META_YAML"
       info "已整体退场：level 0 + ai-surface off。勿忘录一条退级 decision。"
       ;;
-    [0-6])
+    [0-5])
       confirm_or_skip "把 level 降级到 $target（并提示移除超档机制）" || return 0
       sed -i "s/^level:.*/level: $target/" "$META_YAML"
       # 联动：降到 L0 时应清掉 ai-surface 悬挂（否则 sync 仍会生成投影，与退场语义冲突）

@@ -7,7 +7,7 @@
 #   带路径   = 只校验给定文件（如 .agents/notes/proposed/architecture/xxx.md）
 #
 # 退出码：全部通过 exit 0；任一违例 exit 1（逐项打印 FAIL）。
-# 对应判据：ponygo verify_ladder 1.1–1.8（maturity-ladder §5），
+# 对应判据：ponygo verify_ladder 1.1–1.9（maturity-ladder §5），
 # 影子来自 DSH verify-agent-note-format / verify-agent-note-classification。
 #
 # 设计快照（为何是 bash、为何一个脚本）：
@@ -26,7 +26,7 @@
 # 不判"implemented 内容是否真的已落地"（真实性）与"多类是否该拆条"
 # （分类）——这两者是语义判断，靠 review + write-adr 校准样例。
 #
-# 对齐契约：本脚本与 CLI 的 verify_ladder 1.1–1.8 逐项对齐；若发现行为不一致，
+# 对齐契约：本脚本与 CLI 的 verify_ladder 1.1–1.9 逐项对齐；若发现行为不一致，
 # 以 maturity-ladder §5 判据真源为准并回改两者。
 # ============================================================
 set -u
@@ -105,10 +105,13 @@ if [ $# -gt 0 ]; then
 else
   while IFS= read -r -d '' f; do check_one "$f"; done \
     < <(find "$NOTES_DIR" -type f -name '*.md' -print0 2>/dev/null)
+  # 1.9 文档有家（v2.0，整树模式才判）：docs/AGENTS.md 是文档标准的家（agent 自动加载）。
+  # 与 1.1-1.8 同属 L1 判据；docs/AGENTS.md 由 ponygo init 骨架播种。
+  [ -f "docs/AGENTS.md" ] || fail "1.9 缺文档标准家 docs/AGENTS.md（agent 自动加载）→ 补 docs/AGENTS.md（tier 分类 + 写作规则 + slop checklist）"
 fi
 
 if [ "$FAIL" = "0" ]; then
-  echo "verify-note: 全部通过（机械影子 1.1–1.8；真实性/分类靠 review）"
+  echo "verify-note: 全部通过（机械影子 1.1–1.9；真实性/分类靠 review）"
   exit 0
 fi
 echo "verify-note: 未通过（见上方 FAIL 项；逐项修复后重跑）" >&2

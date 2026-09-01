@@ -42,6 +42,6 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 
 ## 验证与报告
 
-- 跑 **`bash .agents/skills/write-adr/verify-note.sh`**（无参 = 整树；或跟单个相对路径）——机械影子 1.1–1.8 全部通过（路径两轴/文件名/日期/Status/骨架标题），exit 0 才算完成；FAIL 项逐条修复重跑。
+- 跑 **`bash .agents/skills/write-adr/verify-note.sh`**（无参 = 整树；或跟单个相对路径）——机械影子 1.1–1.8（路径两轴/文件名/日期/Status/骨架标题）+ 整树 1.9（文档有家：docs/AGENTS.md 存在）全部通过，exit 0 才算完成；FAIL 项逐条修复重跑。
 - 再跑 `ponygo status`：决策数 +1、L1 判据全绿、无卫生 WARN。
 - 报告格式：新记录路径 + lifecycle/class + 一句话 Problem + verify-note.sh 的通过输出。

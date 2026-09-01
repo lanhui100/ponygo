@@ -276,6 +276,22 @@ description 自足性原则：技能路由发生在"只有摘要可见"的懒加
 
 ## 5. 文档分层：docs/AGENTS.md
 
+### 5.0 家载体分工：AGENTS.md（agent 自动加载）vs README（人读）
+
+**这是 ponygo v2.0 起文档治理的地基**（实证：dsh 双轨，ponygo 骨架 v2.0 起播种）：
+
+- **AGENTS.md**（根 + `docs/AGENTS.md` + 各子树/包 `AGENTS.md`）：**agent 自动加载**——
+  agent 处理某路径下的文件时，该路径及所有祖先目录的 AGENTS.md 自动并入上下文
+  （Claude Code / Codex / Cursor / opencode 等均实现）。治理规则、触发契约、文档标准
+  必须放这里，否则 agent 不主动读就不进上下文，治理在机制上落空。
+- **README**（根 + 各包）：**人读契约**——config/semantics/limitations/Model Experience。
+  agent 不主动读不进上下文；它是给人（和 agent 被显式要求时）看的契约层，不是治理规则的载体。
+
+**判据含义**（maturity-ladder §5 0.5 / 1.9 / 2.5）：L0 播种 `docs/AGENTS.md`（文档标准的家，
+自动加载）；L1 判"文档有家"（docs/AGENTS.md 存在 + 根 AGENTS.md 索引链 + 包文档覆盖或豁免）；
+L2 判"分层已激活"（docs-tier 从模板态推进为已激活清单）。**判据检查的是"家载体存在"**——
+docs/ 的家是 AGENTS.md（自动加载），包契约的家是 README（人读），各归其位，不混用。
+
 ### 5.1 Tier 分类法：每个事实一个家
 
 dsh 把"事实"按职责分到 12 个 tier，**每一 tier 的 Job 与该 tier 不承载的东西都写死**：
@@ -387,9 +403,9 @@ rejected（10 篇保留，且实测**全部集中在 `simplification/` 单一 cl
 
 ## 10. 迁移清单（按性价比排，勿照抄全套）
 
-- **Wave1**：ADRs + 状态（路径编码 lifecycle）+ 枚举化触发条件；
-- **Wave2**：write-adr skill（触发内联 + 校准样例）+ verify 门禁（格式/链接 + 负样本）+ 最小 CI；
-- **Wave3**：文档分层（tier 分类 + slop checklist + 词数预算）+ 双语配对（若双语）；
+- **Wave1**：ADRs + 状态（路径编码 lifecycle）+ 枚举化触发条件 + **最小文档契约**（`docs/AGENTS.md` 文档标准的家，agent 自动加载；根 README 人读层）——文档存在性是 L0/L1 纪律，不是 L3 的事；
+- **Wave2**：write-adr skill（触发内联 + 校准样例）+ verify 门禁（格式/链接 + 负样本）+ 最小 CI + 文档有家判据（L1，包文档覆盖或豁免）；
+- **Wave3**：文档分层（tier 分类 + slop checklist + 词数预算，L2 起激活已激活清单）+ 双语配对（若双语）；
 - **Wave4**：归档冻结（archived/ + 哈希 manifest + supersession 同 PR）；
 - **Wave5**（按需）：运行时不变量 + 生成物漂移门 + 覆盖率分区；
 - **长期**：每三次重复资产化为 skill。
