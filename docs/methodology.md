@@ -216,6 +216,7 @@ description 自足性原则：技能路由发生在"只有摘要可见"的懒加
 6. **证据链完整性**：一次演示=一次孤立运行，禁拼接帧；发布前重验 HEAD 未移动（record-browser-gif）；
 7. **校准样例锚定判据**：样例间差异维度 = 判断的真实依据；判定线用具体事实（"foundational authority"）不用形容词（dsh-archive-agent-notes 归档样例）；
 8. **被永久引用的资产获得不变性义务**：assets 分支永不重写——与归档哈希冻结同源。
+9. **对应性校准**：ADR 必须与其治理的代码对应——标题文题相符、Problem/Decision 引用代码路径或提交；多阶段提案部分落地时拆条或链入。存在性判据查"有没有 ADR"，对应性只能由 review 按"抽 implemented 对代码现实、抽 proposed 查已落地未迁移"程序守（ponyllm 8f37827 反例：TUI 功能提交携带多协议提案）。
 
 ---
 
@@ -224,6 +225,12 @@ description 自足性原则：技能路由发生在"只有摘要可见"的懒加
 ### 4.1 分层哲学
 
 本地钩子用 **lefthook**（非 husky），`postinstall` 安装。lefthook.yml 顶部注释自陈分工："Keep these local checkpoints fast; CI owns the full repository-wide gate matrix."
+
+**提醒档（v2.1，ponygo 通用化）**：FAIL 门禁与 review 之间还有一档——**启发式 WARN**（只 echo，
+不改退出码）。适用条件：语义判断机器到不了（P6），但形状可疑值得人看一眼。两条实例：
+文档新鲜度（源码变而非-notes 文档不变 → 提示跑文档面复检，计数排除 `.agents/notes/`，
+否则 ADR-only 提交永远静默）与未来日期（决策文件名日期晚于今天 → 提示核对）。
+提醒档与卫生 WARN 同级（status/audit 双挂），自带退场指引（噪声过大按 L2 退场 disable）。
 
 ### 4.2 L1 pre-commit（秒级，本地）
 
@@ -398,6 +405,11 @@ rejected（10 篇保留，且实测**全部集中在 `simplification/` 单一 cl
 4. **过时的怎么退场？** 归档机制存在吗？归档后是否冻结（哈希封印）？工作区里有没有过期产物堆积？（对照：dsh 的 archived/169 篇 + append-only manifest + `.rgignore` 隔离）
 
 评分纪律：每问 0–10 分；每个缺口 → 一个最小改进动作；缺口之间找杠杆——**强制层是其他三层的放大器**，资源不足时优先投它。
+
+**新鲜度/对应性抽查法（v2.1）**：取近 5 个功能提交，逐个对照有无对应文档更新
+（计数排除 `.agents/notes/`——ADR 不算用户文档更新）；抽 N 条 implemented ADR，
+用 `grep`/`git log -S <关键符号>` 对照代码现实，同提交携带的 ADR 是否文题相符。
+两项都是 review 程序（语义判断），输出疑点 + 证据原文，不做机械 FAIL。
 
 ---
 

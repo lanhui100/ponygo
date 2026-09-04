@@ -45,7 +45,7 @@ curl -fsSL https://raw.githubusercontent.com/lanhui100/ponygo/main/install.sh | 
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/lanhui100/ponygo/main/install.sh | \
-  PONYGO_VERSION=v2.0.0 PONYGO_SHA256=<公布的校验和> bash
+  PONYGO_VERSION=v2.1.0 PONYGO_SHA256=<公布的校验和> bash
 ```
 
 **方式 B：源码目录一键安装（clone 本仓库后）**

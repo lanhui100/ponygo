@@ -303,6 +303,24 @@ PONYGO_EOF
 - 配一个负样本 spec（`*.spec.*`，构造非法样例证明门会拒绝）；
 - 挂载：`git config core.hooksPath .githooks` + 在 .githooks/ 放 pre-commit / pre-push；
 - 每门一条"承诺 → 命令"的对应（凡机械可查的承诺必配命令，P2）。
+
+## 提醒档（v2.1，非门禁）：doc-freshness WARN 片段
+
+新鲜度/对应性是语义判断，做不成 FAIL 门禁（P6）——但可以进 pre-commit 做**启发式提醒**
+（只 echo，不改退出码）。把下面这段追加到你的 pre-commit 末尾（栈无关示例，`.rs`
+换成你栈的源码后缀；ponyllm 实例已验证）：
+
+```bash
+# [doc-freshness WARN] 暂存区改了源码却没带非-notes 文档更新时提醒。
+# 计数排除 `.agents/notes/`——ADR 不算"文档更新"，否则"代码+ADR、无用户文档"永远静默
+# （实证：ponyllm 8f37827 类提交）。纯重构/内部改动误报可忽略；噪声过大按 L2 退场 disable。
+staged_src=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E '\.(rs|ts|py|go)$' || true)
+staged_doc=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E '(\.md$|AGENTS\.md$)' | grep -v '^\.agents/notes/' || true)
+if [ -n "$staged_src" ] && [ -z "$staged_doc" ]; then
+  echo "=== [doc-freshness WARN] 暂存区有源码变更但无（非-notes）文档更新 ===" >&2
+  echo "  改了用户可见行为/契约请同步对应文档的家（same-commit）；纯重构忽略。" >&2
+fi
+```
 PONYGO_EOF
   fi
 
@@ -427,6 +445,8 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 - 边界（靠 review）：重构归哪个 class？判别器是"可观察行为是否改变"——改变 → feature/bug-fix；只为减复杂度 → simplification（`refactor` 刻意缺席，与之重叠）。
 - 反例（时态错位，判据 1.8）：proposed/ 下用现在时 `## Decision` → 未批准的提案伪装成已落地的决定；proposed 必须用 `## Proposal`，迁移到 implemented 时再改写为现在时。
 - 反例（混合 ADR）：把"治理已采纳"（implemented/process）与"架构尚在设计中、零代码"（proposed/architecture）写进同一条 implemented note → 状态轴失真（未实施伪装成已落地）+ class 污染；**多类拆条**（notes/README 触发规则）：已落地的记 implemented，未实施的记 proposed。
+- 反例（文不对题，判据管不到、靠 review）：TUI 定价表单功能（11 个 `.rs` 含大文件重写）携带一篇多协议声明 proposed note——标题与代码无关，ADR 成了"有记录无对应"的伪证据；正确做法是为 TUI 定价单独立条，把多协议提案放到它自己的分支/commit。
+- 正例（对应性）：ADR 的 Problem/Decision 引用它治理的代码路径（`crates/…/src/….rs`）或提交 sha；多阶段提案部分落地时，落地部分拆条或在原文链入 implemented（勿让 proposed 整条失准，如 error-observability 四层中已落地的 `AttemptObserver` 构造器）。
 
 ## 验证与报告
 
@@ -610,12 +630,14 @@ disable-model-invocation: true
    命令不可解析的环境（如无 bash）降级为 review，并在报告中声明"未机械判过"——不得假装跑过。
 
 2. **逐面审查**：
-   - **结构面（机械）**：骨架完整？status/audit/verify-note 全绿？WARN 有哪些（尤其游离计划文档 / 非 git / 缺 .gitignore）？
+   - **结构面（机械）**：骨架完整？status/audit/verify-note 全绿？WARN 有哪些（尤其游离计划文档 / 非 git / 缺 .gitignore / 新鲜度启发式 / 未来日期）？
    - **决策面（语义 + 机械）**：每条 ADR 的 Status/class 与内容真实一致吗（implemented 是否真落地、proposed 是否未实施）？时序符合"先 ADR 后代码/同提交"吗（git log 对照）？有多类混装吗？Alternatives 是真实候选而非凑数吗？
+     - **对应性抽查（v2.1）**：抽 N 条 implemented ADR，用 `grep`/`git log -S <关键符号>` 对照代码现实——Decision 声称的构造/行为在代码里存在吗？抽 proposed ADR，看是否有已部分落地未拆条？同提交携带的 ADR 是否文题相符（反例：功能提交携带无关提案 = 伪证据）？
    - **文档面（v2.0，机械 + 语义）**：文档体系是否真正生效——
      - 家载体对吗？`docs/AGENTS.md` 存在且是文档标准的家（agent 自动加载）？根 `AGENTS.md` 链到它了？（判据 0.5/1.9）
      - 包文档有家吗？每个包目录有 `AGENTS.md` 或 `README.md`，或入豁免清单？（判据 1.9c）
      - **文档与代码同提交吗？**（dsh same-commit 规则）`git log` 对照：改行为/契约的提交是否带了对应文档更新？文档家是不是空壳（有文件无内容/无索引）？
+     - **新鲜度抽查（v2.1）**：取近 5 个功能提交，逐个对照有无对应文档更新（计数排除 `.agents/notes/`——ADR 不算用户文档更新）；用户可见行为（新命令/新端点/新配置项/新面板）必须在 README 或包 README 可寻，否则记"新鲜度欠账"。
      - 分层激活了吗？`.meta/docs-tier/README.md` 是模板态还是已激活清单？（判据 2.5）
    - **卫生面**：游离计划文档？.gitignore/.rgignore 有效性？构建产物入版本库？
    - **负空间面（语义 + 初筛机械）**：语料是否开始腐烂——
@@ -749,7 +771,7 @@ cat <<'PONYGO_EOF'
 3. **第一篇决策**：照 `.agents/skills/write-adr/SKILL.md` 落第一条 ADR（建议主题 `adopt-ponygo-governance`，class: `process`），并把 `.meta/meta.yaml` 的 `level` 改为 `1`。
 4. **文档有家（v2.0 起）**：确认骨架已生成 `docs/AGENTS.md`（文档标准的家，agent 自动加载）与根 `README.md`（人读契约）；有包/模块目录（packages/crates/src）则给每个包补 `README.md`（config/semantics/limitations）或列入 `.meta/docs-tier/exemptions` 豁免——这是 L1 判据 1.9，init 只播种 AGENTS.md 自动加载层，包文档按实例语言自行补齐。
 5. **自证**：运行 `ponygo status`——**无 FAIL 且无 WARN 才算引导完成**（WARN 指向治理卫生缺口：非 git 仓库 / 根目录游离计划文档 / 缺 .gitignore，逐项按提示修）。
-6. **日常**：每次非平凡变更**先 ADR 后代码**（先于或同一提交，按 write-adr 技能判触发），改行为/契约的那次提交**同步更新对应文档**（same-commit，dsh 实证）；随时 `ponygo audit` 体检，或**用户要求治理审查**时用 `governance-review` 技能跑全面体检。升级路径见各目录 README（L1 文档有家 → `docs/AGENTS.md`，L2 门禁 → `.meta/gates/README.md`，L2 文档分层激活 → `.meta/docs-tier/README.md`，L3 技能 → `.agents/skills/README.md`）。
+6. **日常**：每次非平凡变更**先 ADR 后代码**（先于或同一提交，按 write-adr 技能判触发），改行为/契约的那次提交**同步更新对应文档**（same-commit，dsh 实证）；随时 `ponygo audit` 体检，或**用户要求治理审查**时用 `governance-review` 技能跑全面体检。升级路径见各目录 README（L1 文档有家 → `docs/AGENTS.md`，L2 门禁 → `.meta/gates/README.md`，L2 文档分层激活 → `.meta/docs-tier/README.md`，L3 技能 → `.agents/skills/README.md`）。建议节奏（非硬门禁）：每 N 个功能提交或用户点名时跑一次文档面复检（新鲜度/对应性抽查）。
 
 若用户明确表示本项目不需要治理（一次性原型 / 纯实验），运行 `ponygo retire --level off` 并录一条 decision 说明。
 PONYGO_EOF
@@ -806,7 +828,8 @@ do_sync() {
 }
 
 # ---------- 治理卫生 WARN（status 与 audit 双挂；形状可查、价值靠 review，不改退出码） ----------
-# 三条机械 WARN：非 git 仓库 / 根目录游离计划文档 / git 仓库内无 .gitignore。
+# 五条机械 WARN：非 git 仓库 / 根目录游离计划文档 / git 仓库内无 .gitignore /
+# 文档新鲜度启发式（v2.1）/ 未来日期决策文件（v2.1）。
 # "先 ADR 后代码"的时序不可机械判（语义，靠 review 用 git log 校准）——机械锁的是时序的可判定性载体。
 warn_governance_hygiene() {
   # 1. 治理根已建但不在 git 仓库内（版本派生/提交边界/钩子挂载全部悬空）
@@ -826,6 +849,34 @@ warn_governance_hygiene() {
   # 3. git 仓库内无 .gitignore
   if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && [ ! -f .gitignore ]; then
     printf 'ponygo: WARN git 仓库内无 .gitignore——构建产物/编辑器噪声将裸放进版本库 → 建 .gitignore\n' >&2
+  fi
+  # 4. 文档新鲜度启发式（v2.1）：近 5 提交大改代码而非-notes 文档零动 → 提示跑文档面复检。
+  # 计数排除 `.agents/notes/`——ADR 不算"文档更新"，否则"代码+ADR、无用户文档"永远静默
+  # （实证：ponyllm 8f37827 类提交）。纯重构/内部改动误报可忽略；只 WARN 不改退出码（P6）。
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git rev-parse --verify HEAD >/dev/null 2>&1; then
+    local recent_src="" recent_doc=""
+    recent_src=$(git log --format= --name-only -5 HEAD 2>/dev/null | grep -E '\.(rs|ts|py|go|java|cs|rb|php)$' | head -1 || true)
+    recent_doc=$(git log --format= --name-only -5 HEAD 2>/dev/null | grep -E '(\.md$|AGENTS\.md$)' | grep -v '^\.agents/notes/' | head -1 || true)
+    if [ -n "$recent_src" ] && [ -z "$recent_doc" ]; then
+      printf 'ponygo: WARN 近 5 提交有代码变更但无（非-notes）文档更新——改了用户可见行为/契约请同步对应文档的家（same-commit）；纯重构忽略（启发式，非门禁）\n' >&2
+    fi
+  fi
+  # 5. 未来日期决策文件（v2.1）：文件名日期晚于今天 → 提示核对（笔误或计划前置）。
+  # `date -d` 可用才判（与 1.6 同款诚实条款）；只 WARN 不 FAIL。
+  if [ -d "$DECISIONS_DIR" ] && date -d @0 '+%Y' >/dev/null 2>&1; then
+    local today f b d8 future_n=0 future_names=""
+    today=$(date '+%F')
+    while IFS= read -r -d '' f; do
+      b="${f##*/}"
+      [ "$b" = "README.md" ] && continue
+      d8="${b:0:10}"
+      if printf '%s\n' "$d8" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' && [[ "$d8" > "$today" ]]; then
+        future_n=$((future_n+1)); [ "$future_n" -le 3 ] && future_names="${future_names}${b}；"
+      fi
+    done < <(find "$DECISIONS_DIR" -type f -name '*.md' -print0 2>/dev/null)
+    if [ "$future_n" -gt 0 ]; then
+      printf 'ponygo: WARN 有 %s 个决策文件日期晚于今天（如：%s）→ 核对是笔误还是计划前置；前者改名，后者无妨（启发式，非门禁）\n' "$future_n" "${future_names%;}" >&2
+    fi
   fi
 }
 

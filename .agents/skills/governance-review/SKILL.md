@@ -42,12 +42,14 @@ disable-model-invocation: true
    命令不可解析的环境（如无 bash）降级为 review，并在报告中声明"未机械判过"——不得假装跑过。
 
 2. **逐面审查**：
-   - **结构面（机械）**：骨架完整？status/audit/verify-note 全绿？WARN 有哪些（尤其游离计划文档 / 非 git / 缺 .gitignore）？
+   - **结构面（机械）**：骨架完整？status/audit/verify-note 全绿？WARN 有哪些（尤其游离计划文档 / 非 git / 缺 .gitignore / 新鲜度启发式 / 未来日期）？
    - **决策面（语义 + 机械）**：每条 ADR 的 Status/class 与内容真实一致吗（implemented 是否真落地、proposed 是否未实施）？时序符合"先 ADR 后代码/同提交"吗（git log 对照）？有多类混装吗？Alternatives 是真实候选而非凑数吗？
+     - **对应性抽查（v2.1）**：抽 N 条 implemented ADR，用 `grep`/`git log -S <关键符号>` 对照代码现实——Decision 声称的构造/行为在代码里存在吗？抽 proposed ADR，看是否有已部分落地未拆条？同提交携带的 ADR 是否文题相符（反例：功能提交携带无关提案 = 伪证据）？
    - **文档面（v2.0，机械 + 语义）**：文档体系是否真正生效——
      - 家载体对吗？`docs/AGENTS.md` 存在且是文档标准的家（agent 自动加载）？根 `AGENTS.md` 链到它了？（判据 0.5/1.9）
      - 包文档有家吗？每个包目录有 `AGENTS.md` 或 `README.md`，或入豁免清单？（判据 1.9c）
      - **文档与代码同提交吗？**（dsh same-commit 规则）`git log` 对照：改行为/契约的提交是否带了对应文档更新？文档家是不是空壳（有文件无内容/无索引）？
+     - **新鲜度抽查（v2.1）**：取近 5 个功能提交，逐个对照有无对应文档更新（计数排除 `.agents/notes/`——ADR 不算用户文档更新）；用户可见行为（新命令/新端点/新配置项/新面板）必须在 README 或包 README 可寻，否则记"新鲜度欠账"。
      - 分层激活了吗？`.meta/docs-tier/README.md` 是模板态还是已激活清单？（判据 2.5）
    - **卫生面**：游离计划文档？.gitignore/.rgignore 有效性？构建产物入版本库？
    - **负空间面（语义 + 初筛机械）**：语料是否开始腐烂——

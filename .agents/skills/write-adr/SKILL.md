@@ -39,6 +39,8 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 - 边界（靠 review）：重构归哪个 class？判别器是"可观察行为是否改变"——改变 → feature/bug-fix；只为减复杂度 → simplification（`refactor` 刻意缺席，与之重叠）。
 - 反例（时态错位，判据 1.8）：proposed/ 下用现在时 `## Decision` → 未批准的提案伪装成已落地的决定；proposed 必须用 `## Proposal`，迁移到 implemented 时再改写为现在时。
 - 反例（混合 ADR）：把"治理已采纳"（implemented/process）与"架构尚在设计中、零代码"（proposed/architecture）写进同一条 implemented note → 状态轴失真（未实施伪装成已落地）+ class 污染；**多类拆条**（notes/README 触发规则）：已落地的记 implemented，未实施的记 proposed。
+- 反例（文不对题，判据管不到、靠 review）：TUI 定价表单功能（11 个 `.rs` 含大文件重写）携带一篇多协议声明 proposed note——标题与代码无关，ADR 成了"有记录无对应"的伪证据；正确做法是为 TUI 定价单独立条，把多协议提案放到它自己的分支/commit。
+- 正例（对应性）：ADR 的 Problem/Decision 引用它治理的代码路径（`crates/…/src/….rs`）或提交 sha；多阶段提案部分落地时，落地部分拆条或在原文链入 implemented（勿让 proposed 整条失准，如 error-observability 四层中已落地的 `AttemptObserver` 构造器）。
 
 ## 验证与报告
 

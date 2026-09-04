@@ -832,12 +832,41 @@ s25_doc_home_audit() {
   assert_eq "文档家齐全 audit exit 0" 0 "$R_RC"
 }
 
+s26_warn_tier() {
+  echo "--- 场景26：v2.1 提醒档——gates 模板 WARN 片段 + 卫生 WARN（新鲜度/未来日期，exit 不变）"
+  local T G; G=$(sanitize_git)
+  # gates/README 模板含 doc-freshness WARN 片段（排除 notes 计数）
+  T=$(new_case); run_cli "$T" init --yes
+  grep -q 'doc-freshness WARN' "$T/.meta/gates/README.md" && ok "gates 模板含 WARN 片段" || bad "gates 模板缺 WARN 片段"
+  grep -qF "grep -v '^\.agents/notes/'" "$T/.meta/gates/README.md" && ok "WARN 片段排除 notes 计数" || bad "WARN 片段未排除 notes"
+  # 新鲜度 WARN：有提交历史，近 5 提交改代码而非-notes 文档零动 → WARN 但 exit 0
+  # （init 提交自带 .md，需 6 提交把它挤出近 5 窗口，模拟已建项目）
+  ( cd "$T" && git init -q && git add -A >/dev/null 2>&1 \
+    && git -c user.email=t@t -c user.name=t commit -qm init \
+    && for i in 1 2 3 4 5; do printf 'x\n' > "mod$i.py" && git add "mod$i.py" \
+      && git -c user.email=t@t -c user.name=t commit -qm "feat: mod $i" >/dev/null 2>&1; done ) >/dev/null 2>&1
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G status
+  assert_eq "新鲜度 WARN 不改 exit 0" 0 "$R_RC"
+  assert_contains "WARN 新鲜度启发式" "$R_OUT" "无（非-notes）文档更新"
+  # 未来日期 WARN：决策文件名日期晚于今天 → WARN 但 exit 0
+  T=$(new_case); run_cli "$T" init --yes
+  ( cd "$T" && git init -q && git add -A >/dev/null 2>&1 \
+    && git -c user.email=t@t -c user.name=t commit -qm init ) >/dev/null 2>&1
+  write_valid_decision "$T" "implemented/feature/2099-01-01-future.md"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G status
+  assert_eq "未来日期 WARN 不改 exit（level 0 只验 L0）" 0 "$R_RC"
+  assert_contains "WARN 未来日期" "$R_OUT" "晚于今天"
+}
+
 s20_installer
 s21_external001_regress
 s22_hygiene_warn
 s23_verify_note
 s24_gate_layers
 s25_doc_home_audit
+s26_warn_tier
 
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
