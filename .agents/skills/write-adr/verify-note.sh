@@ -63,7 +63,7 @@ date -d @0 '+%Y' >/dev/null 2>&1 && DATE_OK=1
 check_one() { # $1 = 决策文件路径
   local f="$1" b rel lc slashes st d8
   b="${f##*/}"
-  [ "$b" = "README.md" ] && return 0
+  [ "$b" = "README.md" ] || [ "$b" = "AGENTS.md" ] && return 0
   rel="${f#"$NOTES_DIR"/}"
   [ "$rel" = "$f" ] && rel="$f"
   lc="${rel%%/*}"

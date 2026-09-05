@@ -41,9 +41,9 @@ info() { printf 'ponygo: %s\n' "$*"; }
 # 是否已有治理根
 has_meta() { [ -d "$META_DIR" ]; }
 
-# 决策文件计数——排除集 {README.md, *.zh.md} 的唯一真源（audit / status / verify_ladder 共用）
+# 决策文件计数——排除集 {README.md, AGENTS.md, *.zh.md} 的唯一真源（audit / status / verify_ladder 共用）
 count_decisions() {
-  find "$DECISIONS_DIR" -type f -name '*.md' ! -name 'README.md' ! -name '*.zh.md' 2>/dev/null | wc -l | tr -d ' '
+  find "$DECISIONS_DIR" -type f -name '*.md' ! -name 'README.md' ! -name 'AGENTS.md' ! -name '*.zh.md' 2>/dev/null | wc -l | tr -d ' '
 }
 
 # 实例扩展 class（L5 领域定制的开放口）：notes/classes.local 每行一个额外 class 名
@@ -197,9 +197,71 @@ Status: <status>
 禁止根目录游离 `*plan*.md` / `ROADMAP.md`——计划烂在根目录永远不会被迁移，
 且是 spec-speak 的滋生地（status/audit 对游离计划文件输出 WARN）。
 
+## 读触发规则（谁在什么时候必须读旧 ADR，与写触发对称）
+
+只写不读，决策记录就是只写存档。以下时刻必须先读相关旧 ADR 再动手：
+
+- **写新 ADR 前**：按主题词/模块路径/关键符号 `grep` 检索活动树（proposed/implemented/
+  rejected；archived 只读史不判）——命中则读全文、链入、判 supersession（见 write-adr
+  写前检索程序）；
+- **评审变更时**：用 change-review 技能——先检索相关 ADR 再逐项对照（对应性/same-commit/
+  Status 迁移），无对应 ADR 的非平凡变更先补 ADR 再评审；
+- **找简化/归档时**：读 note 树理解架构意图，按"未来价值"分类（能指导未来工作的理由/
+  备选/负面保证保留，其余归档）；
+- **治理审查时**：governance-review 决策面抽查（implemented 是否真落地、proposed 是否
+  已实施未迁移）；
+- **接手陌生模块时**：先读相关 implemented 再读代码——决策史是比代码更便宜的地图。
+
+读的结论只进两处：新 note 的链入/拆条，或评审报告的问题清单——不落盘等于没读。
+
 ## 与下一级的关系
 
 有决策记录是 L1 的判据之一；是否"承诺可验"（L2）取决于 `gates/` 是否有非零退出门禁。
+PONYGO_EOF
+  fi
+
+  # notes/AGENTS.md：进 notes 子树自动加载的工作指引（写前检索 + supersession 义务）。
+  # 缺失时生成与模板仓库 eol 归一后逐字节一致版本。
+  if [ ! -f "$DECISIONS_DIR/AGENTS.md" ]; then
+    cat > "$DECISIONS_DIR/AGENTS.md" <<'PONYGO_EOF'
+# AGENTS.md —— 决策记录区工作指引（自动加载）
+
+> 进 `.agents/notes/` 子树即加载本文。规则正文在 `README.md`，这里只放每次必做的动作。
+
+## 每次必做
+
+1. **写新 ADR 前先检索**：按主题词/模块路径/关键符号 `grep -r` 扫活动树
+   （proposed/implemented/rejected；archived 只读史不判）——命中则读全文、链入、
+   判 supersession（程序见 write-adr 写前检索）。
+2. **Supersession 不 deferred**：被取代的旧条同提交归档或链入；多阶段提案部分落地就拆条。
+3. **读触发**：评审变更（change-review）、找简化/归档、治理审查、接手陌生模块时，
+   先读相关 implemented 再动手（读触发规则见 README.md）。
+
+## 禁区
+
+- `archived/` 冻结：永不编辑、不作现行权威（细则见 `archived/AGENTS.md`）；
+- 状态轴失真零容忍：未实施的不进 implemented，标题时态与目录一致（判据 1.8）。
+PONYGO_EOF
+  fi
+
+  # notes/archived/AGENTS.md：归档冻结规则（自动加载）。缺失时生成与模板仓库一致版本。
+  if [ ! -f "$DECISIONS_DIR/archived/AGENTS.md" ]; then
+    cat > "$DECISIONS_DIR/archived/AGENTS.md" <<'PONYGO_EOF'
+# AGENTS.md —— 归档区冻结规则（自动加载）
+
+> 进 `.agents/notes/archived/` 子树即加载本文。
+
+## 冻结即法律
+
+1. **永不编辑**：归档文件保持归档时原貌，不改一字（ mechanical 豁免，判据 1.8 冻结豁免）。
+2. **不作现行权威**：引用 archived 结论前，先确认没有更新的 implemented 取代它；
+   拿归档条当"当前就该这么做"的依据是状态误读。
+3. **引用方式**：链路径 + 注明"已归档（冻结快照）"，不复制正文。
+
+## 恢复流程
+
+确需恢复某条归档决策 → 按 write-adr 新建一条 implemented（链入归档原文），
+走正常评审；**禁止把文件移回 implemented/**（移动即改写历史）。
 PONYGO_EOF
   fi
 
@@ -333,15 +395,17 @@ PONYGO_EOF
 就把它从"口传 / 现写"资产化为这里的一篇 `SKILL.md`；当技能失去真实消费者（对应流程
 不再发生），删掉它——删除是一次决策，需录 `.agents/notes/`。
 
-**为什么首版只有 write-adr 与 governance-review**：流程资产化是 L3 的产物，依赖
+**为什么首版只有 write-adr、governance-review 与 change-review**：流程资产化是 L3 的产物，依赖
 "已经有重复发生的流程"这一事实；首版不预置通用技能（空技能是被永久引用的死重）。
-两个框架交付技能各有豁免理由：
+三个框架交付技能各有豁免理由：
 - `write-adr/`：写决策记录是 L1 判据强制的高频流程，消费者由框架自身创造，
   自动路由成立（Rule of three 天然满足）；
 - `governance-review/`：治理审查是重型 review 流程，**用户点名调用**而非自动路由
   （`disable-model-invocation: true`，dsh-translate-docs 范式）——不满足 Rule of three，
   但它是框架对"用户随时想做治理体检"这一刚需的入口封装。
-两者都是**框架交付物，不计入** L3"实例已长出流程资产"的证据——L3 仍要求你的项目
+- `change-review/`：评审变更是否符合已记录决策，是框架判据的执行时刻；读旧 ADR 是
+  每次评审的固定动作，消费者由框架自身创造（Rule of three 豁免同 write-adr）。
+三者都是**框架交付物，不计入** L3"实例已长出流程资产"的证据——L3 仍要求你的项目
 按 Rule of three 自己长出第一个 skill。
 
 > **「原理」引用的出处**：本文及实例骨架中的 methodology 引用，均指向 ponygo 框架仓库的
@@ -422,18 +486,28 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 1. **判触发**：对照 description 的枚举，命中任一即写。拿不准 → 写（多记成本一段文字，漏记成本永久丢失）。
    **时序**：决策记录必须**先于对应代码变更、或与代码变更同一提交**——先 ADR 后代码；
    事后补记是债务，不是常态（时序本身是语义判断、靠 review，用 `git log` 对照 ADR 提交与代码提交校准）。
-2. **选 lifecycle**：`proposed/`（未实现）或 `implemented/`（随本次变更落地）。
-3. **选 class**：`feature`（新能力）/ `bug-fix`（修缺陷）/ `simplification`（减复杂度）/ `architecture`（交付源码的结构）/ `process`（代码周围的工具与流程）/ `testing`（测试策略）。都不够 → 考虑在 `notes/classes.local` 登记领域扩展（扩展即一次治理决策，须评审）。
-4. **建文件**：`.agents/notes/{lifecycle}/{class}/$(date +%F)-<topic-title>.md`，topic 用 kebab-case。
-5. **头部**：第一行 `# Agent Note: <title>`，空行，`Status: <与所在目录一致>`（rejected 可带一行理由：`rejected — <理由>`）。
-6. **正文**：`## Problem` 开头（先写动机，脱离方案也成立），随后**按 lifecycle 选骨架**（判据 1.8 机械校验，选错即 FAIL）：
+2. **写前检索**（必做，不是提示）：落笔前先查旧 ADR 是否覆盖同一决策——
+   用主题词、模块路径、关键符号 `grep -r` 扫 `.agents/notes/` 活动树
+   （proposed/implemented/rejected；archived 只读史不判），按下面判定表处理：
+
+   | 检索结果 | 动作 |
+   |---|---|
+   | 无命中 | 直接写（本条即首案） |
+   | 命中相关旧条 | 读全文；新 note 正文链入旧条路径；旧条若被部分取代，链回新条 |
+   | 命中被取代的旧条 | 走 supersession：旧 implemented 条移入 archived/（冻结，原貌不动），或链入说明被哪条取代；**同一提交处理，不 deferred** |
+   | 多阶段提案部分落地 | 落地部分拆条记 implemented，未落地部分留在 proposed（勿让 proposed 整条失准） |
+3. **选 lifecycle**：`proposed/`（未实现）或 `implemented/`（随本次变更落地）。
+4. **选 class**：`feature`（新能力）/ `bug-fix`（修缺陷）/ `simplification`（减复杂度）/ `architecture`（交付源码的结构）/ `process`（代码周围的工具与流程）/ `testing`（测试策略）。都不够 → 考虑在 `notes/classes.local` 登记领域扩展（扩展即一次治理决策，须评审）。
+5. **建文件**：`.agents/notes/{lifecycle}/{class}/$(date +%F)-<topic-title>.md`，topic 用 kebab-case。
+6. **头部**：第一行 `# Agent Note: <title>`，空行，`Status: <与所在目录一致>`（rejected 可带一行理由：`rejected — <理由>`）。
+7. **正文**：`## Problem` 开头（先写动机，脱离方案也成立），随后**按 lifecycle 选骨架**（判据 1.8 机械校验，选错即 FAIL）：
 
    | lifecycle | 骨架 |
    |---|---|
    | `proposed/` | `## Proposal`（将来时）→ `## Alternatives considered` → `## Acceptance criteria` → `## Risks` |
    | `implemented/` | `## Decision`（现在时）→ `## Alternatives considered`（必填）→ `## Consequences`（可选） |
    | `rejected/` | 提案原文冻结（保留 `## Proposal`），verdict 只写 `Status:` 行 |
-7. **迁移状态** = 移动文件到目标 lifecycle + 改 `Status:` 行 + 把提案时代标题改写为现在时——三件事在同一次变更内完成。
+8. **迁移状态** = 移动文件到目标 lifecycle + 改 `Status:` 行 + 把提案时代标题改写为现在时——三件事在同一次变更内完成。
 
 ## 校准样例
 
@@ -525,7 +599,7 @@ date -d @0 '+%Y' >/dev/null 2>&1 && DATE_OK=1
 check_one() { # $1 = 决策文件路径
   local f="$1" b rel lc slashes st d8
   b="${f##*/}"
-  [ "$b" = "README.md" ] && return 0
+  [ "$b" = "README.md" ] || [ "$b" = "AGENTS.md" ] && return 0
   rel="${f#"$NOTES_DIR"/}"
   [ "$rel" = "$f" ] && rel="$f"
   lc="${rel%%/*}"
@@ -672,6 +746,63 @@ disable-model-invocation: true
 - 本技能无退出码门禁（审查是 review 层；机械面已由 verify-note.sh / ponygo status 各自承担）。
 - 交付物 = 审查报告（上述表格 + 水位 + 升 L2 建议 + 不覆盖声明）。
 - 后续动作：把问题清单落一条 `.agents/notes/proposed/{class}/yyyy-mm-dd-governance-audit.md`（含本轮审查证据），修复按最小改进动作逐个执行并迁移 implemented——审查完不落 note 等于没审。
+PONYGO_EOF
+  fi
+
+  # skills/change-review/SKILL.md：框架交付的第三类预置技能——轻量单变更评审（读侧入口，
+  # 与 write-adr 配对；模型可自主路由，触发条件内联）。缺失时生成与模板仓库逐字节一致版本。
+  if [ ! -f "$SKILLS_DIR/change-review/SKILL.md" ]; then
+    mkdir -p "$SKILLS_DIR/change-review"
+    cat > "$SKILLS_DIR/change-review/SKILL.md" <<'PONYGO_EOF'
+---
+name: change-review
+description: 何时用：评审一处变更（工作区 diff / 单个提交 / 分支）是否符合已记录决策时——对照相关 ADR 查对应性、same-commit 文档、Status 迁移需求。多类大改先拆评审 scope，一次只审一个主题。
+---
+
+# change-review —— 变更评审（读旧 ADR 再动手）
+
+一次轻量、可复现的单变更评审。只产出 **blocker / non-blocker + 证据**，
+不代为决策（修不修、值不值归用户）。
+
+## 真相源（冲突以它们为准）
+
+- `.agents/notes/README.md` —— 决策契约 + 读触发规则
+- `.agents/skills/write-adr/SKILL.md` —— 写前检索程序 + 对应性校准
+- `.meta/constitution/constitution.md` —— 常载命约（先 ADR 后代码 / same-commit）
+- `docs/AGENTS.md` —— 文档标准的家（用户文档落点）
+
+## 步骤
+
+1. **定范围**：评审对象是工作区 diff、单个提交还是分支？列出文件清单。
+   多主题混装先要求拆 scope（一次评审只审一个主题；混装本身记一条 non-blocker）。
+2. **检索相关 ADR**：按主题词、模块路径、关键符号 `grep -r` 扫 `.agents/notes/`
+   活动树（archived 只读史不判）。无命中且变更非平凡 → 先按 write-adr 补 ADR 再评审
+   （无对应 ADR 的评审是无米之炊）。
+3. **逐项检查**（每项附磁盘证据）：
+   - **对应性**：ADR 的 Problem/Decision 与代码现实一致吗？用 `grep`/`git log -S <关键符号>`
+     验证声称的构造/行为存在；同提交携带的 ADR 是否文题相符（文不对题 = blocker）？
+   - **same-commit 文档**：改用户可见行为/契约/配置了吗？对应文档的家（README/包 README/
+     docs/）同步更新了吗？计数排除 `.agents/notes/`（ADR 不算用户文档更新）。
+   - **Status 迁移**：PR 落 proposed note 是否同 diff 改写为 implemented？新废弃旧决策是否
+     走 supersession（同一提交处理）？
+   - **门禁与测试证据**：行为变更有聚焦测试吗？门禁全绿吗？（只认命令输出，不认口头声称）
+4. **输出报告**：blocker（必须修：文不对题、无 ADR 的非平凡变更、Status 失真）/
+   non-blocker（建议修：文档滞后、nit）各附证据；末尾一句话：合入条件。
+
+## 校准样例
+
+- 正例：评审报告每条 blocker 都附 `git show --stat <sha>`、ADR 路径、`grep` 命中行；
+  "一个可证实 blocker 的短评审 > 一串 nit"。
+- 反例：无证据断言"这段代码与 ADR 不符"却不给符号对照；把 review 判断说成"机器已验证"；
+  堆 20 个 nit 却漏掉文不对题的 ADR。
+- 反例（文不对题）：TUI 功能提交携带多协议提案——标题与代码无关，记 blocker 并要求拆条。
+- 边界（靠 review）：重构归类、改动是否用户可见——判据管不到，列疑点 + 证据让人定夺。
+
+## 验证与报告
+
+- 本技能无退出码门禁（审查是 review 层）。
+- 交付物 = 评审报告（blocker/non-blocker + 证据 + 合入条件）。
+- 后续动作：blocker 修完重审；需补/迁移的 note 按 write-adr 落盘——审完不落盘等于没审。
 PONYGO_EOF
   fi
 
@@ -868,7 +999,7 @@ warn_governance_hygiene() {
     today=$(date '+%F')
     while IFS= read -r -d '' f; do
       b="${f##*/}"
-      [ "$b" = "README.md" ] && continue
+      [ "$b" = "README.md" ] || [ "$b" = "AGENTS.md" ] && continue
       d8="${b:0:10}"
       if printf '%s\n' "$d8" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' && [[ "$d8" > "$today" ]]; then
         future_n=$((future_n+1)); [ "$future_n" -le 3 ] && future_names="${future_names}${b}；"
@@ -955,13 +1086,13 @@ verify_ladder() {
 
   if [ "$validated" = "1" ]; then
 
-    # ---- L1（1.1-1.7，声明级 ≥1 时验；决策计数排除集 {README.md, *.zh.md}）----
+    # ---- L1（1.1-1.9，声明级 ≥1 时验；决策计数排除集 {README.md, AGENTS.md, *.zh.md}）----
     if [ "$lv" -ge 1 ]; then
       verified_range="L0-L1"
       [ -d "$DECISIONS_DIR" ] || vl_fail "1.1 .agents/notes/ 缺失 → 建 notes/ 与四态子目录"
       local n_dec=0
       n_dec=$(count_decisions)
-      [ "${n_dec:-0}" -gt 0 ] || vl_fail "1.2 无决策记录（排除 README.md / *.zh.md）→ 写第一篇 ADR 落 proposed/ 或 implemented/"
+      [ "${n_dec:-0}" -gt 0 ] || vl_fail "1.2 无决策记录（排除 README.md / AGENTS.md / *.zh.md）→ 写第一篇 ADR 落 proposed/ 或 implemented/"
       # 1.3 顶层目录 ⊆ 四态封闭集（路径即标签，杂项目录即违例）
       while IFS= read -r d; do
         case " $LIFECYCLES " in *" $d "*) ;; *)
@@ -983,13 +1114,13 @@ verify_ladder() {
         if [ "${#slashes}" -ne 2 ]; then
           n15=$((n15+1)); [ "$n15" -le 3 ] && names15="${names15}${rel}；"
         fi
-      done < <(find "$DECISIONS_DIR" -type f -name '*.md' ! -name 'README.md' -print0 2>/dev/null)
+      done < <(find "$DECISIONS_DIR" -type f -name '*.md' ! -name 'README.md' ! -name 'AGENTS.md' -print0 2>/dev/null)
       [ "$n15" -eq 0 ] || vl_fail "1.5 有决策文件未恰好位于 {lifecycle}/{class}/ 两级（如：${names15%;}）→ 移到 {lifecycle}/{class}/ 下"
       # 1.6 文件名格式 + 日期合法性（README 豁免；date 不可用时在结论行降级标注）
       local n16=0 names16="" n16d=0 names16d=""
       while IFS= read -r -d '' f; do
         b="${f##*/}"
-        [ "$b" = "README.md" ] && continue
+        [ "$b" = "README.md" ] || [ "$b" = "AGENTS.md" ] && continue
         if ! printf '%s\n' "$b" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}-.+\.md$'; then
           n16=$((n16+1)); [ "$n16" -le 3 ] && names16="${names16}${b}；"
         elif [ "$DATE_OK" = "1" ]; then
@@ -1003,7 +1134,7 @@ verify_ladder() {
       local n17=0 names17=""
       while IFS= read -r -d '' f; do
         b="${f##*/}"
-        [ "$b" = "README.md" ] && continue
+        [ "$b" = "README.md" ] || [ "$b" = "AGENTS.md" ] && continue
         rel="${f#"$DECISIONS_DIR"/}"
         lc="${rel%%/*}"
         st=$(sed -n 's/\r$//;s/^Status:[[:space:]]*//p' "$f" 2>/dev/null | head -n1 | awk '{print $1}')
@@ -1024,7 +1155,7 @@ verify_ladder() {
       local n18=0 names18=""
       while IFS= read -r -d '' f; do
         b="${f##*/}"
-        [ "$b" = "README.md" ] && continue
+        [ "$b" = "README.md" ] || [ "$b" = "AGENTS.md" ] && continue
         rel="${f#"$DECISIONS_DIR"/}"
         lc="${rel%%/*}"
         case "$lc" in
@@ -1232,8 +1363,8 @@ cmd_audit() {
   total=$((total+1))
   if [ -d "$DECISIONS_DIR/rejected" ] && [ -n "$(ls -A "$DECISIONS_DIR/rejected" 2>/dev/null | grep -vE '^(README\.md|\.gitkeep)$')" ]; then hit=$((hit+1)); fi  # 被否选项留痕（占位文件不计）
   total=$((total+1))
-  # 状态与内容一致：反向查缺 Status 头的 md（允许义务外的 README 豁免）
-  bad_status=$(find "$DECISIONS_DIR" -name '*.md' ! -name 'README.md' -exec grep -L '^Status:' {} + 2>/dev/null | wc -l | tr -d ' ')
+  # 状态与内容一致：反向查缺 Status 头的 md（允许义务外的 README/AGENTS.md 豁免）
+  bad_status=$(find "$DECISIONS_DIR" -name '*.md' ! -name 'README.md' ! -name 'AGENTS.md' -exec grep -L '^Status:' {} + 2>/dev/null | wc -l | tr -d ' ')
   [ "${bad_status:-0}" -eq 0 ] && hit=$((hit+1))
 
   if [ "$LEVEL_CHOICE" = "M" ]; then

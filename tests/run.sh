@@ -146,6 +146,11 @@ s02_init() {
   grep -q 'disable-model-invocation: true' "$T/.agents/skills/governance-review/SKILL.md" && ok "governance-review 禁自主路由" || bad "governance-review 未禁自主路由"
   [ -f "$T/docs/AGENTS.md" ] && ok "文档标准家 docs/AGENTS.md 生成（agent 自动加载）" || bad "docs/AGENTS.md 缺失"
   [ -f "$T/README.md" ] && ok "根 README 人读契约生成" || bad "根 README 缺失"
+  [ -f "$T/.agents/notes/AGENTS.md" ] && ok "notes/AGENTS.md 生成（写前检索义务自动加载）" || bad "notes/AGENTS.md 缺失"
+  [ -f "$T/.agents/notes/archived/AGENTS.md" ] && ok "archived/AGENTS.md 生成（冻结规则自动加载）" || bad "archived/AGENTS.md 缺失"
+  [ -f "$T/.agents/skills/change-review/SKILL.md" ] && ok "change-review 预置（读侧入口）" || bad "change-review 缺失"
+  grep -q '何时用' "$T/.agents/skills/change-review/SKILL.md" && ok "change-review 含触发式 description" || bad "change-review 缺触发式 description"
+  grep -q '读触发规则' "$T/.agents/notes/README.md" && ok "notes/README 含读触发枚举" || bad "notes/README 缺读触发枚举"
   [ -f "$T/AGENTS.md" ] && [ -f "$T/CLAUDE.md" ] && ok "模板态投影初始引导（bootstrap）" || bad "模板态未投影初始引导"
   grep -q '初始引导' "$T/AGENTS.md" && ok "投影含 bootstrap 标记" || bad "投影缺 bootstrap 标记"
   run_cli "$T" init --yes
@@ -529,6 +534,24 @@ s14_decisions_readme() {
     bad "生成 gates/README 与模板不一致"
   fi
   grep -q 'pre-commit' "$T/.meta/gates/README.md" && ok "gates 模板含 P7 分层" || bad "gates 模板缺 P7 分层"
+  if diff <(tr -d '\r' < "$T/.agents/skills/change-review/SKILL.md") \
+          <(tr -d '\r' < "$ROOT/.agents/skills/change-review/SKILL.md") >/dev/null 2>&1; then
+    ok "生成 change-review/SKILL.md 与模板 eol 归一后一致"
+  else
+    bad "生成 change-review/SKILL.md 与模板不一致"
+  fi
+  if diff <(tr -d '\r' < "$T/.agents/notes/AGENTS.md") \
+          <(tr -d '\r' < "$ROOT/.agents/notes/AGENTS.md") >/dev/null 2>&1; then
+    ok "生成 notes/AGENTS.md 与模板 eol 归一后一致"
+  else
+    bad "生成 notes/AGENTS.md 与模板不一致"
+  fi
+  if diff <(tr -d '\r' < "$T/.agents/notes/archived/AGENTS.md") \
+          <(tr -d '\r' < "$ROOT/.agents/notes/archived/AGENTS.md") >/dev/null 2>&1; then
+    ok "生成 archived/AGENTS.md 与模板 eol 归一后一致"
+  else
+    bad "生成 archived/AGENTS.md 与模板不一致"
+  fi
 }
 
 s15_upgrade() {

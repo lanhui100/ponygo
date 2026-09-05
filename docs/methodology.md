@@ -166,6 +166,8 @@ Status: <status>
 
 每次新增 note 触发一次范围化审查：搜索覆盖同一决策/机制/被拒备选的既有记录，分类完全/部分取代并**在同一变更中处理**（债务不过夜）。作者拥有最新的所有权证据，因此审查发生在写作时、而非延迟到定期整理。无 supersession 检查，决策语料会在几个月内腐烂成噪音。
 
+**ponygo 落地（v2.2）**：写前检索程序进 write-adr（判定表：无关直写/相关链入/被取代同提交归档/部分落地拆条）+ `.agents/notes/AGENTS.md` 自动加载检索义务 + change-review 评审时复查对应性。dsh 的 archive 技能是独立重型流；ponygo 把 supersession 收为写流程的一步（P9：少一个技能的维护税），归档冻结本身在 L4 目标画像。
+
 ### 2.7 反索引：不要集中式 INDEX.md
 
 `2026-07-19-remove-generated-agent-note-index` 记录了反索引决策：集中式索引重复路径/文件名日期/H1 已编码的事实，且成为无关分支的 merge hotspot。active tree 本身就是 inventory——树导航 + 仓库搜索提供发现，README 是精修入口。
@@ -217,6 +219,7 @@ description 自足性原则：技能路由发生在"只有摘要可见"的懒加
 7. **校准样例锚定判据**：样例间差异维度 = 判断的真实依据；判定线用具体事实（"foundational authority"）不用形容词（dsh-archive-agent-notes 归档样例）；
 8. **被永久引用的资产获得不变性义务**：assets 分支永不重写——与归档哈希冻结同源。
 9. **对应性校准**：ADR 必须与其治理的代码对应——标题文题相符、Problem/Decision 引用代码路径或提交；多阶段提案部分落地时拆条或链入。存在性判据查"有没有 ADR"，对应性只能由 review 按"抽 implemented 对代码现实、抽 proposed 查已落地未迁移"程序守（ponyllm 8f37827 反例：TUI 功能提交携带多协议提案）。
+10. **读写配对**：写技能（write-adr：落笔前检索旧 ADR）与读技能（change-review：评审时先检索再对照）是同一循环的两端；读触发规则（写前/评审/找简化/归档/接手）与写触发规则对称载入 notes/README。只给写触发不给读触发，决策记录就是只写存档（ponygo v2.2 补齐）。
 
 ---
 

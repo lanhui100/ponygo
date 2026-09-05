@@ -16,18 +16,28 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 1. **判触发**：对照 description 的枚举，命中任一即写。拿不准 → 写（多记成本一段文字，漏记成本永久丢失）。
    **时序**：决策记录必须**先于对应代码变更、或与代码变更同一提交**——先 ADR 后代码；
    事后补记是债务，不是常态（时序本身是语义判断、靠 review，用 `git log` 对照 ADR 提交与代码提交校准）。
-2. **选 lifecycle**：`proposed/`（未实现）或 `implemented/`（随本次变更落地）。
-3. **选 class**：`feature`（新能力）/ `bug-fix`（修缺陷）/ `simplification`（减复杂度）/ `architecture`（交付源码的结构）/ `process`（代码周围的工具与流程）/ `testing`（测试策略）。都不够 → 考虑在 `notes/classes.local` 登记领域扩展（扩展即一次治理决策，须评审）。
-4. **建文件**：`.agents/notes/{lifecycle}/{class}/$(date +%F)-<topic-title>.md`，topic 用 kebab-case。
-5. **头部**：第一行 `# Agent Note: <title>`，空行，`Status: <与所在目录一致>`（rejected 可带一行理由：`rejected — <理由>`）。
-6. **正文**：`## Problem` 开头（先写动机，脱离方案也成立），随后**按 lifecycle 选骨架**（判据 1.8 机械校验，选错即 FAIL）：
+2. **写前检索**（必做，不是提示）：落笔前先查旧 ADR 是否覆盖同一决策——
+   用主题词、模块路径、关键符号 `grep -r` 扫 `.agents/notes/` 活动树
+   （proposed/implemented/rejected；archived 只读史不判），按下面判定表处理：
+
+   | 检索结果 | 动作 |
+   |---|---|
+   | 无命中 | 直接写（本条即首案） |
+   | 命中相关旧条 | 读全文；新 note 正文链入旧条路径；旧条若被部分取代，链回新条 |
+   | 命中被取代的旧条 | 走 supersession：旧 implemented 条移入 archived/（冻结，原貌不动），或链入说明被哪条取代；**同一提交处理，不 deferred** |
+   | 多阶段提案部分落地 | 落地部分拆条记 implemented，未落地部分留在 proposed（勿让 proposed 整条失准） |
+3. **选 lifecycle**：`proposed/`（未实现）或 `implemented/`（随本次变更落地）。
+4. **选 class**：`feature`（新能力）/ `bug-fix`（修缺陷）/ `simplification`（减复杂度）/ `architecture`（交付源码的结构）/ `process`（代码周围的工具与流程）/ `testing`（测试策略）。都不够 → 考虑在 `notes/classes.local` 登记领域扩展（扩展即一次治理决策，须评审）。
+5. **建文件**：`.agents/notes/{lifecycle}/{class}/$(date +%F)-<topic-title>.md`，topic 用 kebab-case。
+6. **头部**：第一行 `# Agent Note: <title>`，空行，`Status: <与所在目录一致>`（rejected 可带一行理由：`rejected — <理由>`）。
+7. **正文**：`## Problem` 开头（先写动机，脱离方案也成立），随后**按 lifecycle 选骨架**（判据 1.8 机械校验，选错即 FAIL）：
 
    | lifecycle | 骨架 |
    |---|---|
    | `proposed/` | `## Proposal`（将来时）→ `## Alternatives considered` → `## Acceptance criteria` → `## Risks` |
    | `implemented/` | `## Decision`（现在时）→ `## Alternatives considered`（必填）→ `## Consequences`（可选） |
    | `rejected/` | 提案原文冻结（保留 `## Proposal`），verdict 只写 `Status:` 行 |
-7. **迁移状态** = 移动文件到目标 lifecycle + 改 `Status:` 行 + 把提案时代标题改写为现在时——三件事在同一次变更内完成。
+8. **迁移状态** = 移动文件到目标 lifecycle + 改 `Status:` 行 + 把提案时代标题改写为现在时——三件事在同一次变更内完成。
 
 ## 校准样例
 

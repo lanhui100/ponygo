@@ -68,6 +68,23 @@ Status: <status>
 禁止根目录游离 `*plan*.md` / `ROADMAP.md`——计划烂在根目录永远不会被迁移，
 且是 spec-speak 的滋生地（status/audit 对游离计划文件输出 WARN）。
 
+## 读触发规则（谁在什么时候必须读旧 ADR，与写触发对称）
+
+只写不读，决策记录就是只写存档。以下时刻必须先读相关旧 ADR 再动手：
+
+- **写新 ADR 前**：按主题词/模块路径/关键符号 `grep` 检索活动树（proposed/implemented/
+  rejected；archived 只读史不判）——命中则读全文、链入、判 supersession（见 write-adr
+  写前检索程序）；
+- **评审变更时**：用 change-review 技能——先检索相关 ADR 再逐项对照（对应性/same-commit/
+  Status 迁移），无对应 ADR 的非平凡变更先补 ADR 再评审；
+- **找简化/归档时**：读 note 树理解架构意图，按"未来价值"分类（能指导未来工作的理由/
+  备选/负面保证保留，其余归档）；
+- **治理审查时**：governance-review 决策面抽查（implemented 是否真落地、proposed 是否
+  已实施未迁移）；
+- **接手陌生模块时**：先读相关 implemented 再读代码——决策史是比代码更便宜的地图。
+
+读的结论只进两处：新 note 的链入/拆条，或评审报告的问题清单——不落盘等于没读。
+
 ## 与下一级的关系
 
 有决策记录是 L1 的判据之一；是否"承诺可验"（L2）取决于 `gates/` 是否有非零退出门禁。
