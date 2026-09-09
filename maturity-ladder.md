@@ -139,12 +139,13 @@ L0–L2 的每条退出标准，落到**布尔检查项 + 锚定命令**。这�
 |---|---|---|---|
 | 2.1 | `gates/` 目录存在且非空 | `find .meta/gates -type f ! -name 'README.md' ! -name '.gitkeep' \| wc -l` | 结果 > 0 |
 | 2.2 | 门禁脚本可运行（非零退出是"拒绝"语义） | `<gate-script> --help` 或跑一次空样本 | 返回可理解的帮助 / 退出码 |
-| 2.3 | 至少一个门禁带负样本 spec（构造非法样本证明门会拒绝） | `test -f .meta/gates/*.spec.*`（按实际命名） | 存在 |
+| 2.3 | 至少一个门禁带负样本 spec（构造非法样本证明门会拒绝） | `find .meta/gates -type f -name '*.spec.*'` | 存在 |
 | 2.4 | 本地钩子已挂载（若交付） | `git config core.hooksPath` | 指向已配置路径 |
 | 2.5 | 文档分层已激活：`docs-tier/README.md` 非模板态（含"已激活文档家"标记） | `grep -q '已激活' .meta/docs-tier/README.md` | 存在 |
 
 > L2 判据的关键不在"脚本多"，而在**每条"必须/禁止"承诺都能被一条非零退出命令抓到**（P2）。2.2–2.3 是 L2 能被称为"承诺可验"的最低自证。
 > 2.1 的 README/`.gitkeep` 豁免：占位说明文件不算门禁落地。2.2 的机械化实现以 `bash -n` 语法校验为**代理判据**，真判据仍是 `<gate> --help` / 空样本拒绝非零退出，供人工补验。
+> 2.3 的机械化实现：存在性判据（形状，靠 review）。**执行判据**是 opt-in 的 `ponygo audit --run-specs`——跑 `*.spec.sh` 并断言各自 exit 0（契约见 `.meta/gates/README.md`；有 `timeout` 时 30 秒上限；`PONYGO_IN_SPEC=1` 时 SKIPPED 且**不计入 PASS**）。为什么默认不执行：只读命令（`status`/`audit`）不得执行仓库脚本（对陌生遗留仓库 = 任意代码执行），故执行需显式开关。"空 spec 文件"过得了存在性，证明不了任何拒绝语义。
 > 2.5 的"文档分层已激活"由 `ponygo init` 生成**模板态**（仅骨架占位）——升到 L2 时把 `.meta/docs-tier/README.md` 推进为"已激活文档家清单"（doc-sync 门作为 L3 依赖，§2），判据只锁"已从模板态离开"这一形状。tier 放置正确性靠 review（§2 诚实声明）。
 
 ---

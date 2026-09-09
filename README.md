@@ -44,9 +44,17 @@ curl -fsSL https://raw.githubusercontent.com/lanhui100/ponygo/main/install.sh | 
 生产环境建议钉版本 + 校验和（防"curl|bash 拉的是未知内容"）：
 
 ```bash
+# 1) 取该版本的校验和（发布物 = Release 附件 ponygo.sha256，内容为裸哈希；
+#    未发布时按下方口径本地自算。awk 剥掉文件名列，与 install.sh 的整串比对口径对齐）
+SHA=$(curl -fsSL https://github.com/lanhui100/ponygo/releases/download/v2.3.0/ponygo.sha256 | awk '{print $1}')
+# 2) 钉版本 + 校验和安装
 curl -fsSL https://raw.githubusercontent.com/lanhui100/ponygo/main/install.sh | \
-  PONYGO_VERSION=v2.2.0 PONYGO_SHA256=<公布的校验和> bash
+  PONYGO_VERSION=v2.3.0 PONYGO_SHA256="$SHA" bash
 ```
+
+校验和的生成口径（维护者）：`git checkout v2.3.0 && sha256sum ponygo | awk '{print $1}' > ponygo.sha256`，
+随 Release 附件发布。`ponygo` 在仓库中以 LF 存储（`.gitattributes: eol=lf`），故 raw 下载与本地自算口径一致；
+未公布校验和之前，方式 A 的默认路径（不设 `PONYGO_SHA256`）仍然可用。
 
 **方式 B：源码目录一键安装（clone 本仓库后）**
 
@@ -67,8 +75,8 @@ git clone https://github.com/lanhui100/ponygo.git && export PATH="$PWD/ponygo:$P
 
 ```bash
 ponygo init      # 新项目：在仓库根生成 .agents/ + .meta/ 治理骨架 + meta.yaml（level: 0）
-ponygo audit     # 旧项目改造（或随时体检）：按自适应审计打分，输出缺口与最小改进动作；有治理根时内嵌级自洽验证，判据不符 exit 1
-ponygo status    # 查看当前成熟度级（L0-L6）与骨架完整性，并对声明级（L0-L2）判据逐项机械验证，不符即非零退出
+ponygo audit     # 旧项目改造（或随时体检）：按自适应审计打分，输出缺口与最小改进动作；有治理根时内嵌级自洽验证，判据不符 exit 1。加 --run-specs 执行 gates/*.spec.sh 负样本自检（opt-in，默认不执行仓库脚本）
+ponygo status    # 查看当前成熟度级（L0-L5）与骨架完整性，并对声明级（L0-L2）判据逐项机械验证，不符即非零退出
 ponygo upgrade   # 跟随框架升级：把本仓库新版 ponygo 的命令面/判据同步进已有治理根
 ponygo sync      # 把 constitution 投影到根 AGENTS.md / CLAUDE.md（生成物，勿手编；槽位未填的模板态投影初始引导 bootstrap）
 ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|off>
@@ -98,7 +106,7 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
     ├── write-adr/SKILL.md     #    框架交付的自动路由技能（写 ADR）
     └── governance-review/SKILL.md  # 框架交付的用户点名技能（全面治理审查）
 .meta/
-├── meta.yaml                  # 合法键仅两个：level（成熟度级，整数 0-6，如 level: 2）与 ai-surface；版本由 git 派生，组件清单由目录存在性充当
+├── meta.yaml                  # 合法键仅两个：level（成熟度级，整数 0-5，如 level: 2）与 ai-surface；版本由 git 派生，组件清单由目录存在性充当
 ├── constitution/              # 宪法：语义规范（"什么是好的"），供投影到 AGENTS.md / CLAUDE.md
 │   └── constitution.md        #    模板态（槽位未填）时 sync 投影初始引导 bootstrap：AI agent 进场即有指引，
 │                              #    由 agent 完成填槽/重投影/首篇 ADR；填槽后重跑 sync，引导自动被常载命约替换
@@ -138,6 +146,11 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
 
 > 上方是 **CLI 内嵌的精简子集**（其"10/14 项"与下文 checklist 的"骨架 8 / 机制 15 / 精微 8"是两套计数，勿混用）；全量细目见 `audit/checklist.md`（骨架 8 / 机制 15 / 精微 8 标 future，为权威真源——CLI 与文档口径不一致时以 checklist 为准）。四问记分卡：决策记在哪 / 承诺怎么强制 / 重复劳动怎么复用 / 过时怎么退场。
 
+> **只读边界**：`status` / `audit` 默认**不执行**仓库里的任何脚本（对陌生遗留仓库执行脚本 = 任意代码执行）。
+> 判据 2.3 的**执行侧**（跑 `gates/*.spec.sh` 并断言 exit 0）由显式开关承担：`ponygo audit --run-specs`，
+> 或在 CI / pre-push 层逐个跑 `bash .meta/gates/<name>.spec.sh`（**勿写 `*.spec.sh` 通配**——
+> shell 只会把第一个匹配当命令、其余沦为参数，静默漏跑）。`--dry-run` 下一律跳过。
+
 ---
 
 ## 5. 与旧项目的关系
@@ -175,7 +188,7 @@ CLI 从不假设项目是空仓；它对"已有治理"与"零治理但历史厚�
 
 ### 6.3 合规免责（重要）
 
-**ponygo 是工程化治理脚手架，爬满 L6 不构成任何监管合规背书**（FDA、ISO 13485、ISO 26262、SOC2、PIPL 等），不替代贵组织的质控与审计流程。强监管项目请另行接入专用合规框架——`ponygo audit` 检测到 `compliance/`、`traceability/` 目录时也会输出此免责。
+**ponygo 是工程化治理脚手架，爬满 L5 不构成任何监管合规背书**（FDA、ISO 13485、ISO 26262、SOC2、PIPL 等），不替代贵组织的质控与审计流程。强监管项目请另行接入专用合规框架——`ponygo audit` 检测到 `compliance/`、`traceability/` 目录时也会输出此免责。
 
 ---
 
@@ -189,7 +202,7 @@ CLI 从不假设项目是空仓；它对"已有治理"与"零治理但历史厚�
 | `.github/workflows/ci.yml` | 回归门禁挂载：ubuntu + windows Git Bash 双平台跑 tests/run.sh + 聚合门 | 维护者；分支保护依赖 |
 | `docs/methodology.md` | 原理层：方法论设计依据（源自 deepseek-harness） | 想懂"为什么"的人；机制层的理论源头 |
 | `.meta/` + `.agents/` | 治理根骨架（双根）：.meta/ = constitution / gates / docs-tier / meta.yaml；.agents/ = notes / skills | 实例化产物；由 `ponygo init` 生成进用户项目 |
-| `maturity-ladder.md` | 成熟度阶梯定义（L0–L6 逐档判据） | `ponygo status` 与 review 的判定来源 |
+| `maturity-ladder.md` | 成熟度阶梯定义（L0–L5 逐档判据） | `ponygo status` 与 review 的判定来源 |
 | `audit/` | 四问记分卡 + 分层细目库 + 自适应深度选择器 | `ponygo audit` 的执行依据 |
 | `audit/checklist.md` | 分层细目（骨架 / 机制 / 精微三层条目） | 审计打分时的逐项参照 |
 | `checklists/` | 双入口清单：init（冷启动）+ audit（改造） | 使用者；落地动作指引 |

@@ -279,6 +279,10 @@ description 自足性原则：技能路由发生在"只有摘要可见"的懒加
 
 - **门被门检验**：每个验收路径有负样本 spec（`archived-agent-notes.spec.ts` 构造"删 sidecar + 错头"拒绝 incomplete triplet、"改 content"拒绝 sealed hash changed）；`ci-workflow.spec.ts` 把整个 CI 形状钉死——门本身也是代码，配置变更像任何变更一样评审；
 - **窄例外优于全局关闭**（`.oxlintrc.staged.json` 是 staged 专用精简档，非全仓降标）；
+- **只读判定不执行仓库代码**：`status`/`audit` 这类判定命令默认只读——不执行实例里的脚本
+  （对陌生遗留仓库执行脚本 = 任意代码执行）。执行型判据（跑负样本 spec 证明门会拒绝）须显式
+  opt-in（`ponygo audit --run-specs`）或挂在 CI/pre-push 层；护栏命中时如实报 `SKIPPED`，
+  **不得并入"全部 PASS"**——结论行必须限定它到底验证了什么；
 - **证据面三禁令**：不默认全量、不重复已过检查、不为遮掩降低阈值；
 - 绕行仅经用户同意并报告实情（dsh-pre-push-checks：bypass 本地 hook 只在用户明确同意时，且报告失败与 CI 为何预期不同）。
 

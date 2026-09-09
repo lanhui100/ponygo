@@ -4,12 +4,13 @@
 #
 # 用法：
 #   ponygo init     [--yes] [--dry-run]   在项目根建立/注入 .agents/ + .meta/ 治理骨架
-#   ponygo audit    [--level S|M] [--dry-run]  自适应体检：打分 + 缺口 + 最小改进动作（有治理根时内嵌级自洽验证，判据不符 exit 1）
+#   ponygo audit    [--level S|M] [--run-specs] [--dry-run]  自适应体检：打分 + 缺口 + 最小改进动作（有治理根时内嵌级自洽验证，判据不符 exit 1）
 #   ponygo status                         查看成熟度级与骨架完整度（骨架缺口或声明级判据不符 exit 1）
 #   ponygo upgrade                        跟随框架升级指引（首版不实际合并，见 -h）
 #   ponygo sync                           把 constitution 投影到根 AGENTS.md / CLAUDE.md（模板态投影初始引导）
 #
 # 设计约束：判定优先只读；破坏性动作前必须确认（或 --yes）。
+#           只读命令（status/audit）不执行仓库脚本——执行需显式 opt-in（audit --run-specs）。
 #           非零退出（non-zero exit）语义：凡机器可查的缺口，命令 exit 1。
 # 平台边界：Windows Git Bash / GNU 用户态（find -printf、sed -i、date -d 按 GNU 语义）。
 # ============================================================
@@ -365,6 +366,33 @@ PONYGO_EOF
 - 配一个负样本 spec（`*.spec.*`，构造非法样例证明门会拒绝）；
 - 挂载：`git config core.hooksPath .githooks` + 在 .githooks/ 放 pre-commit / pre-push；
 - 每门一条"承诺 → 命令"的对应（凡机械可查的承诺必配命令，P2）。
+
+## 负样本 spec 的两种形态（判据 2.3）
+
+| 形态 | 判据强度 | 写法 |
+|---|---|---|
+| `*.spec.sh` | **执行判据**——由 `ponygo audit --run-specs`（opt-in）执行，exit 0 = 自检通过 | 自造非法样本 → 断言门非零拒绝；自造合法样本 → 断言门放行；全过才 exit 0 |
+| `*.spec.md` 等其它后缀 | 形状判据（存在性，靠 review） | 只作说明/占位；机器不执行，**不得冒充真判据** |
+
+**为什么执行是 opt-in**：`status` / `audit` 的默认语义是"判定优先只读"——不执行仓库里的脚本
+（对陌生遗留仓库执行脚本 = 任意代码执行）。执行判据由显式开关承担，或在 CI / pre-push 层直接跑
+（那两层本来就允许执行代码）：
+
+```bash
+ponygo audit --run-specs          # 跑 gates/*.spec.sh，断言各自 exit 0
+bash .meta/gates/<name>.spec.sh   # CI / pre-push 层的等价写法
+```
+
+`*.spec.sh` 契约（违反即执行判据失败）：
+
+- **自包含**：从自身路径解析仓库根（`ROOT=$(cd "$(dirname "$0")/../.." && pwd)`），不依赖调用者 cwd；
+- **只读仓库**：样本一律建在 `mktemp -d` 临时目录、退出时清理；不得改动仓库文件；
+- **秒级**：有 `timeout` 时施加 30 秒上限（挂死的 spec 不会拖死体检）；
+- **exit 0 = 自检通过**（"门确实会拒绝非法样本"）；非零 → 报 FAIL 并回显该 spec 输出尾部；
+- **防递归**：`PONYGO_IN_SPEC=1` 已在环境中时跳过并报 `SKIPPED`——**SKIPPED 不计入 PASS**。
+
+> 诚实标注（P6）：执行判据只证明"脚本自检通过"，证明不了"脚本真的构造了非法样本"——后者靠 review；
+> 非 `.sh` 后缀的 spec 连执行都没有，只是形状判据。"放个空 spec 文件"过得了存在性，证明不了任何拒绝语义。
 
 ## 提醒档（v2.1，非门禁）：doc-freshness WARN 片段
 
@@ -1210,9 +1238,11 @@ verify_ladder() {
         bash -n "$f" 2>/dev/null || { sh_bad=1; [ -z "$shf" ] && shf="$f"; }
       done < <(find "$META_DIR/gates" -type f -name '*.sh' -print0 2>/dev/null)
       [ "$sh_bad" = "0" ] || vl_fail "2.2 门禁脚本语法错误：$shf → 修语法；并人工补真判据（'<gate> --help' / 空样本须非零拒绝）"
-      # 2.3 至少一个门禁带负样本 spec（*.spec.*，收紧防误配）
+      # 2.3 负样本 spec（*.spec.*）：存在性判据（形状，靠 review）。
+      # 执行判据是 opt-in 的 `ponygo audit --run-specs`——只读命令不执行仓库脚本
+      # （设计约束"判定优先只读"，见文件头）。
       if ! find "$META_DIR/gates" -type f -name '*.spec.*' -print -quit 2>/dev/null | grep -q .; then
-        vl_fail "2.3 gates/ 无负样本 spec（*.spec.*）→ 配一个证明门会拒绝非法样本的 spec 文件"
+        vl_fail "2.3 gates/ 无负样本 spec（*.spec.*）→ 配一个证明门会拒绝非法样本的 spec（推荐 *.spec.sh 自检脚本，用 'ponygo audit --run-specs' 验证）"
       fi
       # 2.4 hooksPath 已设且钩子目录非空。仅在 git 仓库内判定——非 git 目录读到的
       # 全局配置与本项目无关，视为未设（防假 PASS）。
@@ -1244,19 +1274,86 @@ verify_ladder() {
     return 1
   fi
 
+  local spec_note=""
+  [ "${SPEC_SKIPPED:-0}" = "1" ] && spec_note="；2.3 执行判据 SKIPPED——本次未验证"
   echo ""
   if [ "$lv" = "0" ]; then
     echo "级自洽验证：通过（纯 L0 长驻：合法终态）"
   else
     if [ "$DATE_OK" != "1" ]; then
-      echo "级自洽验证：通过（${verified_range} 机械判据 PASS；日期合法性：靠 review）"
+      echo "级自洽验证：通过（${verified_range} 机械判据 PASS${spec_note}；日期合法性：靠 review）"
     else
-      echo "级自洽验证：通过（${verified_range} 机械判据全部 PASS）"
+      echo "级自洽验证：通过（${verified_range} 机械判据全部 PASS${spec_note}）"
     fi
   fi
   [ "$verified_range" = "L0-L2" ] && \
-    echo "  注：2.2/2.3 是代理判据——2.2 查 bash -n 语法、2.3 查 *.spec.* 存在性。" && \
-    echo "      真判据靠人工补验：'<gate> --help' / 空样本须非零拒绝；负样本 spec 须真实构造非法样例并断言拒绝（只放一个空 spec 文件是形状合规，不算数）。"
+    echo "  注：2.2 与 2.3 均为代理判据——2.2 查 bash -n 语法、2.3 查 *.spec.* 存在性（只读命令不执行仓库脚本）。" && \
+    echo "      执行判据是 opt-in 的 'ponygo audit --run-specs'（跑 *.spec.sh 并断言 exit 0）；" && \
+    echo "      真判据的人工补验：'<gate> --help' / 空样本须非零拒绝。"
+  return 0
+}
+
+# ---------- 门禁负样本自检（opt-in：ponygo audit --run-specs） ----------
+# 判据 2.3 的执行侧：跑 gates/ 下全部 *.spec.sh，断言各自 exit 0
+# （exit 0 = 该 spec 已证明"门会拒绝非法样本"）。
+#
+# 为什么默认不跑：本 CLI 的设计约束是"判定优先只读"——status/audit 不得执行仓库里的
+# 任意脚本（对陌生遗留仓库执行脚本 = 任意代码执行）。故执行需显式 opt-in。
+#
+# 护栏：
+#   - 递归：PONYGO_IN_SPEC=1 已在环境中 → SKIPPED（**不计入 PASS**，exit 2）；
+#   - 超时：有 timeout 则 30 秒上限（挂死的 spec 不会拖死体检）；
+#   - 聚合：报告**全部**失败 spec（不只最后一个）。
+# 返回：0 全过 / 1 有失败 / 2 跳过（无 *.spec.sh 或有护栏命中）
+run_gate_specs() {
+  local n=0 bad=0 f out rc tail_ outfile
+  if [ "${PONYGO_IN_SPEC:-0}" = "1" ]; then
+    echo "  [skipped] 2.3 执行判据：检测到 PONYGO_IN_SPEC=1（递归护栏）——SKIPPED 不计入 PASS"
+    echo "            注：该变量若由外部预置，执行判据同样被跳过，且**不视为验证通过**。"
+    return 2
+  fi
+  if ! command -v timeout >/dev/null 2>&1; then
+    echo "  [warn]   本环境无 timeout：spec 自检**无时间上限**（挂死的 spec 会拖住体检）——如实披露，不假装有护栏。"
+  fi
+  outfile=$(mktemp 2>/dev/null) || outfile=""
+  while IFS= read -r -d '' f; do
+    n=$((n+1))
+    # 输出重定向到临时文件而非命令替换：命令替换会等管道写端关闭，
+    # 后台进程 + 立即退出的 spec 能拖住 timeout（实证）。
+    if [ -n "$outfile" ]; then
+      if command -v timeout >/dev/null 2>&1; then
+        PONYGO_IN_SPEC=1 timeout 30 bash "$f" >"$outfile" 2>&1; rc=$?
+      else
+        PONYGO_IN_SPEC=1 bash "$f" >"$outfile" 2>&1; rc=$?
+      fi
+      tail_=$(tail -n 3 "$outfile" 2>/dev/null | tr '\n' ' ')
+    else
+      if command -v timeout >/dev/null 2>&1; then
+        out=$(PONYGO_IN_SPEC=1 timeout 30 bash "$f" 2>&1); rc=$?
+      else
+        out=$(PONYGO_IN_SPEC=1 bash "$f" 2>&1); rc=$?
+      fi
+      tail_=$(printf '%s\n' "$out" | tail -n 3 | tr '\n' ' ')
+    fi
+    if [ "$rc" -ne 0 ]; then
+      bad=$((bad+1))
+      printf '  [FAIL] 2.3 spec 自检失败：%s（exit %s；输出尾部：%s）\n' \
+        "$f" "$rc" "${tail_:-（无输出）}"
+    else
+      printf '  [ok]   2.3 spec 自检：%s\n' "$f"
+    fi
+  done < <(find "$META_DIR/gates" -type f -name '*.spec.sh' -print0 2>/dev/null)
+  [ -n "$outfile" ] && rm -f "$outfile"
+
+  if [ "$n" -eq 0 ]; then
+    echo "  [skipped] 2.3 执行判据：gates/ 下无 *.spec.sh——SKIPPED 不计入 PASS（2.3 仍是形状判据）"
+    return 2
+  fi
+  if [ "$bad" -ne 0 ]; then
+    printf 'ponygo: 2.3 执行判据未通过：%s/%s 个 spec 自检失败（门可能已失效）\n' "$bad" "$n" >&2
+    return 1
+  fi
+  printf '  [ok]   2.3 执行判据：%s 个 spec 全部自检通过\n' "$n"
   return 0
 }
 
@@ -1306,7 +1403,7 @@ cmd_init() {
 
 cmd_audit() {
   # 自适应深度选择：探测重型信号 → M 档；全轻 → S 档
-  local heavy=0 reasons=""
+  local heavy=0 reasons="" spec_rc=0
   # 信号1：贡献者数 >= 3
   local contrib=0
   if [ -d .git ] && git rev-parse --verify HEAD >/dev/null 2>&1; then contrib=$(git shortlog -sne HEAD 2>/dev/null | wc -l | tr -d ' '); fi
@@ -1441,6 +1538,23 @@ cmd_audit() {
   fi
   # ---- 门禁分层报告（P7 时间经济性；报告性，非硬判据） ----
   gate_layers_report
+  # ---- 负样本自检（opt-in：--run-specs；默认不执行仓库脚本，见 run_gate_specs 头注）----
+  if [ "$RUN_SPECS" = "1" ]; then
+    echo ""
+    echo "===== 2.3 执行判据（--run-specs，opt-in） ====="
+    if [ "$DRY_RUN" = "1" ]; then
+      echo "  [skipped] --dry-run 下不执行任何仓库脚本——SKIPPED 不计入 PASS"
+    else
+      run_gate_specs; spec_rc=$?
+      # 0 = 全过；2 = SKIPPED（不计入 PASS，也不判 FAIL）；其余（含 1 与意外码）= 拒绝
+      case "$spec_rc" in
+        0) ;;
+        2) SPEC_SKIPPED=1
+           echo "  注：执行判据 SKIPPED——**不计入 PASS**（本次未验证门是否仍会拒绝非法样本）。" ;;
+        *) exit 1 ;;
+      esac
+    fi
+  fi
   # ---- 级自洽验证（EXTERNAL-001 P1-1：audit 不再把判据推给 status，直接内嵌）----
   # 有治理根且声明了 level 时，audit 顺手验级：判据不符 → 列 FAIL 项并 exit 1
   # （机器可查缺口 = 非零退出；audit 的"打分"语义不变，只是不再漏掉判据级结论）。
@@ -1535,7 +1649,7 @@ cmd_retire() {
       fi
       info "level 已降到 $target。超档机制（gates/skills/docs-tier）请按 P9 连根拔并录 decision。"
       ;;
-    *) die "retire 目标非法：$target（用 0-6 或 off）" ;;
+    *) die "retire 目标非法：$target（用 0-5 或 off）" ;;
   esac
 }
 
@@ -1546,7 +1660,7 @@ ponygo —— 项目工程化治理元框架命令行（单文件、零依赖）
 
 用法：
   ponygo init     [--yes] [--dry-run]    建立/注入 .agents/ + .meta/ 治理骨架（自判新/旧项目）
-  ponygo audit    [--level S|M]          自适应体检：打分 + 缺口 + 最小改进动作（判据不符 exit 1）
+  ponygo audit    [--level S|M] [--run-specs]  自适应体检：打分 + 缺口 + 最小改进动作（判据不符 exit 1）
   ponygo status                          查看成熟度级与骨架完整度（骨架缺口或声明级判据不符 exit 1）
   ponygo upgrade                         跟随框架升级指引（首版不实际合并）
   ponygo sync                            把 constitution 投影到 AGENTS.md / CLAUDE.md（模板态投影初始引导）
@@ -1556,15 +1670,17 @@ ponygo —— 项目工程化治理元框架命令行（单文件、零依赖）
   --yes       破坏性动作前不再确认
   --dry-run   只打印将执行的动作，不落盘
   --level S|M 强制指定审计深度档（默认按项目特征自适应）
+  --run-specs 执行 gates/ 下 *.spec.sh 负样本自检（opt-in；默认不执行仓库脚本）
 EOF
 }
 
 # ---------- 入口 ----------
-DRY_RUN=0; YES=0; LEVEL=""; CMD=""; RETIRE_LEVEL=""
+DRY_RUN=0; YES=0; LEVEL=""; CMD=""; RETIRE_LEVEL=""; RUN_SPECS=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --yes) YES=1 ;;
     --dry-run) DRY_RUN=1 ;;
+    --run-specs) RUN_SPECS=1 ;;
     --level) [ $# -ge 2 ] || die "--level 需要取值（如 --level S / --level off）"; shift; LEVEL="$1" ;;
     -h|--help) usage; exit 0 ;;
     init|audit|status|upgrade|sync|retire) CMD="$1" ;;
@@ -1572,6 +1688,11 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+# --run-specs 只属于 audit（执行仓库脚本的 opt-in 入口）；其余命令一律拒绝，避免静默忽略
+if [ "$RUN_SPECS" = "1" ] && [ "${CMD:-}" != "audit" ]; then
+  die "--run-specs 仅适用于 'ponygo audit'（只读命令不执行仓库脚本）"
+fi
 
 case "${CMD:-}" in
   init) cmd_init ;;

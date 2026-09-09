@@ -883,6 +883,141 @@ s26_warn_tier() {
   assert_contains "WARN 未来日期" "$R_OUT" "晚于今天"
 }
 
+s27_run_specs() {
+  echo "--- 场景27：判据 2.3 执行侧 opt-in（--run-specs）+ 只读默认 + 护栏（递归/dry-run）"
+  local T
+  # ① 只读不变量：默认 status/audit 不执行仓库脚本（spec 会落一个 WITNESS 见证文件）
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
+  printf '#!/usr/bin/env bash\ntouch "$(cd "$(dirname "$0")" && pwd)/WITNESS.txt"\nexit 0\n' \
+    > "$T/.meta/gates/x.spec.sh"
+  run_cli "$T" status
+  assert_eq "status 默认 exit 0" 0 "$R_RC"
+  [ -f "$T/.meta/gates/WITNESS.txt" ] && bad "status 执行了仓库脚本（违反只读不变量）" || ok "status 未执行仓库脚本"
+  run_cli "$T" audit
+  [ -f "$T/.meta/gates/WITNESS.txt" ] && bad "audit 默认执行了仓库脚本（违反只读不变量）" || ok "audit 默认未执行仓库脚本"
+
+  # ①b level:2 分支同样不得执行门禁脚本（2.2 只做 bash -n，不得执行）
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
+  printf '#!/usr/bin/env bash\ntouch "$(cd "$(dirname "$0")" && pwd)/GATE_WITNESS.txt"\nexit 0\n' \
+    > "$T/.meta/gates/readme.sh"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/readme.spec.sh"
+  printf 'level: 2\n' > "$T/.meta/meta.yaml"
+  run_cli "$T" status
+  [ -f "$T/.meta/gates/GATE_WITNESS.txt" ] && bad "level:2 status 执行了门禁脚本（2.2 应只做 bash -n）" || ok "level:2 status 未执行门禁脚本"
+
+  # ①c usage 必须披露开关（否则用户不知道它存在）
+  T=$(new_case); run_cli "$T" --help
+  assert_contains "usage 披露 --run-specs" "$R_OUT" "--run-specs"
+
+  # ② --run-specs 执行并断言 exit 0
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
+  printf '#!/usr/bin/env bash\ntouch "$(cd "$(dirname "$0")" && pwd)/WITNESS.txt"\nexit 0\n' \
+    > "$T/.meta/gates/x.spec.sh"
+  run_cli "$T" audit --run-specs
+  assert_eq "--run-specs 全过 → exit 0" 0 "$R_RC"
+  assert_contains "报执行判据" "$R_OUT" "2.3 执行判据"
+  [ -f "$T/.meta/gates/WITNESS.txt" ] && ok "--run-specs 确实执行了 spec" || bad "--run-specs 未执行 spec"
+
+  # ②b 护栏变量必须真导出给子进程（删掉导出前缀则此断言红——护栏不得静默失效）
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
+  printf '#!/usr/bin/env bash\n[ "${PONYGO_IN_SPEC:-0}" = "1" ] || { echo "missing guard env" >&2; exit 3; }\nexit 0\n' \
+    > "$T/.meta/gates/env.spec.sh"
+  run_cli "$T" audit --run-specs
+  assert_eq "护栏变量已导出给 spec → exit 0" 0 "$R_RC"
+
+  # ③ 有 spec 自检失败 → exit 1；多个失败必须全部报出（聚合，不只最后一个）；exit>1 也算失败
+  printf '#!/usr/bin/env bash\necho "bad sample accepted" >&2\nexit 1\n' > "$T/.meta/gates/y.spec.sh"
+  printf '#!/usr/bin/env bash\necho "second failure" >&2\nexit 5\n' > "$T/.meta/gates/z2.spec.sh"
+  run_cli "$T" audit --run-specs
+  assert_eq "spec 自检失败 → exit 1" 1 "$R_RC"
+  assert_contains "报第一个失败 spec" "$R_OUT" "y.spec.sh"
+  assert_contains "报第二个失败 spec（聚合）" "$R_OUT" "z2.spec.sh"
+  assert_contains "exit>1 也算失败" "$R_OUT" "exit 5"
+  assert_contains "回显输出尾部" "$R_OUT" "bad sample accepted"
+
+  # ④ --dry-run 一律不执行脚本，且 SKIPPED 不得冒充 PASS
+  rm -f "$T/.meta/gates/WITNESS.txt" "$T/.meta/gates/y.spec.sh" "$T/.meta/gates/z2.spec.sh"
+  run_cli "$T" audit --run-specs --dry-run
+  assert_eq "--dry-run exit 0" 0 "$R_RC"
+  assert_contains "--dry-run 报 SKIPPED" "$R_OUT" "SKIPPED"
+  [ -f "$T/.meta/gates/WITNESS.txt" ] && bad "--dry-run 仍执行了 spec" || ok "--dry-run 未执行 spec"
+
+  # ⑤ 递归护栏：PONYGO_IN_SPEC=1 时 SKIPPED，且结论行必须限定"未验证"
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/z.spec.sh"
+  run_cli_env "$T" PONYGO_IN_SPEC=1 audit --run-specs
+  assert_contains "递归护栏报 SKIPPED" "$R_OUT" "SKIPPED"
+  assert_not_contains "SKIPPED 不得并入全部通过" "$R_OUT" "spec 全部自检通过"
+  assert_contains "结论行限定未验证" "$R_OUT" "2.3 执行判据 SKIPPED——本次未验证"
+
+  # ⑥ 无 *.spec.sh → SKIPPED（不计入 PASS），非 FAIL
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
+  printf 'x\n' > "$T/.meta/gates/format.spec.md"
+  run_cli "$T" audit --run-specs
+  assert_eq "无 .sh spec → exit 0（SKIPPED 非 FAIL）" 0 "$R_RC"
+  assert_contains "报 SKIPPED 不计入 PASS" "$R_OUT" "SKIPPED 不计入 PASS"
+  assert_contains "SKIPPED 时结论行显式提示未验证" "$R_OUT" "本次未验证门是否仍会拒绝非法样本"
+  assert_contains "SKIPPED 时结论行限定范围" "$R_OUT" "2.3 执行判据 SKIPPED——本次未验证"
+
+  # ⑦ --run-specs 只属于 audit：其余命令显式拒绝，不静默忽略
+  run_cli "$T" status --run-specs
+  assert_eq "status --run-specs → exit 1（显式拒绝）" 1 "$R_RC"
+  assert_contains "报仅适用于 audit" "$R_OUT" "仅适用于"
+}
+
+s28_l2_reachability() {
+  echo "--- 场景28：L1→L2 可达性（骨架 + 手工挂载步骤可复跑；证明判据可被满足，非声称框架自身为 L2）"
+  local T; T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
+  # L2 四件套：门禁脚本 + 负样本 spec + 本地钩子挂载 + 文档分层激活
+  printf '#!/usr/bin/env bash\n[ -f README.md ] || exit 1\nexit 0\n' > "$T/.meta/gates/readme.sh"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/readme.spec.sh"
+  ( cd "$T" && git init -q && git config core.hooksPath .githooks && mkdir -p .githooks \
+      && printf '#!/usr/bin/env bash\nexit 0\n' > .githooks/pre-commit ) >/dev/null 2>&1
+  printf 'level: 2\n' > "$T/.meta/meta.yaml"
+  printf '## 已激活文档家清单\n' >> "$T/.meta/docs-tier/README.md"
+  run_cli "$T" status
+  assert_eq "L2 四件套齐 → exit 0" 0 "$R_RC"
+  assert_contains "报 L0-L2" "$R_OUT" "L0-L2"
+  # 反例：撤掉钩子挂载 → 2.4 FAIL（证明 2.4 是真判据，不是形状摆设）
+  ( cd "$T" && git config --unset core.hooksPath ) >/dev/null 2>&1
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $(sanitize_git) status
+  assert_eq "撤掉 hooksPath → exit 1" 1 "$R_RC"
+  assert_contains "报 2.4" "$R_OUT" "2.4"
+}
+
+s29_doc_level_parity() {
+  echo "--- 场景29：口径防复发——当前态文档不得复述旧档位区间（L6 / 0-6）"
+  local f drift=0
+  for f in README.md maturity-ladder.md .meta/meta.yaml .meta/constitution/constitution.md .meta/gates/README.md; do
+    if grep -qE '(^|[^0-9A-Za-z])L6([^0-9]|$)' "$ROOT/$f" 2>/dev/null \
+       || grep -qE '0[[:space:]]*[-–—][[:space:]]*6' "$ROOT/$f" 2>/dev/null; then
+      bad "口径漂移：$f 仍含 L6 / 0-6"; drift=1
+    fi
+  done
+  [ "$drift" = "0" ] && ok "当前态文档口径与真源一致（L0-L5）"
+  # CLI 用户可见串与 case 分支一致（0-5）
+  grep -q '用 0-5 或 off' "$ROOT/ponygo" && ok "retire 错误消息口径为 0-5" || bad "retire 错误消息仍是旧口径"
+  # meta.yaml 不再复述阶梯（副本即漂移源）：只留指针
+  grep -q 'maturity-ladder.md' "$ROOT/.meta/meta.yaml" && ok "meta.yaml 指向阶梯真源" || bad "meta.yaml 未指向阶梯真源"
+  # CLI 的 LEVELS 显示名表只含 L0–L5（不得悄悄多出一档）
+  if grep '^LEVELS=' "$ROOT/ponygo" | grep -q 'L6'; then bad "CLI LEVELS 含 L6"; else ok "CLI LEVELS 仅 L0-L5"; fi
+}
+
 s20_installer
 s21_external001_regress
 s22_hygiene_warn
@@ -890,6 +1025,9 @@ s23_verify_note
 s24_gate_layers
 s25_doc_home_audit
 s26_warn_tier
+s27_run_specs
+s28_l2_reachability
+s29_doc_level_parity
 
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
