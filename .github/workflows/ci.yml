@@ -2,6 +2,9 @@
 # （ubuntu = GNU 用户态；windows = Git Bash，覆盖 README §6.2 承诺的两个平台）
 name: ci
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]

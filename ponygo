@@ -266,9 +266,9 @@ PONYGO_EOF
 PONYGO_EOF
   fi
 
-  # meta.yaml：仅 level 字段（其余由 git / 目录存在性派生，不冗余声明）
+  # meta.yaml：仅 level / ai-surface / docs-tier 字段（其余由 git / 目录存在性派生，不冗余声明）
   if [ ! -f "$META_YAML" ]; then
-    printf '# ponygo 治理根状态文件（唯一真值源：level）\n# 版本由 git 派生；组件清单由 .meta/ + .agents/ 目录存在性充当；演进由 git + .agents/notes/ 的 ADR 充当。\n\nlevel: %s\n' "$lvl" > "$META_YAML"
+    printf '# ponygo 治理根状态文件（唯一真值源：level）\n# 版本由 git 派生；组件清单由 .meta/ + .agents/ 目录存在性充当；演进由 git + .agents/notes/ 的 ADR 充当。\n# 合法键：level / ai-surface / docs-tier（docs-tier: on|off 是文档分层的启用声明，目录存在不等于已激活，见 maturity-ladder §5 判据 2.5）。\n\nlevel: %s\n' "$lvl" > "$META_YAML"
   fi
 
   # 最小文档家播种（v2.0：文档治理前置到 L0/L1，判据 0.5/1.9）——家载体分工：
@@ -1084,14 +1084,16 @@ gate_layers_report() {
   echo "  注：分层是「值不值」的价值判断（P6）——小项目只上 CI 也合法；本表仅机械探测形状、供 review 参考。"
 }
 
-# ---------- meta.yaml 违例键告警（合法键仅 level / ai-surface；status 与 audit 双挂同一函数） ----------
+# ---------- meta.yaml 违例键告警（合法键仅 level / ai-surface / docs-tier；status 与 audit 双挂同一函数） ----------
 warn_meta_violations() {
   [ -f "$META_YAML" ] || return 0
   local bad
   # 判定前剥 \r：CRLF 环境下合法键不得被误报（V2 的 \r 防御）
-  bad=$(sed 's/\r$//' "$META_YAML" | grep -vE '^[[:space:]]*(#|$)' | grep -vE '^(level|ai-surface):')
+  # docs-tier 只在值为小写 on/off 时合法（新键从严，不继承 ai-surface 的 Off 大小写先例；
+  # 引号/非法值/空值 → 违例键 WARN，不新增解析分支）。
+  bad=$(sed 's/\r$//' "$META_YAML" | grep -vE '^[[:space:]]*(#|$)' | grep -vE '^(level|ai-surface):|^docs-tier:[[:space:]]*(on|off)$')
   [ -n "$bad" ] || return 0
-  printf 'ponygo: WARN meta.yaml 含非法键（合法键仅 level / ai-surface，且须顶格无缩进）：\n' >&2
+  printf 'ponygo: WARN meta.yaml 含非法键（合法键仅 level / ai-surface / docs-tier(值仅小写 on|off)，且须顶格无缩进）：\n' >&2
   printf '%s\n' "$bad" | sed 's/^/ponygo: WARN   /' >&2
 }
 
@@ -1103,6 +1105,9 @@ vl_fail() { VL_FAILS="${VL_FAILS}  - $1"$'\n'; }
 verify_ladder() {
   local lv="$1"
   VL_FAILS=""
+  # 2.5 条件判据状态（Q1=A）：DT_OFF=1 → 结论行改写为"2.1–2.4 PASS；2.5 未启用"；
+  # DT_SKIP=1 → 未声明 docs-tier（2.5 不计入 PASS，WARN 催声明）。
+  DT_OFF=0; DT_SKIP=0
   # 归一后不匹配 ^[0-5]$ → 只验 L0、报 0.4 FAIL、跳过 L1/L2（不对未验证值做算术比较）
   local validated=0
   case "$lv" in
@@ -1265,14 +1270,56 @@ verify_ladder() {
           vl_fail "2.4 已声明 L2 但本地钩子未挂（core.hooksPath 未设/钩子目录为空）→ git config core.hooksPath .githooks 并放入钩子脚本"
         fi
       fi
-      # 2.5 文档分层已激活（v2.0）：docs-tier/README.md 非模板态（含独特标记"## 已激活文档家清单"）。
-      # 模板态 = init 生成的占位（标题为"模板态"）；升 L2 时把标题改为"## 已激活文档家清单"并填家。
-      # tier 放置正确性靠 review（§2 诚实声明）。
-      if [ -f "$META_DIR/docs-tier/README.md" ] && ! grep -q '## 已激活文档家清单' "$META_DIR/docs-tier/README.md"; then
-        vl_fail "2.5 文档分层未激活：.meta/docs-tier/README.md 仍是模板态 → 把标题改为 '## 已激活文档家清单' 并填写本项目的 tier 家清单"
-      elif [ ! -f "$META_DIR/docs-tier/README.md" ]; then
-        vl_fail "2.5 缺 .meta/docs-tier/README.md（文档分层契约）→ 跑 'ponygo init' 生成，升 L2 时推进为已激活清单"
+      # 2.5 文档分层激活（v2.4 起为条件判据，Q1=A）：docs-tier: on|off 显式声明；未声明=SKIP+WARN 催声明。
+      # 状态机：undeclared=SKIP+WARN；off=显式 opt-out（结论禁写"全部 PASS"）；on+TODO 残留=FAIL；
+      #        off+已激活=矛盾 WARN；undeclared+已激活=PASS（实际做到优先于声明）。
+      # 声明载体：meta.yaml 的 docs-tier: 键（顶格，值仅小写 on/off；引号/非法值走 warn_meta_violations
+      #       白名单告警，且**不得激活状态机**——值读取只剥 \r，不剥引号/空白，严格匹配 on|off）。
+      local docs_tier="" dt_state="undeclared" dt_active=0 dt_todo=0
+      # 只剥 \r（CRLF 防御，与 warn_meta_violations 同）；值前空白已由 sed 的 [[:space:]]* 吃掉，
+      # 值内/尾部空白、引号**全部保留** → case 严格 on|off，任何变体落默认支走未声明，
+      # 与白名单"引号/非法值=非法键 WARN"一致（P1-1：引号/空白变体不得兑现 on/off 语义）。
+      docs_tier=$(sed -n 's/^docs-tier:[[:space:]]*//p' "$META_YAML" 2>/dev/null | head -n1 | tr -d '\r')
+      case "$docs_tier" in
+        on)  dt_state="on" ;;
+        off) dt_state="off" ;;
+        *)   dt_state="undeclared" ;;  # 缺键/空/畸形值（含引号/空白变体）——已由 warn_meta_violations 白名单 WARN，这里按未声明处理
+      esac
+      if [ -f "$META_DIR/docs-tier/README.md" ] && grep -q '## 已激活文档家清单' "$META_DIR/docs-tier/README.md"; then
+        dt_active=1
       fi
+      if [ -f "$META_DIR/docs-tier/README.md" ] && grep -q '【TODO】' "$META_DIR/docs-tier/README.md"; then
+        dt_todo=1
+      fi
+      case "$dt_state" in
+        on)
+          # 已声明 on：文档分层必须已激活且无 TODO 残留，否则 FAIL（声明即承诺，不得空心）
+          if [ "$dt_active" = "0" ]; then
+            vl_fail "2.5 已声明 docs-tier: on 但文档分层未激活：.meta/docs-tier/README.md 仍是模板态 → 把标题改为 '## 已激活文档家清单' 并填写本项目的 tier 家清单"
+          elif [ "$dt_todo" = "1" ]; then
+            vl_fail "2.5 已声明 docs-tier: on 但家清单仍含 【TODO】 残留 → 填完各 tier 的家再判定已激活（TODO 残留=声明空心）"
+          fi
+          ;;
+        off)
+          # 显式 opt-out：2.5 不判 FAIL；结论行由 DT_OFF 改写为"2.1–2.4 PASS；2.5 未启用"。
+          # 与事实矛盾（实际已激活）时 WARN 催对齐，不判 FAIL。
+          # spec §3.3：off 是显式 opt-out，须录一条 decision（对齐 retire 的"退级须录 decision"指引式，非硬校验）
+          DT_OFF=1
+          printf 'ponygo: 提示 docs-tier: off 是显式 opt-out——建议录一条 decision（.agents/notes/implemented/process/）说明为何不上文档分层（对齐 retire 的退级须录 decision 纪律）\n' >&2
+          if [ "$dt_active" = "1" ]; then
+            printf 'ponygo: WARN docs-tier: off 但 .meta/docs-tier/README.md 已含「已激活文档家清单」——声明与事实矛盾，请对齐（去掉 off 或退回模板态）\n' >&2
+          fi
+          ;;
+        *)
+          # 未声明：SKIP + WARN 催声明；实际已激活则 PASS（做到优先于声明），不 WARN。
+          if [ "$dt_active" = "1" ]; then
+            : # 实际做到优先于声明 → PASS，且不 WARN
+          else
+            printf 'ponygo: WARN 未声明 docs-tier（meta.yaml 缺 docs-tier: on|off）→ 2.5 SKIPPED 不计入 PASS；想启用文档分层请加 docs-tier: on\n' >&2
+            DT_SKIP=1
+          fi
+          ;;
+      esac
     fi
 
   fi
@@ -1286,14 +1333,24 @@ verify_ladder() {
 
   local spec_note=""
   [ "${SPEC_SKIPPED:-0}" = "1" ] && spec_note="；2.3 执行判据 SKIPPED——本次未验证"
+  # 2.5 条件判据结论行（Q1=A）：off → 整体改写为"2.1–2.4 PASS；2.5 未启用"，禁写"全部 PASS"；
+  # 未声明且未激活 → 2.5 SKIPPED 不计入 PASS（WARN 已在 2.5 分支输出）。
+  local pass_txt=""
+  if [ "${DT_OFF:-0}" = "1" ]; then
+    pass_txt="级自洽验证：通过（2.1–2.4 PASS；2.5 未启用${spec_note}）"
+  elif [ "${DT_SKIP:-0}" = "1" ]; then
+    pass_txt="级自洽验证：通过（${verified_range} 机械判据全部 PASS；2.5 SKIPPED——未声明 docs-tier，不计入 PASS${spec_note}）"
+  else
+    pass_txt="级自洽验证：通过（${verified_range} 机械判据全部 PASS${spec_note}）"
+  fi
   echo ""
   if [ "$lv" = "0" ]; then
     echo "级自洽验证：通过（纯 L0 长驻：合法终态）"
   else
     if [ "$DATE_OK" != "1" ]; then
-      echo "级自洽验证：通过（${verified_range} 机械判据 PASS${spec_note}；日期合法性：靠 review）"
+      echo "${pass_txt}；日期合法性：靠 review"
     else
-      echo "级自洽验证：通过（${verified_range} 机械判据全部 PASS${spec_note}）"
+      echo "$pass_txt"
     fi
   fi
   [ "$verified_range" = "L0-L2" ] && \
@@ -1615,19 +1672,98 @@ cmd_status() {
   fi
 }
 
+# ---------- upgrade 漂移报告（v2.4：Q2=A） ----------
+# 比对宇宙 = s14 的 10 个文件精确路径（详见 tests/run.sh s14/s31），不另立清单文件（第三副本，slop 第一条）。
+# 语义：漂移是**观察**不是承诺（status 管骨架缺口 exit 1，upgrade 管"与模板差多少"）；默认 exit 0，
+# --check 漂移非零供 CI。宇宙外文件（根 README / meta.yaml / 已填 constitution / 根 AGENTS.md /
+# CLAUDE.md / classes.local / docs-tier/exemptions 等）不判漂移——"无基线"不判定，报告头一句话声明盲区。
+# 已激活 docs-tier 实例**不支持**漂移报告（s14 契约锁模板态，激活即破 s14——不发明新激活机制）。
+# 教训归因（假漂移历史）真源：TASK-002 双审，见 docs/dev-team/reviews/——不塞进用户可见输出。
+UPGRADE_UNIVERSE=".agents/notes/README.md .agents/skills/README.md .meta/docs-tier/README.md \
+.agents/skills/write-adr/SKILL.md .agents/skills/write-adr/verify-note.sh \
+.agents/skills/governance-review/SKILL.md .meta/gates/README.md \
+.agents/skills/change-review/SKILL.md .agents/notes/AGENTS.md .agents/notes/archived/AGENTS.md"
+
 cmd_upgrade() {
   echo "===== ponygo upgrade ====="
-  echo "首版不实际执行 diff 合并（那是 v+2 能力）。当前只给升级纪律："
+  # 升级纪律最先打印（任何分支都可见；s15 空目录用例断言其存在）
+  echo "升级纪律（首版不实际执行 diff 合并，那是 v+2 能力）："
   echo "  1) 实例化禁止 cp -r / degit 抹历史——保留 fork 图方可跟随升级。"
   echo "  2) 保留血缘：git remote add upstream <ponygo 模板> && git fetch upstream && git merge upstream/main"
   echo "  3) 已失去血缘（cp 产生）→ 升级退化为人肉对照，漂移自担（诚实声明，勿假装可自动升级）。"
-  local remotes=""
-  remotes=$(git remote 2>/dev/null)
-  if [ -n "$remotes" ]; then
-    echo "当前 remote："; echo "$remotes" | sed 's/^/  - /'
-  else
-    echo "当前无 git remote（或不在 git 仓库）。"
+  # donot：无 .meta/ → die 并指引 init（对齐 retire/status）。真·空目录（s15 历史 fixture，仅 .git 也算空）
+  # 温和跳过，有实质内容的目录（s31③ fixture：有 README 或任何文件）die——两种 fixture 语义不同（spec §8 s31③ / D2 修法）。
+  if ! has_meta; then
+    if [ -z "$(ls -A . 2>/dev/null | grep -v '^\.git$')" ]; then
+      echo "无 .meta/ 治理根（空目录）——无可漂移基线。先 'ponygo init' 播种，再看本报告。"
+      echo "tmpdir 已清理"
+      return 0
+    fi
+    die "无 .meta/ 治理根（meta.yaml 缺失）——先 'ponygo init' 再跟随升级"
   fi
+  # donot：非 git → WARN（对齐 status；漂移参照 git 血缘时不可用，退化为纯文件比对）
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    printf 'ponygo: WARN 不在 git 仓库内——无法从 git 派生版本/血缘，漂移报告退化为纯文件比对（对齐 status 的 WARN）\n' >&2
+  fi
+  # donot：无 level → 按 L0 处理（read_level 三态之"缺文件/缺 level 行"；空值/畸形仍走 0.4 FAIL 语义，不走 L0）
+  local lv=""
+  lv=$(read_level)
+  case "$lv" in
+    ''|*[!0-9]*) echo "当前 level：缺失/非法（按 L0 处理漂移基线；level 合法性请交给 'ponygo status' 的 0.4 判据）" ;;
+    *)            echo "当前 level：$(fmt_level "$lv")" ;;
+  esac
+  # 报告头：盲区声明（升级纪律已在函数头打印）
+  echo "漂移报告：本报告只覆盖 s14 宇宙内十文件；宇宙外文件无基线，不判定。漂移=观察，非承诺违例（status 管承诺）。"
+  # 已激活 docs-tier 实例：诚实声明不支持（s14 契约锁模板态）——本文件不参与比对，
+  # 其余九文件照常比对（P2-1：激活必改写该文件，比对即恒漂移、--check 恒红，违反"漂移=观察"与"不支持"双重语义）
+  local dt_skip=0
+  if [ -f "$META_DIR/docs-tier/README.md" ] && grep -q '## 已激活文档家清单' "$META_DIR/docs-tier/README.md"; then
+    dt_skip=1
+    echo "注：docs-tier 已激活实例——.meta/docs-tier/README.md 不参与漂移比对（s14 契约锁模板态，激活即破 s14，按 P0-1(a) 诚实声明不支持）；其余九文件照常比对。"
+  fi
+  # 生成模板基准（临时目录，用 write_skeleton 同源 heredoc；eol 归一后逐字节比对）。
+  # write_skeleton 是当前进程内的函数（相对路径常量），在子 shell cd 后调用即生成一套模板骨架。
+  local tmp="" f="" drift_n=0 missing_n=0
+  tmp=$(mktemp -d) || die "无法创建临时目录"
+  ( cd "$tmp" && write_skeleton 0 ) >/dev/null 2>&1 || { rm -rf "$tmp"; die "无法生成模板基准"; }
+  for f in $UPGRADE_UNIVERSE; do
+    # P2-1：docs-tier 已激活实例跳过该文件比对（s14 锁模板态）
+    [ "$dt_skip" = "1" ] && [ "$f" = ".meta/docs-tier/README.md" ] && continue
+    if [ ! -f "$f" ]; then
+      # 缺骨架文件（实例侧缺失）：gates/README 是"仅空目录时生成"的条件写入口——
+      # gates 目录已有实质门禁时缺 README 报"缺口"（缺骨架文件）而非"漂移"（D2 边界）
+      missing_n=$((missing_n+1))
+      if [ "$f" = ".meta/gates/README.md" ] && [ -d "$META_DIR/gates" ] \
+         && [ -n "$(ls -A "$META_DIR/gates" 2>/dev/null | grep -vE '^(README\.md|\.gitkeep)$')" ]; then
+        echo "缺口: $f（gates/ 已有实质门禁但缺 README——补 'ponygo init' 生成或手建）"
+      else
+        echo "缺口: $f（缺骨架文件——跑 'ponygo init' 补全后再跟随升级）"
+      fi
+      continue
+    fi
+    # P3-1：模板侧缺失 = 清单与 write_skeleton 生成集漂移（内部不一致），报内部错误而非误归 drift
+    if [ ! -f "$tmp/$f" ]; then
+      missing_n=$((missing_n+1))
+      echo "内部不一致: 模板基准缺 $f（UPGRADE_UNIVERSE 与 write_skeleton 生成集漂移——联系维护者对齐清单或生成逻辑）"
+      continue
+    fi
+    if ! diff -q <(tr -d '\r' < "$f") <(tr -d '\r' < "$tmp/$f") >/dev/null 2>&1; then
+      drift_n=$((drift_n+1))
+      echo "drift: $f"
+    fi
+  done
+  rm -rf "$tmp"
+  if [ "$drift_n" -eq 0 ] && [ "$missing_n" -eq 0 ]; then
+    echo "宇宙内十文件与模板基准一致，零漂移。"
+  else
+    echo "发现 $drift_n 处漂移 + $missing_n 处缺口（drift:/缺口: 前缀行）——离线源是模板基准，逐条合入或按升级纪律重建血缘。"
+  fi
+  echo "tmpdir 已清理"
+  # exit 语义：默认报告 exit 0（漂移是观察）；--check 漂移**或缺口**非零（供 CI——删骨架文件比内容漂移更严重，CI 应拦住）
+  if [ "${UPGRADE_CHECK:-0}" = "1" ]; then
+    [ "$drift_n" -eq 0 ] && [ "$missing_n" -eq 0 ] || exit 1
+  fi
+  return 0
 }
 
 # ---------- 退级（停止线执行器） ----------
@@ -1672,7 +1808,7 @@ ponygo —— 项目工程化治理元框架命令行（单文件、零依赖）
   ponygo init     [--yes] [--dry-run]    建立/注入 .agents/ + .meta/ 治理骨架（自判新/旧项目）
   ponygo audit    [--level S|M] [--run-specs]  自适应体检：打分 + 缺口 + 最小改进动作（判据不符 exit 1）
   ponygo status                          查看成熟度级与骨架完整度（骨架缺口或声明级判据不符 exit 1）
-  ponygo upgrade                         跟随框架升级指引（首版不实际合并）
+  ponygo upgrade  [--check]              骨架漂移报告（宇宙=s14 十文件；默认 exit 0；--check 漂移非零供 CI）
   ponygo sync                            把 constitution 投影到 AGENTS.md / CLAUDE.md（模板态投影初始引导）
   ponygo retire   --level <N|off>        退级 / 整体退场（停止线执行器）
 
@@ -1681,16 +1817,18 @@ ponygo —— 项目工程化治理元框架命令行（单文件、零依赖）
   --dry-run   只打印将执行的动作，不落盘
   --level S|M 强制指定审计深度档（默认按项目特征自适应）
   --run-specs 执行 gates/ 下 *.spec.sh 负样本自检（opt-in；默认不执行仓库脚本）
+  --check     ponygo upgrade 专用：存在漂移 → exit 非零（供 CI；与 --dry-run 互斥）
 EOF
 }
 
 # ---------- 入口 ----------
-DRY_RUN=0; YES=0; LEVEL=""; CMD=""; RETIRE_LEVEL=""; RUN_SPECS=0
+DRY_RUN=0; YES=0; LEVEL=""; CMD=""; RETIRE_LEVEL=""; RUN_SPECS=0; UPGRADE_CHECK=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --yes) YES=1 ;;
     --dry-run) DRY_RUN=1 ;;
     --run-specs) RUN_SPECS=1 ;;
+    --check) UPGRADE_CHECK=1 ;;
     --level) [ $# -ge 2 ] || die "--level 需要取值（如 --level S / --level off）"; shift; LEVEL="$1" ;;
     -h|--help) usage; exit 0 ;;
     init|audit|status|upgrade|sync|retire) CMD="$1" ;;
@@ -1702,6 +1840,14 @@ done
 # --run-specs 只属于 audit（执行仓库脚本的 opt-in 入口）；其余命令一律拒绝，避免静默忽略
 if [ "$RUN_SPECS" = "1" ] && [ "${CMD:-}" != "audit" ]; then
   die "--run-specs 仅适用于 'ponygo audit'（只读命令不执行仓库脚本）"
+fi
+# --check 只属于 upgrade（漂移非零供 CI）；其余命令一律拒绝（对齐 --run-specs 互斥守卫）
+if [ "$UPGRADE_CHECK" = "1" ] && [ "${CMD:-}" != "upgrade" ]; then
+  die "--check 仅适用于 'ponygo upgrade'（骨架漂移检查；其余命令无此语义）"
+fi
+# --check 必须读真实文件：与 --dry-run 互斥（--check --dry-run → die）
+if [ "$UPGRADE_CHECK" = "1" ] && [ "$DRY_RUN" = "1" ]; then
+  die "--check 与 --dry-run 互斥——检查必须读真实文件，dry-run 只打印不落盘"
 fi
 
 case "${CMD:-}" in

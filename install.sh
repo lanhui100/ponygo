@@ -36,7 +36,13 @@ fi
 
 # 1.5 完整性校验（P0-3）：设置了 PONYGO_SHA256 就必须校验通过；
 # 找不到校验工具时 fail-closed（拒绝未校验安装），不降级为跳过。
-if [ -n "${PONYGO_SHA256:-}" ]; then
+# 显式空串（PONYGO_SHA256=""）= 用户声明"要校验但给空值"→ 拒绝安装（fail-closed，非跳过）；
+# 未设置（unset）= 未要求校验 → 允许（兼容分支，配合 README 未发布提示）。
+if [ -n "${PONYGO_SHA256+x}" ]; then
+  if [ -z "${PONYGO_SHA256}" ]; then
+    rm -f "$TARGET"
+    die "PONYGO_SHA256 已设置但为空——完整性校验要求非空校验和；拒绝未校验安装（fail-closed）"
+  fi
   actual=""
   if command -v sha256sum >/dev/null 2>&1; then
     actual=$(sha256sum "$TARGET" | awk '{print $1}')
@@ -50,6 +56,8 @@ if [ -n "${PONYGO_SHA256:-}" ]; then
     die "SHA-256 校验失败：期望 $PONYGO_SHA256，实得 $actual。已删除可疑文件。"
   fi
   info "SHA-256 校验通过。"
+else
+  warn "未设置 PONYGO_SHA256——安装未经完整性校验（生产环境建议钉版本 + 校验和，见 README §3.1）"
 fi
 
 chmod +x "$TARGET" || die "无法赋予执行权限: $TARGET"

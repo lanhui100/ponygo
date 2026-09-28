@@ -416,7 +416,7 @@ s11_l1_criteria() {
 }
 
 s12_l2_criteria() {
-  echo "--- 场景12：L2 判据（齐 → 过；缺钩子 → FAIL）"
+  echo "--- 场景12：L2 判据（齐 → 过；缺钩子 → FAIL；2.5 条件判据四分支）"
   local T
   T=$(new_case); run_cli "$T" init --yes
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
@@ -426,12 +426,13 @@ s12_l2_criteria() {
       && mkdir -p .githooks && printf '#!/usr/bin/env bash\necho hook\n' > .githooks/pre-commit ) >/dev/null 2>&1
   printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
   printf 'purpose: negative sample spec\n' > "$T/.meta/gates/format.spec.md"
-  # 2.5 文档分层激活：把 docs-tier/README.md 从模板态推进为已激活清单态
+  # 分支：未声明 docs-tier + 已激活 → PASS（实际做到优先于声明）
   printf '## 已激活文档家清单\n' >> "$T/.meta/docs-tier/README.md"
   run_cli "$T" status
-  assert_eq "门禁+spec+钩子+文档分层齐 → exit 0" 0 "$R_RC"
+  assert_eq "未声明+文档分层已激活（PASS）→ exit 0" 0 "$R_RC"
   assert_contains "L0-L2 通过" "$R_OUT" "L0-L2"
   assert_contains "2.2 标注代理判据" "$R_OUT" "代理判据"
+  assert_not_contains "已激活不触发 2.5 告警" "$R_OUT" "WARN docs-tier"
 
   T=$(new_case); run_cli "$T" init --yes
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
@@ -445,7 +446,7 @@ s12_l2_criteria() {
   assert_eq "缺钩子（非 git 目录 + 消毒）→ exit 1" 1 "$R_RC"
   assert_contains "报 2.4" "$R_OUT" "2.4"
 
-  # 2.5 文档分层未激活 → FAIL（L2 判据新增）
+  # 分支：未声明 docs-tier + 模板态（未激活）→ SKIP + WARN 催声明，exit 0（2.5 不计入 PASS）
   T=$(new_case); run_cli "$T" init --yes
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
@@ -455,8 +456,95 @@ s12_l2_criteria() {
   printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
   printf 'x\n' > "$T/.meta/gates/format.spec.md"
   run_cli "$T" status
-  assert_eq "docs-tier 模板态（未激活）→ exit 1" 1 "$R_RC"
+  assert_eq "未声明+模板态（SKIP）→ exit 0" 0 "$R_RC"
+  assert_contains "催声明 WARN" "$R_OUT" "未声明 docs-tier"
+  assert_contains "结论行标 SKIPPED" "$R_OUT" "2.5 SKIPPED"
+
+  # 分支：docs-tier: off + 模板态 → 显式 opt-out，结论行禁写"全部 PASS"，改写为"2.1–2.4 PASS；2.5 未启用"
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
+  printf 'level: 2\n' > "$T/.meta/meta.yaml"
+  printf 'docs-tier: off\n' >> "$T/.meta/meta.yaml"
+  ( cd "$T" && git init -q && git config core.hooksPath .githooks \
+      && mkdir -p .githooks && printf '#!/usr/bin/env bash\necho hook\n' > .githooks/pre-commit ) >/dev/null 2>&1
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
+  printf 'x\n' > "$T/.meta/gates/format.spec.md"
+  run_cli "$T" status
+  assert_eq "docs-tier: off → exit 0" 0 "$R_RC"
+  assert_contains "off 改写结论行" "$R_OUT" "2.1–2.4 PASS；2.5 未启用"
+  assert_not_contains "off 禁写全部 PASS" "$R_OUT" "全部 PASS"
+
+  # 分支：docs-tier: on + 模板态（未激活）→ FAIL（声明即承诺，未激活即违约）
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
+  printf 'level: 2\n' > "$T/.meta/meta.yaml"
+  printf 'docs-tier: on\n' >> "$T/.meta/meta.yaml"
+  ( cd "$T" && git init -q && git config core.hooksPath .githooks \
+      && mkdir -p .githooks && printf '#!/usr/bin/env bash\necho hook\n' > .githooks/pre-commit ) >/dev/null 2>&1
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
+  printf 'x\n' > "$T/.meta/gates/format.spec.md"
+  # 模板态 docs-tier/README.md 未激活（无已激活锚点）
+  run_cli "$T" status
+  assert_eq "docs-tier: on + 模板态 → exit 1" 1 "$R_RC"
   assert_contains "报 2.5" "$R_OUT" "2.5"
+  assert_contains "报模板态未激活" "$R_OUT" "未激活"
+
+  # 分支：docs-tier: on + 已激活但 TODO 残留 → FAIL（声明空心）
+  printf '## 已激活文档家清单\n' >> "$T/.meta/docs-tier/README.md"
+  run_cli "$T" status
+  assert_eq "docs-tier: on + TODO 残留 → exit 1" 1 "$R_RC"
+  assert_contains "报 2.5（TODO 残留）" "$R_OUT" "2.5"
+  assert_contains "报 TODO 残留" "$R_OUT" "TODO"
+
+  # 分支：docs-tier: off + 已激活 → 矛盾 WARN + off 结论行（exit 0）
+  # P3-3 单变量：全新目录 + 重写 docs-tier/README（无 TODO 残留），只留"off 声明 vs 已激活事实"一个变量
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
+  printf 'level: 2\ndocs-tier: off\n' > "$T/.meta/meta.yaml"
+  ( cd "$T" && git init -q && git config core.hooksPath .githooks \
+      && mkdir -p .githooks && printf '#!/usr/bin/env bash\necho hook\n' > .githooks/pre-commit ) >/dev/null 2>&1
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
+  printf 'x\n' > "$T/.meta/gates/format.spec.md"
+  printf '## 已激活文档家清单\n\n| tier | 家 |\n|---|---|\n| 决策记录 | .agents/notes/ |\n' > "$T/.meta/docs-tier/README.md"
+  run_cli "$T" status
+  assert_eq "off + 已激活（矛盾 WARN）→ exit 0" 0 "$R_RC"
+  assert_contains "off 矛盾 WARN" "$R_OUT" "矛盾"
+  assert_contains "off 结论行" "$R_OUT" "2.1–2.4 PASS；2.5 未启用"
+  assert_contains "off 提示录 decision" "$R_OUT" "建议录一条 decision"
+
+  # 分支：docs-tier: on + 已激活 + 无 TODO → PASS（声明且做到）
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
+  printf 'level: 2\n' > "$T/.meta/meta.yaml"
+  printf 'docs-tier: on\n' >> "$T/.meta/meta.yaml"
+  ( cd "$T" && git init -q && git config core.hooksPath .githooks \
+      && mkdir -p .githooks && printf '#!/usr/bin/env bash\necho hook\n' > .githooks/pre-commit ) >/dev/null 2>&1
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
+  printf 'x\n' > "$T/.meta/gates/format.spec.md"
+  # 清零模板态 TODO：重写为已激活清单（无 TODO 残留）
+  printf '## 已激活文档家清单\n\n| tier | 家 |\n|---|---|\n| 决策记录 | .agents/notes/ |\n' > "$T/.meta/docs-tier/README.md"
+  run_cli "$T" status
+  assert_eq "docs-tier: on + 已激活 + 无 TODO → exit 0" 0 "$R_RC"
+  assert_contains "on 全过结论行" "$R_OUT" "L0-L2"
+
+  # 分支（P1-1 回归）：引号值（docs-tier: "off"）不得激活状态机——走非法键 WARN + 未声明 SKIP，不兑现 off
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
+  printf 'level: 2\n' > "$T/.meta/meta.yaml"
+  printf 'docs-tier: "off"\n' >> "$T/.meta/meta.yaml"
+  ( cd "$T" && git init -q && git config core.hooksPath .githooks \
+      && mkdir -p .githooks && printf '#!/usr/bin/env bash\necho hook\n' > .githooks/pre-commit ) >/dev/null 2>&1
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
+  printf 'x\n' > "$T/.meta/gates/format.spec.md"
+  run_cli "$T" status
+  assert_eq "引号值不兑现 off → exit 0（未声明 SKIP）" 0 "$R_RC"
+  assert_contains "引号值报非法键 WARN" "$R_OUT" "非法键"
+  assert_not_contains "引号值不进入 off 分支（不写 off 结论）" "$R_OUT" "2.5 未启用"
 }
 
 s13_meta_violations() {
@@ -484,6 +572,22 @@ s13_meta_violations() {
   run_cli "$T" status
   assert_not_contains "CRLF meta.yaml 不假 WARN" "$R_OUT" "WARN"
   assert_eq "CRLF meta.yaml status exit 0" 0 "$R_RC"
+
+  # docs-tier: on|off 是合法键（L 包原子补丁）：顶格声明不告警，缩进才告警
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 0\ndocs-tier: off\n' > "$T/.meta/meta.yaml"
+  run_cli "$T" status
+  assert_eq "docs-tier: off 为合法键 → exit 0" 0 "$R_RC"
+  assert_not_contains "docs-tier: off 不告警" "$R_OUT" "非法键"
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 0\n  docs-tier: on\n' > "$T/.meta/meta.yaml"
+  run_cli "$T" status
+  assert_contains "缩进 docs-tier 行告警" "$R_OUT" "WARN"
+  # docs-tier 非法值（yes/大写 ON）走违例键 WARN（新键从严，不继承 ai-surface 的 Off 大小写先例）
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 0\ndocs-tier: ON\n' > "$T/.meta/meta.yaml"
+  run_cli "$T" status
+  assert_contains "docs-tier 非法值告警" "$R_OUT" "非法键"
 }
 
 s14_decisions_readme() {
@@ -555,9 +659,18 @@ s14_decisions_readme() {
 }
 
 s15_upgrade() {
-  echo "--- 场景15：upgrade exit 0"
+  echo "--- 场景15：upgrade exit 0（默认契约：报告 exit 0；空项目温和跳过）"
+  # 空项目（无 .meta、无代码迹象）→ upgrade 温和跳过 exit 0（含升级纪律输出行）
   run_cli "$(new_case)" upgrade
-  assert_eq "upgrade exit 0" 0 "$R_RC"
+  assert_eq "空项目 upgrade exit 0" 0 "$R_RC"
+  assert_contains "含升级纪律" "$R_OUT" "升级纪律"
+  # 健康实例（init 后未动宇宙文件）→ exit 0 且含漂移报告头（双断言同属 s15）
+  local T; T=$(new_case)
+  run_cli "$T" init --yes
+  run_cli "$T" upgrade
+  assert_eq "健康实例 upgrade exit 0" 0 "$R_RC"
+  assert_contains "含漂移报告头" "$R_OUT" "漂移报告"
+  assert_contains "零漂移" "$R_OUT" "零漂移"
 }
 
 s16_status_no_meta() {
@@ -998,6 +1111,15 @@ s28_l2_reachability() {
   run_cli_env "$T" $(sanitize_git) status
   assert_eq "撤掉 hooksPath → exit 1" 1 "$R_RC"
   assert_contains "报 2.4" "$R_OUT" "2.4"
+
+  # 作用域：L1 声明 docs-tier: on → 忽略（2.x 不在 L1 判据内，静默不告警，不校验 2.5）
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  printf 'docs-tier: on\n' >> "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
+  run_cli "$T" status
+  assert_eq "L1 + docs-tier: on → exit 0（忽略 2.x）" 0 "$R_RC"
+  assert_not_contains "L1 不验 2.5（静默）" "$R_OUT" "2.5"
 }
 
 s29_doc_level_parity() {
@@ -1016,6 +1138,80 @@ s29_doc_level_parity() {
   grep -q 'maturity-ladder.md' "$ROOT/.meta/meta.yaml" && ok "meta.yaml 指向阶梯真源" || bad "meta.yaml 未指向阶梯真源"
   # CLI 的 LEVELS 显示名表只含 L0–L5（不得悄悄多出一档）
   if grep '^LEVELS=' "$ROOT/ponygo" | grep -q 'L6'; then bad "CLI LEVELS 含 L6"; else ok "CLI LEVELS 仅 L0-L5"; fi
+  # 版本号一致性（spec §8 s29 扩展）：README 示例 tag == git 最新 tag 语义
+  # （发布流程：实现 bump README 示例 → 从绿 main 切 tag → 以 tag 落点复核，bump 后/tag 前红是预期，spec §9）
+  local ltag rtag
+  ltag=$(git -C "$ROOT" tag --list 'v*' --sort=-version:refname | head -1)
+  rtag=$(grep -oE 'releases/download/v[0-9]+\.[0-9]+\.[0-9]+/' "$ROOT/README.md" | head -1 | sed 's#releases/download/##' | tr -d '/')
+  if [ -n "$ltag" ] && [ -n "$rtag" ]; then
+    if [ "$ltag" = "$rtag" ]; then
+      ok "README 示例 tag（$rtag）与 git 最新 tag 一致"
+    else
+      bad "README 示例 tag（$rtag）≠ git 最新 tag（$ltag）——发布流程中间态（bump 后/tag 前为预期，以 tag 落点复核）"
+    fi
+  else
+    ok "仓库无 tag 或 README 未钉 release tag——版本一致性断言跳过（首次发布前无基线）"
+  fi
+}
+
+s31_upgrade_drift() {
+  echo "--- 场景31：upgrade 漂移报告（宇宙=s14 十文件；--check 漂移非零；donot 三场景）"
+  local T
+  # ① 健康实例（已填 constitution + 模板态 docs-tier）upgrade exit 0 且无"drift:"行
+  T=$(new_case); run_cli "$T" init --yes
+  write_constitution_filled "$T"
+  run_cli "$T" upgrade
+  assert_eq "健康实例 upgrade exit 0" 0 "$R_RC"
+  assert_not_contains "健康实例零漂移" "$R_OUT" "drift:"
+  assert_contains "含漂移报告头" "$R_OUT" "漂移报告"
+  assert_contains "报告内自证清理" "$R_OUT" "tmpdir 已清理"
+  # ② 篡改一处宇宙内文件（notes/README.md 追加一行）→ 默认 exit 0 含 drift: 行；--check exit 非零
+  printf '\n# 篡改标记\n' >> "$T/.agents/notes/README.md"
+  run_cli "$T" upgrade
+  assert_eq "篡改后默认 upgrade exit 0（漂移=观察）" 0 "$R_RC"
+  assert_contains "报 drift 行" "$R_OUT" "drift:"
+  assert_contains "drift 行带前缀" "$R_OUT" "drift: .agents/notes/README.md"
+  run_cli "$T" upgrade --check
+  assert_eq "--check 漂移 → exit 非零" 1 "$R_RC"
+  # ③ 无 .meta/（有代码迹象的非空项目）→ die 指引 init
+  T=$(new_case); printf '# proj\n' > "$T/README.md"
+  run_cli "$T" upgrade
+  assert_eq "有代码但无 .meta → die" 1 "$R_RC"
+  assert_contains "指引 init" "$R_OUT" "ponygo init"
+  # ④ 非 git → WARN（exit 0）
+  T=$(new_case); run_cli "$T" init --yes
+  # init 在 mktemp 目录内，天然非 git——WARN 但 exit 0
+  run_cli "$T" upgrade
+  assert_eq "非 git 场景 upgrade exit 0" 0 "$R_RC"
+  assert_contains "非 git WARN" "$R_OUT" "WARN 不在 git 仓库"
+  # ⑤ 缺 meta.yaml/缺 level 行 → 按 L0 处理（不崩）
+  T=$(new_case); run_cli "$T" init --yes
+  rm -f "$T/.meta/meta.yaml"
+  run_cli "$T" upgrade
+  assert_eq "缺 meta.yaml upgrade exit 0（按 L0）" 0 "$R_RC"
+  assert_contains "L0 处理" "$R_OUT" "L0"
+  T=$(new_case); run_cli "$T" init --yes
+  printf 'docs-tier: off\n' > "$T/.meta/meta.yaml"  # 有 meta.yaml 但无 level 行
+  run_cli "$T" upgrade
+  assert_eq "缺 level 行 upgrade exit 0（按 L0）" 0 "$R_RC"
+  # ⑥ usage/parser 联动：--check 非 upgrade 拒绝；--check 与 --dry-run 互斥
+  T=$(new_case); run_cli "$T" init --yes
+  run_cli "$T" status --check
+  assert_eq "status --check → exit 1（显式拒绝）" 1 "$R_RC"
+  assert_contains "报仅适用于 upgrade" "$R_OUT" "仅适用于 'ponygo upgrade'"
+  run_cli "$T" upgrade --check --dry-run
+  assert_eq "upgrade --check --dry-run → exit 1（互斥）" 1 "$R_RC"
+  assert_contains "报互斥" "$R_OUT" "互斥"
+  # ⑦ 已激活 docs-tier 实例（P2-1）：docs-tier/README.md 不参与比对（s14 锁模板态）——
+  #    upgrade exit 0 且不报该文件 drift；--check 仍 exit 0（不假红）
+  T=$(new_case); run_cli "$T" init --yes
+  printf '## 已激活文档家清单\n\n| tier | 家 |\n|---|---|\n| 决策记录 | .agents/notes/ |\n' > "$T/.meta/docs-tier/README.md"
+  run_cli "$T" upgrade
+  assert_eq "已激活实例 upgrade exit 0" 0 "$R_RC"
+  assert_not_contains "不报 docs-tier drift" "$R_OUT" "drift: .meta/docs-tier/README.md"
+  assert_contains "声明不支持比对" "$R_OUT" "不参与漂移比对"
+  run_cli "$T" upgrade --check
+  assert_eq "已激活实例 --check exit 0（不假红）" 0 "$R_RC"
 }
 
 s20_installer
@@ -1026,6 +1222,46 @@ s24_gate_layers
 s25_doc_home_audit
 s26_warn_tier
 s27_run_specs
+s30_release_chain() {
+  echo "--- 场景30：发布校验和链（fail-closed / 同钉 tag / workflow 形状 / 裸哈希口径 / CRLF）"
+  local T vreadme
+  # ① fail-closed 双入口：README 主命令块守卫（静态）+ install.sh 显式空 SHA 拒绝（动态，不 mock curl）
+  grep -q 'set -o pipefail' "$ROOT/README.md" && ok "README fail-closed 含 pipefail" || bad "README 缺 pipefail 守卫"
+  grep -q '\[ -n "\$SHA" \]' "$ROOT/README.md" && ok "README fail-closed 含空 SHA 守卫" || bad "README 缺空 SHA 守卫"
+  T=$(new_case); mkdir -p "$T/bin"
+  if PONYGO_SHA256="" bash "$ROOT/install.sh" "$T/bin" >/dev/null 2>&1; then
+    bad "install.sh 显式空 SHA 未拒绝（fail-closed 缺失）"
+  else
+    [ ! -f "$T/bin/ponygo" ] && ok "install.sh 空 SHA → 拒绝安装且无残留" || bad "install.sh 空 SHA 拒绝后仍残留 ponygo"
+  fi
+  # ② 同钉 tag：README 方式 A 的 bootstrap 行（install.sh URL）与 PONYGO_VERSION 同钉同一 tag；
+  #    install.sh 未设版本时仍取 main（兼容分支，architect P1-2：真改的是 README 行）
+  vreadme=$(grep -oE 'releases/download/v[0-9]+\.[0-9]+\.[0-9]+/' "$ROOT/README.md" | head -1 | sed 's#releases/download/##' | tr -d '/')
+  [ -n "$vreadme" ] || { bad "README 未钉 release tag"; vreadme="v0.0.0"; }
+  grep -qF "$vreadme/install.sh" "$ROOT/README.md" && ok "README bootstrap 行同钉 $vreadme" || bad "README bootstrap 行未钉 $vreadme"
+  grep -qF "PONYGO_VERSION=$vreadme" "$ROOT/README.md" && ok "README PONYGO_VERSION 同钉 $vreadme" || bad "README PONYGO_VERSION 未钉 $vreadme"
+  grep -q 'VERSION="${PONYGO_VERSION:-main}"' "$ROOT/install.sh" && ok "install.sh 未设版本回退 main" || bad "install.sh 缺 main 回退分支"
+  # ③ workflow 静态六断言（spec §8 s30③ + security P1-1）：精确管线 / Linux runner / 顶层 permissions:{} /
+  #    action 钉 commit SHA / tag 触发 / hex 附件断言（s30⑤）
+  if [ -f "$ROOT/.github/workflows/release.yml" ]; then
+    grep -qF 'sha256sum ponygo | awk' "$ROOT/.github/workflows/release.yml" && ok "workflow 裸哈希管线" || bad "workflow 缺裸哈希管线"
+    grep -q 'runs-on: ubuntu-latest' "$ROOT/.github/workflows/release.yml" && ok "workflow 钉 Linux" || bad "workflow 未钉 Linux"
+    grep -qE '^permissions: \{\}$' "$ROOT/.github/workflows/release.yml" && ok "workflow 顶层 permissions:{}" || bad "workflow 顶层 permissions 非 {}"
+    grep -qE 'uses: actions/checkout@[0-9a-f]{40} # v[0-9]+' "$ROOT/.github/workflows/release.yml" && ok "checkout 钉 commit SHA" || bad "checkout 未钉 commit SHA"
+    grep -qE 'uses: softprops/action-gh-release@[0-9a-f]{40} # v[0-9]+' "$ROOT/.github/workflows/release.yml" && ok "gh-release 钉 commit SHA" || bad "gh-release 未钉 commit SHA"
+    grep -qE "tags: \['v\[0-9\]\+\.\[0-9\]\+\.\[0-9\]\+'\]" "$ROOT/.github/workflows/release.yml" && ok "workflow 仅语义化版本 tag 触发" || bad "workflow 触发条件非语义化版本 tag"
+    grep -q "回验 raw.githubusercontent" "$ROOT/.github/workflows/release.yml" && ok "workflow 含 raw 回验" || bad "workflow 缺 raw 回验"
+    grep -qE '\^\[0-9a-f\]\{64\}\$' "$ROOT/.github/workflows/release.yml" && ok "workflow 附件 64 hex 断言" || bad "workflow 缺附件 hex 断言"
+    # ④ CRLF 断言（workflow 自身无 CRLF + 承诺的发布前 CRLF 检查静态存在）
+    grep -q $'\r' "$ROOT/.github/workflows/release.yml" && bad "release.yml 自身含 CRLF" || ok "release.yml 无 CRLF"
+    grep -qF "grep -q \$'\\r' ponygo" "$ROOT/.github/workflows/release.yml" && ok "workflow 含 CRLF 断言" || bad "workflow 缺 CRLF 断言"
+  else
+    bad "release.yml 缺失"
+  fi
+  # ⑤ README 维护者口径：裸哈希 awk 剥列 + 64 hex 附件语义（发布后以真实附件值为准）
+  grep -qF '{print $1}' "$ROOT/README.md" && ok "README 维护者口径 awk 剥列" || bad "README 缺 awk 剥列口径"
+  grep -qF 'sha256sum ponygo | awk' "$ROOT/README.md" && ok "README 裸哈希管线" || bad "README 缺裸哈希管线"
+}
 s32_task004_static() {
   echo "--- 场景32：TASK-004 静态存在性（G/I/S/D 四段，全称锚定；失败报 file:line）"
   g() { # $1=描述 $2=文件 $3=靶串（固定串）
@@ -1064,6 +1300,8 @@ s32_task004_static() {
 
 s28_l2_reachability
 s29_doc_level_parity
+s30_release_chain
+s31_upgrade_drift
 s32_task004_static
 
 echo ""

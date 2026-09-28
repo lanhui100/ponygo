@@ -227,7 +227,13 @@ TASK-003 标注 `blocked（未发布）`；不许"两种结局都算交代"。**
 | proposed 评审 | 独立 reviewer（upgrade） | **不通过**（4 P0） | `reviews/review-TASK-003-upgrade.md` |
 | proposed 评审 | 独立 reviewer（release） | **不通过**（无需 consultant） | `reviews/review-TASK-003-release.md` |
 | spec rev1 | consultant 三选一裁决 | Q1=A（2.5 条件判据）、Q2=A（按 §3.2 落地）、Q3=A（按 §3.1 落地，新 tag `v2.4.0`，禁补 `v2.3.0` 附件，不可撤回风险由维护者承担，全绿前禁推） | `reviews/review-TASK-003-consultant.md` |
-| spec rev1 | architect 独立对抗评审 | 待补（回齐后填结论与处置） | `reviews/review-TASK-003-architect.md`（待建） |
-| code | @code-reviewer-a / @code-reviewer-b + security 快审 | 待补 | `reviews/review-TASK-003-code.md`（待建） |
+| spec rev1 | architect 独立对抗评审 | **不通过**（方向保留，按 P0 修完可复审） | `reviews/review-TASK-003-architect.md` |
+| code | @code-reviewer-a（正确性） | **有条件通过**（无 P0；P1-1 引号值激活状态机 / P1-2 空 SHA 缺行为测试 → 已修） | 主会话收口记录（TASK-003.md §收口记录）+ s12/s30 新用例 |
+| code | @code-reviewer-b（边界/失败路径） | **有条件通过**（无 P0/P1；P2-1 已激活 docs-tier 实例 --check 恒红 → 已修跳过比对 + s31⑦ fixture） | 主会话收口记录（TASK-003.md §收口记录） |
+| code | security 快审 | **有条件通过**（无 P0；P1-1 action 钉 SHA / P1-2 install.sh 空 SHA fail-open → 已修；P2 四项全修） | 主会话收口记录（TASK-003.md §收口记录）+ release.yml/ci.yml 变更 |
+
+> **版本漂移登记**：本 spec 写 `v2.4.0` 时基于 v2.3.0 时代；实施时 v2.5.0 已由 TASK-004 发布，
+> 发布目标顺延为 **v2.6.0**（README `:54`、release.yml 头注同步）。s29 版本一致性断言在
+> bump 后/tag 前红是预期（spec §9），以 WP-P tag 落点复核。
 
 *（本节在双审后回填；重大回改后重新审核受影响产物。）*

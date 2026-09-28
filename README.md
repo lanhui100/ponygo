@@ -35,26 +35,36 @@
 
 `ponygo` 是纯 bash 实现的治理演进脚手架，无外部包依赖。任选以下一种方式安装：
 
-**方式 A：一行命令远端安装（推荐，自动注入 `~/.local/bin` 并做 PATH 引导）**
+**方式 A：一行命令远端安装（快速体验，无完整性校验；生产环境请用下方"钉版本 + 校验和"块）**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/lanhui100/ponygo/main/install.sh | bash
 ```
 
-生产环境建议钉版本 + 校验和（防"curl|bash 拉的是未知内容"）：
+> 注：上行为**快速体验路径**——`curl|bash` 不验证内容，仅适合尝鲜；生产环境务必用下面
+> 钉版本 + 校验和的块（fail-closed：校验和取不到即拒绝安装）。
+
+生产环境建议钉版本 + 校验和（防"curl|bash 拉的是未知内容"；**fail-closed**：校验和取不到时**拒绝安装**，绝不静默跳过）：
 
 ```bash
 # 1) 取该版本的校验和（发布物 = Release 附件 ponygo.sha256，内容为裸哈希；
 #    未发布时按下方口径本地自算。awk 剥掉文件名列，与 install.sh 的整串比对口径对齐）
-SHA=$(curl -fsSL https://github.com/lanhui100/ponygo/releases/download/v2.5.0/ponygo.sha256 | awk '{print $1}')
-# 2) 钉版本 + 校验和安装
-curl -fsSL https://raw.githubusercontent.com/lanhui100/ponygo/main/install.sh | \
-  PONYGO_VERSION=v2.5.0 PONYGO_SHA256="$SHA" bash
+#    fail-closed 守卫：SHA 为空（附件 404 / 下载失败）→ 立即退出，不安装
+set -o pipefail
+SHA=$(curl -fsSL https://github.com/lanhui100/ponygo/releases/download/v2.6.0/ponygo.sha256 | awk '{print $1}')
+[ -n "$SHA" ] || { echo "无法获取校验和（未发布或网络失败），拒绝安装。" >&2; exit 1; }
+# 2) 钉版本 + 校验和安装（installer 与载荷同钉 tag：bootstrap 行取 tag 化 install.sh，不再浮动 main）
+curl -fsSL https://raw.githubusercontent.com/lanhui100/ponygo/v2.6.0/install.sh | \
+  PONYGO_VERSION=v2.6.0 PONYGO_SHA256="$SHA" bash
 ```
 
-校验和的生成口径（维护者）：`git checkout v2.5.0 && sha256sum ponygo | awk '{print $1}' > ponygo.sha256`，
+校验和的生成口径（维护者）：`git checkout v2.6.0 && sha256sum ponygo | awk '{print $1}' > ponygo.sha256`，
 随 Release 附件发布。`ponygo` 在仓库中以 LF 存储（`.gitattributes: eol=lf`），故 raw 下载与本地自算口径一致；
-未公布校验和之前，方式 A 的默认路径（不设 `PONYGO_SHA256`）仍然可用。
+`install.sh` 不设 `PONYGO_VERSION` 时仍取 main（兼容分支，供未发布新版本时使用）。
+**注意：校验和只保 `ponygo` 本体，不保 `install.sh` 自身**——bootstrap 行钉 tag 后 installer 与载荷同源，
+但首次 curl 的那段仍是信任链起点（可自审后落盘再执行）。
+未发布状态诚实标注：tag 未推 / 附件缺失时，上方命令块的 Releases 链接会 404——此时按下方"本地自算"口径
+手动生成校验和并安装，不要把 404 的链接当可用路径。
 
 **方式 B：源码目录一键安装（clone 本仓库后）**
 
@@ -106,7 +116,7 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
     ├── write-adr/SKILL.md     #    框架交付的自动路由技能（写 ADR）
     └── governance-review/SKILL.md  # 框架交付的用户点名技能（全面治理审查）
 .meta/
-├── meta.yaml                  # 合法键仅两个：level（成熟度级，整数 0-5，如 level: 2）与 ai-surface；版本由 git 派生，组件清单由目录存在性充当
+├── meta.yaml                  # 合法键仅三个：level（成熟度级，整数 0-5，如 level: 2）、ai-surface、docs-tier（on|off，L2 判据 2.5 的启用声明）；版本由 git 派生，组件清单由目录存在性充当
 ├── constitution/              # 宪法：语义规范（"什么是好的"），供投影到 AGENTS.md / CLAUDE.md
 │   └── constitution.md        #    模板态（槽位未填）时 sync 投影初始引导 bootstrap：AI agent 进场即有指引，
 │                              #    由 agent 完成填槽/重投影/首篇 ADR；填槽后重跑 sync，引导自动被常载命约替换
@@ -116,7 +126,7 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
 
 **关键约定**（其它文件据此派生命令名与路径）：
 
-- `meta.yaml` 仅 `level` 与 `ai-surface` 两个合法键 + 注释（其它键是规格违例）；**版本由 git 派生，组件清单由 `.meta/` + `.agents/` 目录存在性充当**——不冗余声明能被机械推导的东西。
+- `meta.yaml` 仅 `level` / `ai-surface` / `docs-tier` 三个合法键 + 注释（其它键是规格违例）；`docs-tier: on|off` 是 L2 判据 2.5 的**启用声明**（未声明=SKIP+WARN；`off`=显式 opt-out；目录存在不等于已激活，故不是冗余副本）；**版本由 git 派生，组件清单由 `.meta/` + `.agents/` 目录存在性充当**——不冗余声明能被机械推导的东西。
 - 决策文件路径：`.agents/notes/{lifecycle}/{class}/yyyy-mm-dd-topic-title.md`，其中
   - `lifecycle ∈ {proposed, implemented, rejected, archived}`
   - `class ∈ {feature, bug-fix, simplification, architecture, process, testing}`（领域扩展：`notes/classes.local` 每行追加一个 class，见 `.agents/notes/README.md`）
@@ -198,8 +208,9 @@ CLI 从不假设项目是空仓；它对"已有治理"与"零治理但历史厚�
 |---|---|---|
 | `README.md` | 门面 + 使用总纲：命令面、路径、阶梯、边界 | 所有人；第一入口 |
 | `ponygo` | 单文件 CLI（shell、零依赖），六条命令 | 使用者；执行入口 |
-| `tests/run.sh` | CLI 自测（纯 bash、零依赖、18+ 场景），`bash tests/run.sh` 全绿为准 | 维护者；回归门禁 |
+| `tests/run.sh` | CLI 自测（纯 bash、零依赖、31 场景），`bash tests/run.sh` 全绿为准 | 维护者；回归门禁 |
 | `.github/workflows/ci.yml` | 回归门禁挂载：ubuntu + windows Git Bash 双平台跑 tests/run.sh + 聚合门 | 维护者；分支保护依赖 |
+| `.github/workflows/release.yml` | 发布校验和链：tag-push 触发，生成并发布 ponygo.sha256（裸哈希 + CRLF 断言 + 最小权限） | 维护者；发布动作 |
 | `docs/methodology.md` | 原理层：方法论设计依据（源自 deepseek-harness） | 想懂"为什么"的人；机制层的理论源头 |
 | `.meta/` + `.agents/` | 治理根骨架（双根）：.meta/ = constitution / gates / docs-tier / meta.yaml；.agents/ = notes / skills | 实例化产物；由 `ponygo init` 生成进用户项目 |
 | `maturity-ladder.md` | 成熟度阶梯定义（L0–L5 逐档判据） | `ponygo status` 与 review 的判定来源 |

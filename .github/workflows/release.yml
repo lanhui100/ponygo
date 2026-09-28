@@ -1,0 +1,47 @@
+# ponygo 发布校验和链（v2.6，TASK-003 R 包）：tag-push 触发，交付可验证的 Release 附件
+# 口径（与 README §3.1 维护者块对齐，s30 断言二者一致）：
+#   - 哈希对象 = 本次 checkout 的 `ponygo` blob（非 zip/tarball 构建物）；
+#   - 计算命令钉死为裸哈希管线：sha256sum ponygo | awk '{print $1}' > ponygo.sha256；
+#   - runner 钉 Linux（GNU sha256sum）；发布前 CRLF 断言（git 存的 LF，出现 CRLF 即拒发）；
+#   - 顶层 permissions: {} 默认拒绝，job 级仅开 contents: write；第三方 action 钉版本/SHA；
+#   - 仅语义化版本 tag-push 触发，不执行 PR 非受信代码；
+#   - 发布前回验：raw.githubusercontent 实际服务的 <tag>/ponygo 与附件哈希一致（防"提交的是 A、raw 服务的是 B"）。
+name: release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']  # 仅语义化版本 tag 触发（拒绝任意 v* 误推/force-move 重推重铸哈希）
+
+permissions: {}
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # 第三方 action 钉 commit 全 SHA（防可变 tag 被攻陷后静默换执行；注释保留 tag 便于人读）
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: 断言 ponygo 无 CRLF（LF 存储，混入 CRLF 即拒绝发布）
+        run: |
+          if grep -q $'\r' ponygo; then
+            echo "::error::ponygo 含 CRLF，拒绝发布（.gitattributes 承诺 LF 存储，混入 CRLF 会使 raw 下载与本地自算的校验和失配）"
+            exit 1
+          fi
+      - name: 计算裸哈希（对象 = checkout 的 ponygo blob）
+        run: sha256sum ponygo | awk '{print $1}' > ponygo.sha256
+      - name: 断言附件为 64 位十六进制裸哈希
+        run: |
+          ATTACH="$(cat ponygo.sha256)"
+          echo "ponygo.sha256: $ATTACH"
+          echo "$ATTACH" | grep -qE '^[0-9a-f]{64}$' || { echo "::error::附件不是 64 位十六进制裸哈希"; exit 1; }
+      - name: 回验 raw.githubusercontent 服务的 blob 与附件一致（P2-2：防提交与 raw 服务不一致）
+        run: |
+          RAW_SHA="$(curl -fsSL "https://raw.githubusercontent.com/lanhui100/ponygo/${GITHUB_REF_NAME}/ponygo" | sha256sum | awk '{print $1}')"
+          ATTACH="$(cat ponygo.sha256)"
+          echo "raw ${GITHUB_REF_NAME}/ponygo sha256: $RAW_SHA"
+          [ "$RAW_SHA" = "$ATTACH" ] || { echo "::error::raw 服务 blob 与附件哈希不一致（$RAW_SHA != $ATTACH），拒绝发布"; exit 1; }
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: ponygo.sha256
+          generate_release_notes: true

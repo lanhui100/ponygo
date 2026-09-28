@@ -1,15 +1,17 @@
 # ============================================================
-# ponygo 治理根状态文件 —— 唯一内容字段是 level
+# ponygo 治理根状态文件 —— 内容字段 = level (ai-surface/docs-tier 为开关声明)
 # ============================================================
 #
 # 铁律（防手填漂移，呼应 methodology.md P2「凡机械可查必有非零退出命令」）：
-#   - 本文件【只】承载一个真值源字段：level（成熟度级）。
+#   - 本文件承载的唯一真值源字段：level（成熟度级）；ai-surface / docs-tier 是开关声明，非事实副本。
 #   - 版本号 → 由 git 派生（git log / tag），不要在这里手填第二个"版本"。
 #   - "已激活组件"清单 → 由 .meta/ 与 .agents/ 下【目录是否实际存在】充当（文件夹即标签），
 #     不要在这里手填一份会与目录漂移的副本。
 #   - "演进记录" → 由 git 历史 + .agents/notes/ 下的 ADR 充当，不要在这里重复记。
-#   - 合法键 = level + ai-surface 两个：ai-surface: on|off 控制 sync 是否生成 AI 投影；
-#     出现其它键（含缩进的 level/ai-surface）会被 'ponygo status' / 'ponygo audit' 告警（WARN）。
+#   - 合法键 = level + ai-surface + docs-tier 三个：ai-surface: on|off 控制 sync 是否生成 AI 投影；
+#     docs-tier: on|off 是文档分层的启用声明（on=校验 2.5，off=显式 opt-out；目录存在不等于已激活，
+#     故不是可由目录推导的冗余副本）；出现其它键（含缩进的 level/ai-surface/docs-tier）
+#     会被 'ponygo status' / 'ponygo audit' 告警（WARN）。
 #
 # 为什么只留一个字段：多字段（版本/组件/演进/成熟度）会互相派生、手填必漂移，
 # 重演 methodology.md §2.1 用「文件夹即标签」消灭掉的「行与文件夹不一致」。
