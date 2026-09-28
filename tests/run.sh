@@ -582,16 +582,16 @@ s17_dry_run() {
 }
 
 s18_repo_consistency() {
-  echo "--- 场景18：F1 口径 grep（checklist.md 骨架8/机制15/精微8）+ .gitattributes"
+  echo "--- 场景18：F1 口径 grep（checklist.md 骨架8/机制18/精微8）+ .gitattributes"
   if grep -Eq '骨架[[:space:]]*8|8[[:space:]]*项' "$ROOT/audit/checklist.md" 2>/dev/null; then
     ok "checklist.md 含骨架层数 8"
   else
     bad "checklist.md 缺骨架层数 8 口径"
   fi
-  if grep -Eq '机制[[:space:]]*15|15[[:space:]]*项' "$ROOT/audit/checklist.md" 2>/dev/null; then
-    ok "checklist.md 含机制层数 15"
+  if grep -Eq '机制[[:space:]]*18|18[[:space:]]*项' "$ROOT/audit/checklist.md" 2>/dev/null; then
+    ok "checklist.md 含机制层数 18"
   else
-    bad "checklist.md 缺机制层数 15 口径"
+    bad "checklist.md 缺机制层数 18 口径"
   fi
   if grep -Eq '精微[[:space:]]*8|精微层.{0,10}8[[:space:]]*项' "$ROOT/audit/checklist.md" 2>/dev/null; then
     ok "checklist.md 含精微层数 8"
@@ -1026,8 +1026,45 @@ s24_gate_layers
 s25_doc_home_audit
 s26_warn_tier
 s27_run_specs
+s32_task004_static() {
+  echo "--- 场景32：TASK-004 静态存在性（G/I/S/D 四段，全称锚定；失败报 file:line）"
+  g() { # $1=描述 $2=文件 $3=靶串（固定串）
+    if grep -Hn -F -- "$3" "$ROOT/$2" >/dev/null 2>&1; then
+      ok "$1（$2）"
+    else
+      bad "$1（$2 缺 [$3]）"
+    fi
+  }
+  grep -q '^| 2\.A ' "$ROOT/audit/checklist.md" && ok "2.A 资源隔离存在" || bad "缺 2.A（audit/checklist.md）"
+  grep -q '^| 2\.B ' "$ROOT/audit/checklist.md" && ok "2.B 状态同步存在" || bad "缺 2.B（audit/checklist.md）"
+  grep -q '^| 2\.C ' "$ROOT/audit/checklist.md" && ok "2.C 处置静默存在" || bad "缺 2.C（audit/checklist.md）"
+  g "判据链到家" "audit/checklist.md" 'methodology §4.7'
+  g "用法小结已同步 18" "audit/checklist.md" '追加「机制层」（18 项）'
+  g "checklist 纪律数已同步五条" "audit/checklist.md" '五条纪律'
+  g "gates 链入行声明非门禁" ".meta/gates/README.md" '本行非门禁'
+  g "gates 掩盖清单附注" ".meta/gates/README.md" '加超时'
+  g "分节键存在" "docs/methodology.md" '分节键'
+  g "旧格式有效原句存在" "docs/methodology.md" '旧整文件哈希记录仍有效'
+  g "重名 ~2 规则存在" "docs/methodology.md" '~2'
+  g "同级重名规则存在" "docs/methodology.md" '同级重名'
+  g "F7 防逃逸句存在" "docs/methodology.md" '不得归 F7'
+  g "纪律 4 存在" ".agents/skills/README.md" '工具定义卫生'
+  g "纪律 5 存在" ".agents/skills/README.md" '简化勘探证据链'
+  g "追溯句存在" ".agents/skills/README.md" '本提交之后新增/改写'
+  g "计数不选优存在" "docs/methodology.md" '计数不选优'
+  g "每事实一次存在" "docs/methodology.md" '每事实只说一次'
+  g "证据链四件套存在" "docs/methodology.md" '证据链四件套'
+  g "救命话：追溯句全句" ".agents/skills/README.md" '本节仅约束本提交之后新增/改写'
+  g "救命话：旧格式有效" "docs/methodology.md" '旧整文件哈希记录仍有效'
+  g "scorecard 精确句存在" "audit/scorecard.md" '2.A–2.C 任一有 review 记录'
+  g "scorecard 9-10 分句存在" "audit/scorecard.md" '分类表可指到'
+  g "depth-selector 已同步 18" "audit/depth-selector.md" '机制 18'
+  g "README 已同步 18" "README.md" '机制 18'
+}
+
 s28_l2_reachability
 s29_doc_level_parity
+s32_task004_static
 
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="

@@ -57,6 +57,12 @@
 | 2.4 | 门带负样本 spec | 每个门有构造非法样例证明会拒绝 | `find . -path ./node_modules -prune -o \( -name '*_test.go' -o -name '*_test.rs' -o -name 'test_*.py' -o -name '*_test.py' -o -name '*.spec.ts' -o -name '*.spec.js' -o -name '*.Spec.cs' \) -print \| head -1` 非空 | 给门配负样本 spec（后缀随项目栈而定，此处仅给常见样例） |
 | 2.5 | 分层（本地 vs CI）各抓各的 | 本地窄、CI 全，不重复跑 | 语义，见 `scorecard.md` 问② | 靠 review |
 | 2.6 | 绕行可控 | 有 bypass 记录/上报机制 | 语义 | 靠 review |
+| 2.A | 资源隔离（原子分配，靠 review） | 并行测试的共享资源由原子分配器获取，禁先探后占 | review 程序：抽新增测试各一例 → 记 F1–F7 分类 → 复现阶梯到首个签名（细则家见 methodology §4.7；检查示例非穷尽：固定路径含 POSIX `/tmp` 与 Windows `%TEMP%` 等价物，动词不限 kill/abort/close 三词） | 补原子分配 + review 记录 |
+| 2.B | 就绪与完成等待（状态同步，靠 review） | 断言等被测方拥有的可观测就绪/完成信号；超时只做上界；固定 sleep 不充当证据 | 同上三步 review 程序 | 补状态等待 + review 记录 |
+| 2.C | 处置到静默（quiescence，靠 review） | 清理获取后立即注册；关闭/取消后等到完成信号才算收尾 | 同上三步 review 程序 | 补完成等待 + review 记录 |
+
+> 读者指引：2.A–2.C 为 active；2.7/2.8 仍 `[future]`；2.7/2.8 激活时顺延编号、本附录号不重编。
+> 本表口径与 CLI 内嵌 10/14 是两套计数——CLI 内嵌是子集故免改，勿混改 CLI（权威以本表为准）。
 
 ### 精微层（`[future]`）
 
@@ -81,7 +87,7 @@
 | 3.3 | 技能带触发式 description | description 内联触发条件 | `grep -l '何时用\|trigger\|When to use' .agents/skills/*/SKILL.md 2>/dev/null` | 补触发式 description |
 | 3.4 | 技能带校准样例 | 正反例成对 | `grep -l '校准样例\|calibration\|Examples' .agents/skills/*/SKILL.md 2>/dev/null` | 补校准样例 |
 
-> **L4 解冻前置**：SKILL.md 的完整格式契约（五要素 + 契约头部示例 + 三条纪律）见
+> **L4 解冻前置**：SKILL.md 的完整格式契约（五要素 + 契约头部示例 + 五条纪律）见
 > `.agents/skills/README.md`；skill 元数据门禁（frontmatter/触发/样例的机械校验）与
 > "第三次重复"计数机制属 L4 依赖的未交付物（maturity-ladder §2），解冻 L4 前逐项
 > 满足 3.2–3.4 即可，不预建门禁（空门禁是被永久引用的死重）。
@@ -120,7 +126,7 @@
 ## 用法小结
 
 - `S 档`（起步/小项目）：只跑「骨架层」各问，共 8 项；命中为 0 的层面**就此打住，不再深挖**（连 ADR 目录都没有时，问词数预算是废话）。
-- `M 档`（有治理基础但欠体系）：追加「机制层」（15 项）。
+- `M 档`（有治理基础但欠体系）：追加「机制层」（18 项）。
 - `L 档`（monorepo/多栈/强合规）：「精微层」（8 项）标 `[future]`，首版不启用——其中半数检查点依赖尚未交付的机制（双语配对、生成物漂移门、覆盖率分区）。
 
 > 打分 = 命中计数；每个 0 分点直接映射右列一条「最小改进动作」。这是审计可复现的来源——同一个盘面、不同人跑，命中数一致。

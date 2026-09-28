@@ -46,13 +46,13 @@ curl -fsSL https://raw.githubusercontent.com/lanhui100/ponygo/main/install.sh | 
 ```bash
 # 1) 取该版本的校验和（发布物 = Release 附件 ponygo.sha256，内容为裸哈希；
 #    未发布时按下方口径本地自算。awk 剥掉文件名列，与 install.sh 的整串比对口径对齐）
-SHA=$(curl -fsSL https://github.com/lanhui100/ponygo/releases/download/v2.3.0/ponygo.sha256 | awk '{print $1}')
+SHA=$(curl -fsSL https://github.com/lanhui100/ponygo/releases/download/v2.5.0/ponygo.sha256 | awk '{print $1}')
 # 2) 钉版本 + 校验和安装
 curl -fsSL https://raw.githubusercontent.com/lanhui100/ponygo/main/install.sh | \
-  PONYGO_VERSION=v2.3.0 PONYGO_SHA256="$SHA" bash
+  PONYGO_VERSION=v2.5.0 PONYGO_SHA256="$SHA" bash
 ```
 
-校验和的生成口径（维护者）：`git checkout v2.3.0 && sha256sum ponygo | awk '{print $1}' > ponygo.sha256`，
+校验和的生成口径（维护者）：`git checkout v2.5.0 && sha256sum ponygo | awk '{print $1}' > ponygo.sha256`，
 随 Release 附件发布。`ponygo` 在仓库中以 LF 存储（`.gitattributes: eol=lf`），故 raw 下载与本地自算口径一致；
 未公布校验和之前，方式 A 的默认路径（不设 `PONYGO_SHA256`）仍然可用。
 
@@ -144,7 +144,7 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
 | S（Small） | 起步 / 小项目 | CLI 内嵌精简子集 10 项（判"有没有"） |
 | M（Medium） | 有治理基础但欠体系 | + CLI 内嵌追加 4 项（共 14 项，判"对不对"） |
 
-> 上方是 **CLI 内嵌的精简子集**（其"10/14 项"与下文 checklist 的"骨架 8 / 机制 15 / 精微 8"是两套计数，勿混用）；全量细目见 `audit/checklist.md`（骨架 8 / 机制 15 / 精微 8 标 future，为权威真源——CLI 与文档口径不一致时以 checklist 为准）。四问记分卡：决策记在哪 / 承诺怎么强制 / 重复劳动怎么复用 / 过时怎么退场。
+> 上方是 **CLI 内嵌的精简子集**（其"10/14 项"与下文 checklist 的"骨架 8 / 机制 18 / 精微 8"是两套计数，勿混用；CLI 内嵌是 checklist 子集故免改）；全量细目见 `audit/checklist.md`（骨架 8 / 机制 18 / 精微 8 标 future，为权威真源——CLI 与文档口径不一致时以 checklist 为准）。四问记分卡：决策记在哪 / 承诺怎么强制 / 重复劳动怎么复用 / 过时怎么退场。
 
 > **只读边界**：`status` / `audit` 默认**不执行**仓库里的任何脚本（对陌生遗留仓库执行脚本 = 任意代码执行）。
 > 判据 2.3 的**执行侧**（跑 `gates/*.spec.sh` 并断言 exit 0）由显式开关承担：`ponygo audit --run-specs`，
