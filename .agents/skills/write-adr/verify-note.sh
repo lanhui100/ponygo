@@ -47,14 +47,16 @@ extra_classes() {
 
 # 1.3 顶层目录 ⊆ 四态封闭集
 while IFS= read -r d; do
+  [ -n "$d" ] || continue
   case " $LIFECYCLES " in *" $d "*) ;; *) fail "1.3 顶层目录越界：$d" ;; esac
-done < <(find "$NOTES_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null)
+done < <(find "$NOTES_DIR" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null)
 
 # 1.4 二级目录 ⊆ 六类封闭集 ∪ classes.local
 classes_all=" $CLASSES $(extra_classes | tr '\n' ' ') "
 while IFS= read -r d; do
+  [ -n "$d" ] || continue
   case "$classes_all" in *" $d "*) ;; *) fail "1.4 class 越界：$d" ;; esac
-done < <(find "$NOTES_DIR" -mindepth 2 -maxdepth 2 -type d -printf '%f\n' 2>/dev/null)
+done < <(find "$NOTES_DIR" -mindepth 2 -maxdepth 2 -type d -exec basename {} \; 2>/dev/null)
 
 # DATE_OK：GNU date 可用才机械判日期，否则降级"靠 review"（与 CLI 同款诚实条款）
 DATE_OK=0

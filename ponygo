@@ -621,14 +621,16 @@ extra_classes() {
 
 # 1.3 顶层目录 ⊆ 四态封闭集
 while IFS= read -r d; do
+  [ -n "$d" ] || continue
   case " $LIFECYCLES " in *" $d "*) ;; *) fail "1.3 顶层目录越界：$d" ;; esac
-done < <(find "$NOTES_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null)
+done < <(find "$NOTES_DIR" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null)
 
 # 1.4 二级目录 ⊆ 六类封闭集 ∪ classes.local
 classes_all=" $CLASSES $(extra_classes | tr '\n' ' ') "
 while IFS= read -r d; do
+  [ -n "$d" ] || continue
   case "$classes_all" in *" $d "*) ;; *) fail "1.4 class 越界：$d" ;; esac
-done < <(find "$NOTES_DIR" -mindepth 2 -maxdepth 2 -type d -printf '%f\n' 2>/dev/null)
+done < <(find "$NOTES_DIR" -mindepth 2 -maxdepth 2 -type d -exec basename {} \; 2>/dev/null)
 
 # DATE_OK：GNU date 可用才机械判日期，否则降级"靠 review"（与 CLI 同款诚实条款）
 DATE_OK=0
@@ -978,14 +980,21 @@ do_sync() {
     if [ -f "$target" ]; then
       # 文件已存在：只在标记区之间替换；无标记区则追加
       if grep -q "$begin" "$target"; then
-        awk -v b="$begin" -v e="$end" -v body="$body" '
+        local sync_tmp
+        sync_tmp=$(mktemp "${target}.tmp.XXXXXX" 2>/dev/null || echo "${target}.tmp.$$")
+        if awk -v b="$begin" -v e="$end" -v body="$body" '
           BEGIN{inblk=0; donebody=0}
           $0==b { print b; print body; inblk=1; donebody=1; next }
           $0==e { print e; inblk=0; next }
           inblk { next }
           { print }
           END{ if(!donebody){ print b; print body; print e } }
-        ' "$target" > "$target.tmp" && mv "$target.tmp" "$target"
+        ' "$target" > "$sync_tmp"; then
+          mv -f "$sync_tmp" "$target" || { rm -f "$sync_tmp"; die "无法原子更新 $target"; }
+        else
+          rm -f "$sync_tmp"
+          die "awk 模板替换失败: $target"
+        fi
       else
         printf '%s\n%s\n%s\n%s\n' "$begin" "$body" "$end" "" >> "$target"
       fi
@@ -1725,7 +1734,8 @@ cmd_upgrade() {
   # write_skeleton 是当前进程内的函数（相对路径常量），在子 shell cd 后调用即生成一套模板骨架。
   local tmp="" f="" drift_n=0 missing_n=0
   tmp=$(mktemp -d) || die "无法创建临时目录"
-  ( cd "$tmp" && write_skeleton 0 ) >/dev/null 2>&1 || { rm -rf "$tmp"; die "无法生成模板基准"; }
+  trap 'rm -rf "${tmp:-}" 2>/dev/null || true; trap - EXIT INT TERM' EXIT INT TERM
+  ( cd "$tmp" && write_skeleton 0 ) >/dev/null 2>&1 || { rm -rf "$tmp"; trap - EXIT INT TERM; die "无法生成模板基准"; }
   for f in $UPGRADE_UNIVERSE; do
     # P2-1：docs-tier 已激活实例跳过该文件比对（s14 锁模板态）
     [ "$dt_skip" = "1" ] && [ "$f" = ".meta/docs-tier/README.md" ] && continue
@@ -1753,6 +1763,7 @@ cmd_upgrade() {
     fi
   done
   rm -rf "$tmp"
+  trap - EXIT INT TERM
   if [ "$drift_n" -eq 0 ] && [ "$missing_n" -eq 0 ]; then
     echo "宇宙内十文件与模板基准一致，零漂移。"
   else

@@ -14,14 +14,14 @@ jobs:
   selftest-linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: bash tests/run.sh
         run: bash tests/run.sh
 
   selftest-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: bash tests/run.sh (Git Bash)
         shell: bash
         run: bash tests/run.sh

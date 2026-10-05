@@ -17,18 +17,18 @@ TARGET="$BIN_DIR/ponygo"
 
 # 1. 获取 ponygo 执行脚本：优先本地已有文件（同目录/当前目录），否则 curl / wget 下载
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "")"
-if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/ponygo" ]; then
+if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/ponygo" ] && [ ! -d "$SCRIPT_DIR/ponygo" ]; then
   info "检测到本地源码，从 $SCRIPT_DIR/ponygo 复制..."
   cp -f "$SCRIPT_DIR/ponygo" "$TARGET"
-elif [ -f "./ponygo" ]; then
+elif [ -f "./ponygo" ] && [ ! -d "./ponygo" ]; then
   info "检测到当前目录源码，从 ./ponygo 复制..."
   cp -f "./ponygo" "$TARGET"
 else
   info "从远端拉取最新 ponygo 脚本 ($REPO_RAW_URL)..."
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$REPO_RAW_URL" -o "$TARGET" || die "curl 下载失败: $REPO_RAW_URL"
+    curl -fsSL --connect-timeout 15 "$REPO_RAW_URL" -o "$TARGET" || die "curl 下载失败: $REPO_RAW_URL"
   elif command -v wget >/dev/null 2>&1; then
-    wget -qO "$TARGET" "$REPO_RAW_URL" || die "wget 下载失败: $REPO_RAW_URL"
+    wget -q --timeout=15 -O "$TARGET" "$REPO_RAW_URL" || die "wget 下载失败: $REPO_RAW_URL"
   else
     die "未找到 curl 或 wget，请先安装网络下载工具。"
   fi
