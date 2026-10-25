@@ -1,6 +1,6 @@
 # Revision: 新增 observe 维度（ob0/ob1/ob2 三级判定 + ob3 advisory）
 
-Status: proposed
+Status: accepted
 
 ## Context
 
@@ -140,7 +140,8 @@ ob3 = 采样策略 / `gen_ai.*` 成本归因 / SLI 告警组。它依赖流量�
 - `README.md`：命令面列表 + §4.4 小节；
 - `checklists/observe-init.md`、`checklists/observe-audit.md`：两条操作程序；
 - `tests/run.sh`：s33~s36；
-- 不做阶梯语义变更：L0–L5 判据与既有计数不变，observe 是并列维度。
+- 不做阶梯语义变更：L0–L5 判据与既有计数不变，observe 是并列维度；
+- 版本：v2.7.0（README 示例同步）。
 
 ## 附：`observe audit` 的退出码语义（K10/K11，审核 B 指出的歧义）
 
