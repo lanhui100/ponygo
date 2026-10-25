@@ -62,6 +62,7 @@ placeholder_token: __REPLACE_ME__
 mount_carriers: .git/hooks/pre-commit .githooks/pre-commit .githooks/pre-push .pre-commit-config.yaml lefthook.yml .github/workflows .gitlab-ci.yml
 skill_dir_rel: .agents/skills/observability-onboarding
 external_timeout_seconds: 120
+local_timeout_seconds: 3
 # ==== OBSERVE MAPPING END ====
 :
 }
@@ -1847,16 +1848,660 @@ cmd_retire() {
 # 属 Executor task-3；--json 词表、init 声明模板、upgrade 版本比较同属 task-3。
 # EXEC: 完整校验与 --mapping 覆盖见 task-3
 
-# 从嵌入映射数据块取值（桩：只做「逐字取出」这一最小实现——
-# 无键名合法性校验、无 --mapping 覆盖、无 mapping_version 校验，全部留给 task-3）。
-observe_map_get() {
-  sed -n "s/^${1:-}:[[:space:]]*//p" "${BASH_SOURCE[0]:-$0}" | head -n 1
+# ---------- observe 辅助函数（映射/版本/技能目录/超时/probe） ----------
+# PONYGO_SELF：单文件自路径（映射数据块与脚本同文件；取数不依赖调用时 CWD）。
+PONYGO_SELF=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/$(basename "${BASH_SOURCE[0]:-$0}")
+
+# 映射文件：--mapping 值 > env PONYGO_OBSERVE_MAPPING > 嵌入数据块（=脚本自身）
+observe_mapping_file() {
+  if [ -n "${OBSERVE_MAPPING_FILE:-}" ]; then printf '%s\n' "$OBSERVE_MAPPING_FILE"; return 0; fi
+  if [ -n "${PONYGO_OBSERVE_MAPPING:-}" ]; then printf '%s\n' "${PONYGO_OBSERVE_MAPPING}"; return 0; fi
+  printf '%s\n' "$PONYGO_SELF"
 }
 
-observe_status() { info "observe status: NOT IMPLEMENTED"; exit 3; }
-observe_init() { info "observe init: NOT IMPLEMENTED"; exit 3; }
-observe_audit() { info "observe audit: NOT IMPLEMENTED"; exit 3; }
-observe_upgrade() { info "observe upgrade: NOT IMPLEMENTED"; exit 3; }
+# 数据块 fail-closed 校验：必需键各恰好一行且取值非空；mapping_version 必须为 1。
+# 首次调用一次即可（OBS_MAP_VERIFIED 防重复）。
+observe_require_keys() {
+  [ "${OBS_MAP_VERIFIED:-0}" = "1" ] && return 0
+  local f k n mv keys bad
+  f=$(observe_mapping_file)
+  if [ ! -f "$f" ]; then
+    printf 'ponygo: 映射文件不存在：%s\n' "$f" >&2
+    printf '  排查：改用 --mapping <file> 或 env PONYGO_OBSERVE_MAPPING=<file>\n' >&2
+    exit 2
+  fi
+  keys="mapping_version ob_levels ob_level0_name ob_level1_name ob_level2_name
+ob_advisory_name target_level_0 target_level_1 target_level_2 target_level_3
+target_level_4 target_level_5 kind_enum contract_version_min declaration_paths
+placeholder_token mount_carriers skill_dir_rel external_timeout_seconds
+local_timeout_seconds"
+  bad=""
+  for k in $keys; do
+    n=$(grep -E "^${k}:[[:space:]]*[^[:space:]]" "$f" | wc -l)
+    n=${n//[!0-9]/}
+    if [ "$n" != "1" ]; then
+      bad="$bad$k(命中${n:-0}次) "
+    fi
+  done
+  if [ -n "$bad" ]; then
+    printf 'ponygo: 映射数据块键异常：\n' >&2
+    for k in $bad; do
+      printf '  - %s\n' "$k" >&2
+    done
+    printf '  期望每键恰好一行且取值非空；排查：grep -n "^<key>:" %s\n' "$f" >&2
+    exit 2
+  fi
+  mv=$(sed -n 's/^mapping_version:[[:space:]]*//p' "$f" | head -n1 | tr -d '\r')
+  if [ "$mv" != "1" ]; then
+    printf 'ponygo: 映射数据块版本不支持：%s（本版本只认 mapping_version: 1）\n' "${mv:-（空）}" >&2
+    exit 2
+  fi
+  OBS_MAP_VERIFIED=1
+}
+
+# 取值：键白名单 + 缺失 fail-closed（sed 首命中即停，不依赖管道求首行）
+observe_map_get() {
+  local key f v
+  key=${1:-}
+  case "$key" in ''|*[!a-z0-9_]*) die "映射键非法：${key:-（空）}" ;; esac
+  observe_require_keys
+  f=$(observe_mapping_file)
+  v=$(sed -n "/^${key}:[[:space:]]*/{s/^${key}:[[:space:]]*//;s/\r\$//;p;q;}" "$f")
+  if [ -z "$v" ]; then
+    printf 'ponygo: 映射键缺失：%s\n' "$key" >&2
+    printf '  排查：grep -n "^%s:" %s\n' "$key" "$f" >&2
+    exit 2
+  fi
+  printf '%s\n' "$v"
+}
+
+# $1 >= $2 → 0（按 . 拆三段整数；缺段按 0；非数字按 0）
+observe_version_ge() {
+  local v1 v2 i a b
+  local -a s1 s2
+  v1=${1:-}; v2=${2:-}; s1=(); s2=()
+  while [ -n "$v1" ]; do
+    s1+=("${v1%%.*}")
+    case "$v1" in *.*) v1=${v1#*.} ;; *) v1="" ;; esac
+  done
+  while [ -n "$v2" ]; do
+    s2+=("${v2%%.*}")
+    case "$v2" in *.*) v2=${v2#*.} ;; *) v2="" ;; esac
+  done
+  for i in 0 1 2; do
+    a=${s1[$i]:-0}; b=${s2[$i]:-0}
+    case "$a" in ''|*[!0-9]*) a=0 ;; esac
+    case "$b" in ''|*[!0-9]*) b=0 ;; esac
+    a=$((10#$a)); b=$((10#$b))
+    [ "$a" -gt "$b" ] && return 0
+    [ "$a" -lt "$b" ] && return 1
+  done
+  return 0
+}
+
+# skill 目录：--skill-dir > ${PONYGO_SKILL_DIR} > $HOME/<skill_dir_rel>（不校验存在性）
+observe_skill_dir_soft() {
+  if [ -n "${OBSERVE_SKILL_DIR:-}" ]; then printf '%s\n' "$OBSERVE_SKILL_DIR"; return 0; fi
+  if [ -n "${PONYGO_SKILL_DIR:-}" ]; then printf '%s\n' "${PONYGO_SKILL_DIR}"; return 0; fi
+  printf '%s/%s\n' "${HOME:-}" "$(observe_map_get skill_dir_rel)"
+}
+
+# $1=dir → 打印 references/contract.json 的 contract_version；取不到打印空
+observe_skill_version() {
+  local d f
+  d=${1:-}
+  if [ -z "$d" ]; then printf '\n'; return 0; fi
+  f="$d/references/contract.json"
+  if [ ! -f "$f" ]; then printf '\n'; return 0; fi
+  sed -n 's/.*"contract_version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$f" | head -n1 | tr -d '\r'
+}
+
+# audit/upgrade 前置：skill 目录或 contract.json 缺失 → exit 2（附安装提示）
+observe_skill_require() {
+  local d c why
+  d=$(observe_skill_dir_soft)
+  c="$d/references/contract.json"
+  if [ -d "$d" ] && [ -f "$c" ]; then return 0; fi
+  if [ -d "$d" ]; then why="缺 references/contract.json"; else why="目录不存在"; fi
+  printf 'ponygo: 技能目录不可用：%s（%s）\n' "$d" "$why" >&2
+  printf '  安装：从所属 skill 仓把 observability-onboarding 安装到 ~/.agents/skills/observability-onboarding\n' >&2
+  printf '  或：ponygo observe <status|audit|upgrade> --skill-dir <dir>（等价 env PONYGO_SKILL_DIR=<dir>）\n' >&2
+  exit 2
+}
+
+# `timeout` 语义探针（惰性一次；OBS_TIMEOUT_OK=1/0）
+observe_timeout_ok() {
+  if [ -z "${OBS_TIMEOUT_OK:-}" ]; then
+    if timeout 1 bash -c 'exit 0' >/dev/null 2>&1; then OBS_TIMEOUT_OK=1; else OBS_TIMEOUT_OK=0; fi
+  fi
+  [ "$OBS_TIMEOUT_OK" = "1" ]
+}
+
+# $1=timeout_seconds $2=script 其余=args → 返回 skill 的 rc；skill 原始输出统一走 stderr
+# 输出捕获用文件重定向（绝不用 $(...)）：skill 可能输出大/多行/含 NUL 前导空字节，
+# 且 --json 时 stdout 必须干净。调用前后显式 rm -f（不用 EXIT trap：set -u 下多次调用易失效）。
+observe_run_skill() {
+  local tmo script out rc
+  tmo=${1:-0}; script=${2:-}
+  if [ $# -ge 2 ]; then shift 2; else set --; fi
+  out=$(mktemp "${TMPDIR:-/tmp}/ponygo-obs.XXXXXX") || {
+    printf 'ponygo: 无法创建临时文件（TMPDIR=%s）\n' "${TMPDIR:-/tmp}" >&2
+    return 2
+  }
+  if observe_timeout_ok; then
+    timeout "$tmo" bash "$script" "$@" >"$out" 2>&1; rc=$?
+  else
+    bash "$script" "$@" >"$out" 2>&1; rc=$?
+  fi
+  cat "$out" >&2
+  rm -f "$out"
+  return $rc
+}
+
+# 声明文件：data 块 declaration_paths 中第一个存在的；都没有 → 打印空
+observe_decl_path() {
+  local p
+  for p in $(observe_map_get declaration_paths); do
+    if [ -f "$p" ]; then printf '%s\n' "$p"; return 0; fi
+  done
+  printf '\n'
+}
+
+# 目标级：.meta/meta.yaml 的 level 经 target_level_<N> 映射；空/非数字/越界 → 0
+observe_target_level() {
+  local lv target
+  lv=$(read_level)
+  case "$lv" in ''|*[!0-9]*) lv=0 ;; esac
+  case "$lv" in 0|1|2|3|4|5) : ;; *) printf 'ob0\n'; return 0 ;; esac
+  target=$(observe_map_get "target_level_$lv")
+  if [ -z "$target" ]; then target=ob0; fi
+  printf '%s\n' "$target"
+}
+
+# 级别序：ob0<ob1<ob2；未知 → -1
+observe_rank() { case "${1:-}" in ob0) echo 0 ;; ob1) echo 1 ;; ob2) echo 2 ;; *) echo -1 ;; esac; }
+
+# 只读静态报告：不调用任何 skill 脚本、不写盘、rc 恒 0（映射数据坏 → 2，由 observe_map_get 抛出）
+observe_status() {
+  local decl present ph skill_dir ver min target compat kind raw gaps sep sp
+  observe_require_keys
+  decl=$(observe_decl_path)
+  present=false
+  if [ -n "$decl" ]; then present=true; fi
+
+  # 占位符：非注释行命中即"有占位"（注释行不算，模板注释可能自带示例 token）
+  ph=false
+  if [ "$present" = "true" ]; then
+    if grep -v '^[[:space:]]*#' "$decl" | grep -q -F "$(observe_map_get placeholder_token)"; then
+      ph=true
+    fi
+  fi
+
+  skill_dir=$(observe_skill_dir_soft)
+  ver=$(observe_skill_version "$skill_dir")
+  min=$(observe_map_get contract_version_min)
+  compat=false
+  if [ -n "$ver" ] && observe_version_ge "$ver" "$min"; then compat=true; fi
+  target=$(observe_target_level)
+
+  # 声明 kind：净化后仅当匹配 ^[a-z0-9-]+$ 且 ∈ kind_enum 才回显，否则 unknown
+  kind=unknown
+  if [ -n "$decl" ]; then
+    raw=$(sed -n 's/^[[:space:]]*kind:[[:space:]]*//p' "$decl" | head -n1 | tr -d '\r')
+    raw=${raw%%[[:space:]]#*}                       # 去行内注释
+    while :; do case "$raw" in *[[:space:]]) raw=${raw%?} ;; *) break ;; esac; done
+    case "$raw" in \"*\") raw=${raw#\"}; raw=${raw%\"} ;; esac
+    case "$raw" in \'*\') raw=${raw#\'}; raw=${raw%\'} ;; esac
+    case "$raw" in
+      ''|*[!a-z0-9-]*) : ;;
+      *) case " $(observe_map_get kind_enum) " in *" $raw "*) kind=$raw ;; esac ;;
+    esac
+  fi
+
+  # gaps：本命令只产 declaration_missing / placeholder_present 两种（顺序固定）
+  gaps=""; sep=""
+  if [ "$present" != "true" ]; then gaps="\"declaration_missing\""; sep=","; fi
+  if [ "$ph" = "true" ]; then gaps="${gaps}${sep}\"placeholder_present\""; fi
+
+  if [ "${OBSERVE_JSON:-0}" = "1" ]; then
+    sp=false
+    if [ -n "$skill_dir" ] && [ -f "$skill_dir/references/contract.json" ]; then sp=true; fi
+    local jp jph jc
+    if [ "$present" = "true" ]; then jp=pass; else jp=fail; fi
+    if [ "$ph" = "true" ]; then jph=fail; else jph=pass; fi
+    if [ "$compat" = "true" ]; then jc=true; else jc=false; fi
+    printf '{"schema":"ponygo.observe/1","command":"status","declared_kind":"%s","current":"unknown","target":"%s","skill":{"present":%s,"contract_version":"%s","compatible":%s},"judges":[{"id":"declaration_present","status":"%s"},{"id":"no_placeholder","status":"%s"},{"id":"declaration_consistent","status":"skip"},{"id":"enforcement_mounted","status":"skip"}],"gaps":[%s]}\n' \
+      "$kind" "$target" "$sp" "${ver:-unknown}" "$jc" "$jp" "$jph" "$gaps"
+    exit 0
+  fi
+
+  echo "===== ponygo observe status ====="
+  if [ "$present" = "true" ]; then printf '声明: %s\n' "$decl"; else printf '声明: 缺失\n'; fi
+  if [ "$ph" = "true" ]; then printf '占位符: 有\n'; else printf '占位符: 无\n'; fi
+  if [ "$compat" = "true" ]; then
+    printf 'skill: %s（contract_version=%s，兼容=yes）\n' "$skill_dir" "$ver"
+  else
+    printf 'skill: %s（contract_version=%s，兼容=no）\n' "$skill_dir" "${ver:-unknown}"
+  fi
+  printf '目标级: %s\n' "$target"
+  printf "判定项：需 'ponygo observe audit'（本命令不执行 skill 脚本）\n"
+  if [ "$present" != "true" ]; then
+    printf '缺口: declaration_missing —— 未找到可观测性声明；下一步：ponygo observe init --kind <k>\n'
+  fi
+  if [ "$ph" = "true" ]; then
+    printf '缺口: placeholder_present —— 声明中占位符未替换；下一步：填实四维归属与落点\n'
+  fi
+  exit 0
+}
+
+# observe init：落地四维归属声明（observe 唯一写命令；已存在声明需 --force；--dry-run 零落盘）
+observe_init() {
+  local kind svc decl target ph skill_rel date_s content dim_block dim d anchor reason usable gaps
+  local ph_hit cur tgt lv tmp dir skill_dir skill_ver min_ver
+  observe_require_keys
+
+  # 1) kind：必填且在枚举内（枚举来自映射数据块 kind_enum）
+  kind=${OBS_KIND:-}
+  if [ -z "$kind" ]; then
+    printf 'ponygo: observe init：缺必填 --kind（枚举：%s）\n' "$(observe_map_get kind_enum)" >&2
+    printf '  例：ponygo observe init --kind cli --dims metrics,logs\n' >&2
+    exit 2
+  fi
+  case "$kind" in
+    *[!a-z0-9-]*)
+      printf 'ponygo: observe init：--kind 取值非法：%s（枚举：%s）\n' "$kind" "$(observe_map_get kind_enum)" >&2
+      exit 2 ;;
+  esac
+  case " $(observe_map_get kind_enum) " in
+    *" $kind "*) : ;;
+    *)
+      printf 'ponygo: observe init：--kind 不在枚举内：%s（枚举：%s）\n' "$kind" "$(observe_map_get kind_enum)" >&2
+      exit 2 ;;
+  esac
+
+  # 2) service：--service 优先；否则 $PWD 基线名净化（保留 [A-Za-z0-9._-]，其余换 '-'）
+  svc=${OBS_SERVICE:-}
+  if [ -z "$svc" ]; then
+    svc=$(basename "$PWD" 2>/dev/null)
+    svc=$(printf '%s\n' "$svc" | sed 's/[^A-Za-z0-9._-]/-/g' | head -n1)
+  fi
+  if [ -z "$svc" ]; then
+    printf 'ponygo: observe init：service 无法确定（--service 为空且 $PWD 基线名净化后为空）\n' >&2
+    printf '  用：ponygo observe init --kind %s --service <name>\n' "$kind" >&2
+    exit 2
+  fi
+  # --service 值只收 YAML 标量安全字符（防 'a: b' 之类注入出第二个键）
+  case "$svc" in
+    *[!A-Za-z0-9._-]*)
+      printf 'ponygo: observe init：--service 取值非法：%s\n' "$svc" >&2
+      printf '  只允许 [A-Za-z0-9._-]（YAML 标量安全）；例：--service checkout-api\n' >&2
+      exit 2 ;;
+  esac
+
+  # 2.5) 技能契约门（A8）：<skill>/references/contract.json 是唯一版本源；缺目录/低版本 → exit 2
+  observe_skill_require
+  skill_dir=$(observe_skill_dir_soft)
+  skill_ver=$(observe_skill_version "$skill_dir")
+  min_ver=$(observe_map_get contract_version_min)
+  if [ -z "$skill_ver" ] || ! observe_version_ge "$skill_ver" "$min_ver"; then
+    printf 'ponygo: observe init：skill 契约版本不满足：%s（要求 >= %s）\n' "${skill_ver:-unknown}" "$min_ver" >&2
+    printf '  升级 skill 到 >= %s 后重试（版本源：%s/references/contract.json）\n' "$min_ver" "$skill_dir" >&2
+    exit 2
+  fi
+
+  # 3) 目标路径：已存在声明且无 --force → exit 2；目标 = 已存在声明（含 .yml）否则 docs/observability.yaml
+  decl=$(observe_decl_path)
+  if [ -n "$decl" ] && [ "${OBS_FORCE:-0}" != "1" ]; then
+    printf 'ponygo: observe init：声明已存在：%s\n' "$decl" >&2
+    printf '  覆盖请加 --force：ponygo observe init --kind %s --force\n' "$kind" >&2
+    exit 2
+  fi
+  if [ -n "$decl" ]; then
+    target=$decl
+  elif [ -f "docs/observability.yml" ]; then
+    target="docs/observability.yml"
+  else
+    target="docs/observability.yaml"
+  fi
+
+  # 4) 生成声明内容：四维齐全；未给 --dims ⇒ 四维 applicable: true（anchor 缺则占位），
+  #    给了 --dims ⇒ 列表内 true（anchor 缺占位），列表外 false（reason 缺占位）。
+  ph=$(observe_map_get placeholder_token)
+  skill_rel=$(observe_map_get skill_dir_rel)
+  date_s=$(date +%F)
+  dim_block=""; gaps=""
+  for dim in metrics tracing logs issues; do
+    case "$dim" in
+      metrics) anchor=${OBS_ANCHOR_METRICS:-}; reason=${OBS_REASON_METRICS:-} ;;
+      tracing) anchor=${OBS_ANCHOR_TRACING:-}; reason=${OBS_REASON_TRACING:-} ;;
+      logs)    anchor=${OBS_ANCHOR_LOGS:-};    reason=${OBS_REASON_LOGS:-} ;;
+      issues)  anchor=${OBS_ANCHOR_ISSUES:-};  reason=${OBS_REASON_ISSUES:-} ;;
+    esac
+    usable=true
+    if [ -n "${OBS_DIMS:-}" ]; then
+      usable=false
+      for d in $(printf '%s' "$OBS_DIMS" | tr ',' ' '); do
+        if [ "$d" = "$dim" ]; then usable=true; fi
+      done
+    fi
+    if [ "$usable" = "true" ]; then
+      if [ -z "$anchor" ]; then
+        anchor=$ph
+        gaps="${gaps}缺口: ${dim}.anchor 仍是占位符（applicable: true）—— 填实：--anchor-${dim} <path> 后 --force 重写\n"
+      fi
+      dim_block="${dim_block}  ${dim}:
+    applicable: true
+    anchor: ${anchor}
+"
+    else
+      if [ -z "$reason" ]; then
+        reason=$ph
+        gaps="${gaps}缺口: ${dim}.reason 仍是占位符（applicable: false）—— 填实：--reason-${dim} <结构性理由> 后 --force 重写\n"
+      fi
+      dim_block="${dim_block}  ${dim}:
+    applicable: false
+    reason: ${reason}
+"
+    fi
+  done
+
+  # 注释行不含占位符字面（占位符判定只扫非注释行，注释里也不埋字面以免误导）
+  content=$(cat <<EOF
+# ${svc} 的可观测性适用性声明（ponygo observe init 生成）
+# 形状契约：${skill_rel}/references/declaration.schema.json；判定口径：${skill_rel}/references/declaration-rubric.md
+# 四维必须齐全：省略 != 不适用。applicable: false 必须写结构性 reason（不是排期理由）；
+# applicable: true 必须 anchor 指向该维唯一实现落点。
+service: ${svc}
+kind: ${kind}
+dimensions:
+${dim_block}reviewed_at: "${date_s}"
+EOF
+)
+
+  # 5) --dry-run：只打印将写入的完整内容，零落盘
+  if [ "${DRY_RUN:-0}" = "1" ]; then
+    info "[dry-run] observe init：将写入 ${target}（未落盘）"
+    printf '%s\n' "$content"
+    exit 0
+  fi
+
+  # 6) 落盘（原子）：mkdir -p → 写 <target>.tmp.$$ → mv -f；任一步失败清理临时文件并 exit 2
+  dir=$(dirname "$target")
+  if [ ! -d "$dir" ]; then
+    if ! mkdir -p "$dir"; then
+      printf 'ponygo: observe init：目录创建失败：%s\n' "$dir" >&2
+      exit 2
+    fi
+  fi
+  tmp="${target}.tmp.$$"
+  if ! printf '%s\n' "$content" > "$tmp"; then
+    rm -f "$tmp"
+    printf 'ponygo: observe init：临时文件写入失败：%s\n' "$tmp" >&2
+    exit 2
+  fi
+  if ! mv -f "$tmp" "$target"; then
+    rm -f "$tmp"
+    printf 'ponygo: observe init：落盘失败：%s\n' "$target" >&2
+    exit 2
+  fi
+
+  # 7) 收尾：静态级别（声明存在 + 非注释行无占位符）+ 目标级 + 逐条缺口 + 下一步
+  ph_hit=false
+  if grep -v '^[[:space:]]*#' "$target" | grep -q -F "$ph"; then ph_hit=true; fi
+  cur=达成
+  if [ "$ph_hit" = "true" ]; then cur=未达; fi
+  lv=$(read_level)
+  tgt=$(observe_target_level)
+
+  printf '当前静态级别: ob0 %s\n' "$cur"
+  printf '目标级: %s（ponygo level=%s）\n' "$tgt" "${lv:-0}"
+  if [ -n "$gaps" ]; then
+    printf '%b' "$gaps"
+  else
+    printf '缺口: 无（ob0 静态判据满足：声明存在且非注释行无占位符）\n'
+  fi
+  printf '下一步: ponygo observe audit\n'
+  exit 0
+}
+# audit：真判定（会调用 skill 脚本）。退出码优先级 2 > 3 > 1 > 0：
+#   2=工具/输入错误（判定中止）；3=证据不足；1=有缺口（含 below_target）；0=达标。
+observe_audit() {
+  local skill decl present ph rc rd ver min compat sp kind raw target cur
+  local ob0 ob1 ob2 s0 s1 s2 jp jph jc jm mounted diff_log diff_ep abort exit2 exit3
+  local gap_incon gap_ev gap_ep gap_diff gap_viol gap_mount gap_tool gap_below
+  local ids gaps sep g c n0 n1 n2 adv code cr trk dabort
+
+  # 映射数据块先做一次 fail-closed 校验：map_get 多在 $(...) 子 shell 里调用，
+  # 子 shell 里的 exit 2 拦不住父 shell，故必须在此以普通语句显式校验一次。
+  observe_require_keys
+  observe_skill_require
+  skill=$(observe_skill_dir_soft)
+  ver=$(observe_skill_version "$skill")
+  min=$(observe_map_get contract_version_min)
+  compat=false
+  if [ -n "$ver" ] && observe_version_ge "$ver" "$min"; then compat=true; fi
+  sp=false
+  if [ -f "$skill/references/contract.json" ]; then sp=true; fi
+
+  # 目标级：meta.yaml 的 level 映射；--level obN 作为断言目标覆盖它
+  target=$(observe_target_level)
+  if [ -n "${OBSERVE_LEVEL:-}" ]; then target="$OBSERVE_LEVEL"; fi
+
+  n0=$(observe_map_get ob_level0_name)
+  n1=$(observe_map_get ob_level1_name)
+  n2=$(observe_map_get ob_level2_name)
+  adv=$(observe_map_get ob_advisory_name)
+
+  # 声明在场 / 占位符（口径与 observe_status 一致：只扫非注释行）
+  decl=$(observe_decl_path)
+  present=false
+  if [ -n "$decl" ]; then present=true; fi
+  ph=false
+  if [ "$present" = "true" ]; then
+    if grep -v '^[[:space:]]*#' "$decl" | grep -q -F "$(observe_map_get placeholder_token)"; then
+      ph=true
+    fi
+  fi
+
+  # declared_kind：净化后仅当匹配 ^[a-z0-9-]+$ 且 ∈ kind_enum 才回显，否则 unknown
+  kind=unknown
+  if [ -n "$decl" ]; then
+    raw=$(sed -n 's/^[[:space:]]*kind:[[:space:]]*//p' "$decl" | head -n1 | tr -d '\r')
+    raw=${raw%%[[:space:]]#*}                       # 去行内注释
+    while :; do case "$raw" in *[[:space:]]) raw=${raw%?} ;; *) break ;; esac; done
+    case "$raw" in \"*\") raw=${raw#\"}; raw=${raw%\"} ;; esac
+    case "$raw" in \'*\') raw=${raw#\'}; raw=${raw%\'} ;; esac
+    case "$raw" in
+      ''|*[!a-z0-9-]*) : ;;
+      *) case " $(observe_map_get kind_enum) " in *" $raw "*) kind=$raw ;; esac ;;
+    esac
+  fi
+
+  # judges 默认值：声明缺失 → declaration_present=fail，占位符与后两项 skip
+  if [ "$present" = "true" ]; then jp=pass; else jp=fail; fi
+  if [ "$present" = "true" ]; then
+    if [ "$ph" = "true" ]; then jph=fail; else jph=pass; fi
+  else
+    jph=skip
+  fi
+  jc=skip; jm=skip
+
+  rc="-"; abort=0; exit2=0; exit3=0; dabort=0
+  gap_incon=0; gap_ev=0; gap_ep=0; gap_diff=0; gap_viol=0; gap_mount=0; gap_tool=0; gap_below=0
+
+  # 声明层：有声明才跑 check-declaration（无声明时 ob0 直接不成立）
+  if [ "$present" = "true" ]; then
+    observe_run_skill "$(observe_map_get external_timeout_seconds)" \
+      "$skill/scripts/check-declaration.sh" --project "$PWD"
+    rc=$?
+    case "$rc" in
+      0) jc=pass ;;
+      2) jc=fail; gap_incon=1 ;;
+      3) jc=unknown; gap_ev=1; exit3=1 ;;
+      *)
+        # 4 或其它：判定中止（不是「未达标」）
+        jc=unknown; abort=1; exit2=1; gap_tool=1
+        printf 'ponygo: check-declaration.sh 退出码=%s（不在 0/2/3 白名单内）\n' "$rc" >&2
+        printf "声明层不可判定（可能：声明不合规 / 工具与环境错误）；先看上面的 stderr，再跑 'bash %s/scripts/check-declaration.sh --help' 自检\n" "$skill" >&2
+        ;;
+    esac
+  fi
+
+  # ob0 = 声明存在 && 非注释行无占位符 && rc ∈ {0,2,3}；ob1 = ob0 && rc == 0
+  ob0=0; ob1=0; ob2=0
+  if [ "$abort" = "0" ]; then
+    if [ "$present" = "true" ] && [ "$ph" != "true" ]; then
+      case "$rc" in 0|2|3) ob0=1 ;; esac
+    fi
+    if [ "$ob0" = "1" ] && [ "$rc" = "0" ]; then ob1=1; fi
+  fi
+
+  # ob1 成立才跑 audit-diff；rc=1 的 gap 需读 skill 输出关键词，故临时文件捕获后原样转发 stderr
+  rd="-"; diff_log=""; diff_ep=0; mounted=0
+  if [ "$ob1" = "1" ]; then
+    diff_log=$(mktemp "${TMPDIR:-/tmp}/ponygo-obs-diff.XXXXXX") || diff_log=""
+    if [ -n "$diff_log" ]; then
+      observe_run_skill "$(observe_map_get local_timeout_seconds)" \
+        "$skill/scripts/audit-diff.sh" --repo "$PWD" --base "${OBSERVE_BASE:-HEAD}" 2>"$diff_log"
+      rd=$?
+      cat "$diff_log" >&2
+      if grep -q -F '收口点' "$diff_log"; then diff_ep=1; fi
+    else
+      # 建不了临时文件：无法分关键词，rc=1 退化为 diff_warn
+      observe_run_skill "$(observe_map_get local_timeout_seconds)" \
+        "$skill/scripts/audit-diff.sh" --repo "$PWD" --base "${OBSERVE_BASE:-HEAD}"
+      rd=$?
+    fi
+    case "$rd" in
+      0)
+        # mount_ok：遍历挂载载体，目录递归 grep、文件直接 grep，命中 audit-diff 即可
+        for c in $(observe_map_get mount_carriers); do
+          if [ -d "$c" ]; then
+            if grep -rq -F 'audit-diff' "$c" 2>/dev/null; then mounted=1; break; fi
+          elif [ -f "$c" ]; then
+            if grep -q -F 'audit-diff' "$c" 2>/dev/null; then mounted=1; break; fi
+          fi
+        done
+        if [ "$mounted" = "1" ]; then jm=pass; ob2=1; else jm=fail; gap_mount=1; fi
+        ;;
+      1) jm=fail; if [ "$diff_ep" = "1" ]; then gap_ep=1; else gap_diff=1; fi ;;
+      2) jm=fail; gap_viol=1 ;;
+      3) jm=fail; gap_tool=1; exit3=1; dabort=1 ;;
+      *) jm=fail; gap_tool=1; exit2=1; dabort=1 ;;
+    esac
+    if [ -n "$diff_log" ]; then rm -f "$diff_log"; fi
+  fi
+
+  cur=unknown
+  if [ "$ob2" = "1" ]; then cur=ob2
+  elif [ "$ob1" = "1" ]; then cur=ob1
+  elif [ "$ob0" = "1" ]; then cur=ob0
+  fi
+  # audit-diff 判定中止（rc ∉ {0,1,2}）时没有可信的当前级
+  if [ "$dabort" = "1" ]; then cur=unknown; fi
+
+  # 目标断言（--level obN 覆盖 meta 级）：只在 current ∈ {ob0,ob1,ob2} 时判 below_target
+  cr=$(observe_rank "$cur"); trk=$(observe_rank "$target")
+  if [ "$cr" -ge 0 ] && [ "$trk" -ge 0 ] && [ "$cr" -lt "$trk" ]; then gap_below=1; fi
+
+  # gaps 顺序固定（见施工单 §8 词表）
+  ids=""
+  if [ "$present" != "true" ]; then ids="$ids declaration_missing"; fi
+  if [ "$ph" = "true" ]; then ids="$ids placeholder_present"; fi
+  if [ "$gap_incon" = "1" ]; then ids="$ids declaration_inconsistent"; fi
+  if [ "$gap_ev" = "1" ]; then ids="$ids evidence_insufficient"; fi
+  if [ "$gap_ep" = "1" ]; then ids="$ids enforcement_points_missing"; fi
+  if [ "$gap_diff" = "1" ]; then ids="$ids diff_warn"; fi
+  if [ "$gap_viol" = "1" ]; then ids="$ids enforcement_violation"; fi
+  if [ "$gap_mount" = "1" ]; then ids="$ids mount_missing"; fi
+  if [ "$gap_tool" = "1" ]; then ids="$ids tool_error"; fi
+  if [ "$gap_below" = "1" ]; then ids="$ids below_target"; fi
+
+  if [ "$abort" = "1" ]; then
+    s0=SKIP; s1=SKIP; s2=SKIP
+  else
+    if [ "$ob0" = "1" ]; then s0=PASS; else s0=FAIL; fi
+    if [ "$ob1" = "1" ]; then s1=PASS; elif [ "$ob0" = "1" ]; then s1=FAIL; else s1=SKIP; fi
+    if [ "$ob2" = "1" ]; then s2=PASS; elif [ "$ob1" = "1" ]; then s2=FAIL; else s2=SKIP; fi
+  fi
+
+  # 退出码优先级：2 > 3 > 1 > 0。
+  # 显式 --level obN 是「目标断言」：只判是否达到该档（超出目标档的缺口不否决 exit）；
+  # 未给 --level（目标取自 meta.yaml）时，任一缺口即 exit 1。
+  if [ "$exit2" = "1" ]; then code=2
+  elif [ "$exit3" = "1" ]; then code=3
+  elif [ -n "${OBSERVE_LEVEL:-}" ]; then
+    if [ "$cr" -ge 0 ] && [ "$cr" -ge "$trk" ]; then code=0; else code=1; fi
+  elif [ -n "$ids" ]; then code=1
+  else code=0
+  fi
+
+  # 人读报告（--json 时整体走 stderr，stdout 只留一行 JSON）
+  observe_audit_report() {
+    printf '===== ponygo observe audit =====\n'
+    printf '[%s] ob0 %s\n' "$s0" "$n0"
+    printf '[%s] ob1 %s\n' "$s1" "$n1"
+    printf '[%s] ob2 %s\n' "$s2" "$n2"
+    printf '当前级: %s\n' "$cur"
+    printf '目标级: %s\n' "$target"
+    for g in $ids; do
+      case "$g" in
+        declaration_missing) printf '缺口: declaration_missing —— 未找到可观测性声明（查找路径：%s）；下一步：ponygo observe init --kind <k>\n' "$(observe_map_get declaration_paths)" ;;
+        placeholder_present) printf '缺口: placeholder_present —— 声明中占位符未替换；下一步：填实四维归属与落点\n' ;;
+        declaration_inconsistent) printf '缺口: declaration_inconsistent —— 声明与巡检结果不一致（check-declaration rc=2）；下一步：按上面 stderr 修正声明\n' ;;
+        evidence_insufficient) printf '缺口: evidence_insufficient —— 证据不可得（check-declaration rc=3，不是声明本身错）；补证据后重跑\n' ;;
+        enforcement_points_missing) printf '缺口: enforcement_points_missing —— 变更门禁里没有 audit-diff 收口点；下一步：挂到 pre-commit / CI\n' ;;
+        diff_warn) printf '缺口: diff_warn —— 变更门禁（enforcement points）有非阻断告警（见上面 stderr）\n' ;;
+        enforcement_violation) printf '缺口: enforcement_violation —— 变更门禁判定不通过（见上面 stderr）\n' ;;
+        mount_missing) printf '缺口: mount_missing —— 未在挂载载体（mount_carriers）发现 audit-diff 调用\n' ;;
+        tool_error) printf '缺口: tool_error —— 工具或环境错误，本次判定不可信（见上面 stderr）\n' ;;
+        below_target) printf '缺口: below_target —— 当前级低于 --level 断言的目标级\n' ;;
+      esac
+    done
+    if [ -z "$ids" ]; then printf '缺口: 无\n'; fi
+    printf '%s：\n' "$adv"
+    printf '  - 采样策略：按流量与成本定采样率（head-based，必要时 tail 兜底），别默认全采\n'
+    printf '  - gen_ai.* 成本归因：LLM/Agent 调用的 token 与成本标到 gen_ai.* 语义约定\n'
+    printf '  - SLI 告警组：每个 SLI 建告警组与 burn-rate 阈值，而非单点阈值\n'
+    printf '判定口径见 %s/references/declaration-rubric.md §6.6\n' "$skill"
+  }
+
+  if [ "${OBSERVE_JSON:-0}" = "1" ]; then
+    observe_audit_report >&2
+    gaps=""; sep=""
+    for g in $ids; do gaps="$gaps$sep\"$g\""; sep=","; done
+    printf '{"schema":"ponygo.observe/1","command":"audit","declared_kind":"%s","current":"%s","target":"%s","skill":{"present":%s,"contract_version":"%s","compatible":%s},"judges":[{"id":"declaration_present","status":"%s"},{"id":"no_placeholder","status":"%s"},{"id":"declaration_consistent","status":"%s"},{"id":"enforcement_mounted","status":"%s"}],"gaps":[%s]}\n' \
+      "$kind" "$cur" "$target" "$sp" "${ver:-unknown}" "$compat" "$jp" "$jph" "$jc" "$jm" "$gaps"
+    exit "$code"
+  fi
+
+  observe_audit_report
+  exit "$code"
+}
+
+# 本地版本兼容门：不联网、不调集群、不调 check-drift；--check 时兼容=0/不兼容=2，否则恒 0
+observe_upgrade() {
+  local d ver min compat
+  observe_require_keys
+  observe_skill_require
+  d=$(observe_skill_dir_soft)
+  ver=$(observe_skill_version "$d")
+  min=$(observe_map_get contract_version_min)
+  compat=no
+  if [ -n "$ver" ] && observe_version_ge "$ver" "$min"; then compat=yes; fi
+
+  echo "===== ponygo observe upgrade ====="
+  printf 'skill: %s\n' "$d"
+  printf 'contract_version: %s\n' "${ver:-unknown}"
+  printf '要求: >= %s\n' "$min"
+  if [ "$compat" = "yes" ]; then printf '结论: 兼容\n'; else printf '结论: 不兼容（需升级 skill）\n'; fi
+
+  if [ "${UPGRADE_CHECK:-0}" = "1" ] && [ "$compat" != "yes" ]; then
+    printf 'ponygo: skill 契约版本不满足：%s（要求 >= %s）；升级 skill 后重试\n' "${ver:-unknown}" "$min" >&2
+    exit 2
+  fi
+  exit 0
+}
 
 # observe 段帮助：usage() 与 'ponygo observe --help' 共用同一份文案（单一真源，防双源漂移）
 usage_observe() {
@@ -1878,6 +2523,9 @@ observe 选项（仅 observe 接受，其余命令拒绝）：
   --mapping <file>     覆盖嵌入映射数据块（等价 env PONYGO_OBSERVE_MAPPING）
 
 退出码白话：0=已达/兼容；1=有缺口或用法错；2=工具或输入错误（不是"未达标"）；3=证据不足。
+
+已知局限：ob1 只判「声明与巡检一致」；四维全 false 的声明同样 PASS（识别谎言是非机械项，见 revisions/proposed/2026-10-25-observe-dimension.md K4）。
+已知局限：ob2 的挂载证据是形状判据（grep 载体），真执行证据是 audit-diff 本身（K7）。
 EOF
 }
 
@@ -1910,6 +2558,12 @@ DRY_RUN=0; YES=0; LEVEL=""; CMD=""; RETIRE_LEVEL=""; RUN_SPECS=0; UPGRADE_CHECK=
 # observe 独立变量族：OBSERVE_SUB 承载子命令（与顶层 CMD 分离，防 'observe audit' 被
 # 'audit)' 分支二次覆盖），OBSERVE_LEVEL 只收 ob0|ob1|ob2（不复用 LEVEL 的 S|M 值域）。
 OBSERVE_SUB=""; OBSERVE_LEVEL=""; OBSERVE_JSON=0; OBSERVE_SKILL_DIR=""; OBSERVE_MAPPING_FILE=""
+# observe init/audit 旗标族（值型：--kind/--service/--dims/--anchor-<dim>/--reason-<dim>/--base）
+OBS_KIND=""; OBS_SERVICE=""; OBS_DIMS=""; OBS_FORCE=0; OBSERVE_BASE=""
+OBS_ANCHOR_METRICS=""; OBS_ANCHOR_TRACING=""; OBS_ANCHOR_LOGS=""; OBS_ANCHOR_ISSUES=""
+OBS_REASON_METRICS=""; OBS_REASON_TRACING=""; OBS_REASON_LOGS=""; OBS_REASON_ISSUES=""
+# 惰性求值的探测缓存（映射数据块校验 / `timeout` 语义探针）
+OBS_MAP_VERIFIED=0; OBS_TIMEOUT_OK=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --yes) YES=1 ;;
@@ -1917,36 +2571,71 @@ while [ $# -gt 0 ]; do
     --run-specs) RUN_SPECS=1 ;;
     --check) UPGRADE_CHECK=1 ;;
     --json) OBSERVE_JSON=1 ;;
+    --force) OBS_FORCE=1 ;;
     --skill-dir) [ $# -ge 2 ] || die "--skill-dir 需要目录取值（如 --skill-dir .agents/skills/observability-onboarding）"; shift; OBSERVE_SKILL_DIR="$1" ;;
     --mapping) [ $# -ge 2 ] || die "--mapping 需要文件取值（如 --mapping ./observe-mapping.txt）"; shift; OBSERVE_MAPPING_FILE="$1" ;;
-    --level) [ $# -ge 2 ] || die "--level 需要取值（如 --level S / --level off）"; shift
+    --base) [ $# -ge 2 ] || die "--base 需要取值（如 --base origin/main）"; shift; OBSERVE_BASE="$1" ;;
+    --kind) [ $# -ge 2 ] || die "--kind 需要取值（如 --kind desktop；枚举见映射 kind_enum）"; shift; OBS_KIND="$1" ;;
+    --service) [ $# -ge 2 ] || die "--service 需要取值（如 --service checkout-api）"; shift; OBS_SERVICE="$1" ;;
+    --dims) [ $# -ge 2 ] || die "--dims 需要取值（如 --dims metrics,tracing）"; shift; OBS_DIMS="$1" ;;
+    --anchor-metrics) [ $# -ge 2 ] || die "--anchor-metrics 需要取值（如 --anchor-metrics src/metrics.ts）"; shift; OBS_ANCHOR_METRICS="$1" ;;
+    --anchor-tracing) [ $# -ge 2 ] || die "--anchor-tracing 需要取值（如 --anchor-tracing src/tracing.ts）"; shift; OBS_ANCHOR_TRACING="$1" ;;
+    --anchor-logs) [ $# -ge 2 ] || die "--anchor-logs 需要取值（如 --anchor-logs src/log.ts）"; shift; OBS_ANCHOR_LOGS="$1" ;;
+    --anchor-issues) [ $# -ge 2 ] || die "--anchor-issues 需要取值（如 --anchor-issues src/sentry.ts）"; shift; OBS_ANCHOR_ISSUES="$1" ;;
+    --reason-metrics) [ $# -ge 2 ] || die "--reason-metrics 需要取值（结构性理由，不是排期理由）"; shift; OBS_REASON_METRICS="$1" ;;
+    --reason-tracing) [ $# -ge 2 ] || die "--reason-tracing 需要取值（结构性理由，不是排期理由）"; shift; OBS_REASON_TRACING="$1" ;;
+    --reason-logs) [ $# -ge 2 ] || die "--reason-logs 需要取值（结构性理由，不是排期理由）"; shift; OBS_REASON_LOGS="$1" ;;
+    --reason-issues) [ $# -ge 2 ] || die "--reason-issues 需要取值（结构性理由，不是排期理由）"; shift; OBS_REASON_ISSUES="$1" ;;
+    --level) [ $# -ge 2 ] || die "--level 需要取值（如 --level S / --level off）"; shift; LEVEL="$1" ;;
+    -h|--help)
+      # 'ponygo observe --help' 与本段帮助同源（usage_observe 是 usage 的子集文案）
+      if [ "${CMD:-}" = "observe" ]; then usage_observe; exit 0; fi
+      usage; exit 0 ;;
+    observe)
+      # 不盲取下一词：子命令词交给下面的 'init|audit|status|upgrade' 分支（A1 守卫）认领，
+      # 旗标仍由本循环正常解析（'observe --skill-dir /x audit' 不得被吞掉或串味）。
+      CMD=observe
+      ;;
+    init|audit|status|upgrade|sync|retire)
+      # A1 守卫：observe 已占 CMD 时，紧随的第二个子命令词不得覆盖它（'observe status init' 不得变成 init）；
+      # 但 'observe --skill-dir /x audit' 这类旗标前置后出现的子命令词仍归 observe。
       if [ "${CMD:-}" = "observe" ]; then
-        case "$1" in
-          ob0|ob1|ob2) OBSERVE_LEVEL="$1" ;;
-          ob3) die "--level ob3 不可用于判定：ob3 是成本与 SLO 的目标画像，不参与判定；判定档用 ob0|ob1|ob2" ;;
-          *) die "observe --level 取值非法：$1（用 ob0|ob1|ob2）" ;;
-        esac
+        if [ -n "${OBSERVE_SUB:-}" ]; then
+          die "observe 后不接受第二个子命令词：$1（见 'ponygo observe --help'）"
+        fi
+        OBSERVE_SUB="$1"
       else
-        LEVEL="$1"
+        CMD="$1"
       fi
       ;;
-    -h|--help) usage; exit 0 ;;
-    observe)
-      CMD=observe
-      # 立刻消费下一词为子命令：否则 'observe audit' 的 audit 会落到下面
-      # 'init|audit|status|upgrade|sync|retire)' 分支把 CMD 覆盖成 audit（路由串味）。
-      shift
-      case "${1:-}" in
-        init|audit|status|upgrade) OBSERVE_SUB="$1" ;;
-        -h|--help) usage_observe; exit 0 ;;
-        *) die "未知 observe 子命令：${1:-（缺）}（用 status|init|audit|upgrade，见 'ponygo observe --help'）" ;;
-      esac
+    *)
+      # observe 上下文里的裸词：不是第二个子命令词就是未知子命令，绝不落到顶层未知参数
+      if [ "${CMD:-}" = "observe" ] && [ "${1#-}" = "$1" ]; then
+        if [ -n "${OBSERVE_SUB:-}" ]; then
+          die "observe 不接受第二个子命令词：$1（见 'ponygo observe --help'）"
+        fi
+        die "未知 observe 子命令：$1（用 status|init|audit|upgrade，见 'ponygo observe --help'）"
+      fi
+      die "未知参数或子命令：$1（见 'ponygo --help'）"
       ;;
-    init|audit|status|upgrade|sync|retire) CMD="$1" ;;
-    *) die "未知参数或子命令：$1（见 'ponygo --help'）" ;;
   esac
   shift
 done
+
+# B2 归一（解析循环结束后、守卫之前）：'--level obN' 写在 observe 之前时先落进 LEVEL，
+# 必须在此归一到 OBSERVE_LEVEL 再清空，否则会被后面的守卫当「非 observe 的 --level」丢掉。
+if [ "${CMD:-}" = "observe" ]; then
+  case "${LEVEL:-}" in
+    ob0|ob1|ob2) OBSERVE_LEVEL="$LEVEL"; LEVEL="" ;;
+    ob3) die "--level ob3 不可用于判定：ob3 是成本与 SLO 的目标画像，不参与判定；判定档用 ob0|ob1|ob2" ;;
+    "") : ;;
+    *) die "observe 侧 --level 只收 ob0|ob1|ob2（收到：${LEVEL}）" ;;
+  esac
+fi
+# obN 值域只属 observe；非 observe 命令不得静默接收（LEVEL 的 S|M|off 值域另属 legacy 分支）
+if [ "${CMD:-}" != "observe" ] && [ -n "${OBSERVE_LEVEL:-}" ]; then
+  die "--level obN 仅适用于 'ponygo observe audit'"
+fi
 
 # --run-specs 只属于 audit（执行仓库脚本的 opt-in 入口）；其余命令一律拒绝，避免静默忽略
 if [ "$RUN_SPECS" = "1" ] && [ "${CMD:-}" != "audit" ]; then
@@ -1972,6 +2661,24 @@ if [ -n "$OBSERVE_SKILL_DIR" ] && [ "${CMD:-}" != "observe" ]; then
 fi
 if [ -n "$OBSERVE_MAPPING_FILE" ] && [ "${CMD:-}" != "observe" ]; then
   die "--mapping 仅适用于 'ponygo observe'（嵌入映射数据块的覆盖文件）"
+fi
+# --kind/--service/--dims/--anchor-<dim>/--reason-<dim>/--force 只属 observe init（唯一写命令）；
+# --base 只属 observe audit（audit-diff 比较基线）。其余命令一律拒绝，避免静默忽略。
+if [ "${CMD:-}" != "observe" ]; then
+  if [ -n "${OBS_KIND:-}" ]; then die "--kind 仅适用于 'ponygo observe init'（可观测性声明种类）"; fi
+  if [ -n "${OBS_SERVICE:-}" ]; then die "--service 仅适用于 'ponygo observe init'（声明服务名）"; fi
+  if [ -n "${OBS_DIMS:-}" ]; then die "--dims 仅适用于 'ponygo observe init'（四维适用性列表）"; fi
+  if [ -n "${OBS_ANCHOR_METRICS:-}${OBS_ANCHOR_TRACING:-}${OBS_ANCHOR_LOGS:-}${OBS_ANCHOR_ISSUES:-}" ]; then
+    die "--anchor-<dim> 仅适用于 'ponygo observe init'（该维唯一实现落点）"
+  fi
+  if [ -n "${OBS_REASON_METRICS:-}${OBS_REASON_TRACING:-}${OBS_REASON_LOGS:-}${OBS_REASON_ISSUES:-}" ]; then
+    die "--reason-<dim> 仅适用于 'ponygo observe init'（不适用维的结构性理由）"
+  fi
+  if [ "${OBS_FORCE:-0}" = "1" ]; then die "--force 仅适用于 'ponygo observe init'（覆盖已存在声明）"; fi
+fi
+if [ -n "${OBSERVE_BASE:-}" ] \
+   && ! { [ "${CMD:-}" = "observe" ] && [ "${OBSERVE_SUB:-}" = "audit" ]; }; then
+  die "--base 仅适用于 'ponygo observe audit'（audit-diff 比较基线）"
 fi
 
 case "${CMD:-}" in
