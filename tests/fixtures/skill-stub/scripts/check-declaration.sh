@@ -34,6 +34,10 @@ if [ ! -d "$PROJ" ]; then
   exit 4
 fi
 
+# 可选：故意拖长执行时间，供 SIGTERM 中断/临时文件清理用例（F3）驱动；
+# 缺省 0 = 立即返回（其余用例零等待，禁盲等）。
+if [ -n "${STUB_SLEEP:-}" ]; then sleep "${STUB_SLEEP}"; fi
+
 RC="${STUB_RC_CHECK_DECL:-0}"
 printf 'STUB-CHECK-DECL rc=%s proj=%s\n' "$RC" "$PROJ"
 printf 'stub: check-declaration 模拟结论 rc=%s（非真实判定，仅供 ponygo observe 测试）\n' "$RC" >&2

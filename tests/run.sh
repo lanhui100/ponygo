@@ -1677,7 +1677,7 @@ s35_observe_audit() {
   assert_contains "observe[A3] audit-diff rc=2 报 enforcement_violation" "$R_OUT" "enforcement_violation"
   run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=3 observe audit --skill-dir "$SK"
   assert_eq "observe[A3] audit-diff rc=3（证据不可得）→ 判定中止 exit 3" 3 "$R_RC"
-  assert_contains "observe[A3] audit-diff rc=3 报 tool_error" "$R_OUT" "tool_error"
+  assert_contains "observe[A3] audit-diff rc=3（证据不可得）报 evidence_insufficient" "$R_OUT" "evidence_insufficient"
   run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=4 observe audit --skill-dir "$SK"
   assert_eq "observe[A3] audit-diff rc=4（工具错误）→ 判定中止 exit 2" 2 "$R_RC"
 
@@ -1762,12 +1762,12 @@ s36_observe_json() {
   assert_eq "observe[A6] audit skill rc=4 exit 2" 2 "$STD_RC"
   assert_not_contains "observe[A6] --json stdout 无 skill 原始输出" "$STD_OUT" "STUB-"
 
-  # ⑥ audit-diff 判定中止（rc=3）：gap=tool_error，current=unknown，exit 2（A3）
+  # ⑥ audit-diff 判定中止（rc=3）：gap=evidence_insufficient（F7 裁决：与 check-declaration rc=3 同义），current=unknown，exit 3
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; add_mount_carrier "$T"
   run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=3 \
     observe audit --skill-dir "$SK" --json
   assert_eq "observe[A3] audit-diff rc=3 exit 3" 3 "$STD_RC"
-  assert_contains "observe[A3] audit-diff rc=3 gaps 含 tool_error" "$STD_OUT" '"gaps":["tool_error"]'
+  assert_contains "observe[A3] audit-diff rc=3 gaps 含 evidence_insufficient" "$STD_OUT" '"gaps":["evidence_insufficient"]'
   assert_contains "observe[A3] audit-diff rc=3 current=unknown" "$STD_OUT" '"current":"unknown"'
 
   # ⑦ ob2 挂载缺失的逐字 JSON（current=ob1 / enforcement_mounted=fail / 两缺口）
@@ -1863,6 +1863,81 @@ s36_observe_json() {
   assert_contains "observe[A8] 空 HOME 给安装提示" "$R_OUT" "安装"
 }
 
+
+s37_observe_regress() {
+  echo "--- 场景37：第三轮审核回归钉（F1 YAML 注入 / F2 TMPDIR 哨兵 / F3 SIGTERM 残留 / F5 --level 只属 audit / F6 顶层路由 / F7 版本净化）"
+  local T SK SNAP0 BG N FIRST RC
+
+  # ① F5：--level obN 的判定目标档只属 'observe audit'（status/init/upgrade 一律显式拒绝，不静默忽略）
+  T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3
+  run_cli "$T" observe status --level ob1 --skill-dir "$SK"
+  assert_eq "observe[F5] status --level ob1 → exit 1（不静默忽略）" 1 "$R_RC"
+  assert_contains "observe[F5] status --level 文案含「只属 audit」" "$R_OUT" "只属 audit"
+  SNAP0=$(snap "$T")
+  run_cli "$T" observe init --kind cli --level ob1 --dry-run --skill-dir "$SK"
+  assert_eq "observe[F5] init --level ob1 → exit 1（不静默忽略）" 1 "$R_RC"
+  assert_same_tree "observe[F5] init --level ob1 被拒零写（文件树快照不变）" "$T" "$SNAP0"
+  run_cli "$T" observe upgrade --level ob1 --skill-dir "$SK"
+  assert_eq "observe[F5] upgrade --level ob1 → exit 1" 1 "$R_RC"
+  assert_contains "observe[F5] upgrade --level 文案含「只属 audit」" "$R_OUT" "只属 audit"
+
+  # ② F1：--reason-<dim> / --anchor-<dim> 的 YAML 标量注入（写盘前拦截，且绝不落盘）
+  T=$(new_case); SK=$(stage_skill "$T"); SNAP0=$(snap "$T")
+  run_cli "$T" observe init --kind cli --skill-dir "$SK" --yes \
+    --dims metrics --reason-tracing $'x\n  metrics:\n    applicable: false'
+  assert_eq "observe[F1] --reason-tracing 含换行（YAML 注入）→ exit 2" 2 "$R_RC"
+  assert_same_tree "observe[F1] 注入被拒后不落盘（文件树快照不变）" "$T" "$SNAP0"
+  assert_eq "observe[F1] 注入被拒后无声明文件" "no" \
+    "$([ -f "$T/docs/observability.yaml" ] && echo yes || echo no)"
+  run_cli "$T" observe init --kind cli --skill-dir "$SK" --yes --anchor-metrics 'src/a: b.ts'
+  assert_eq "observe[F1] --anchor-metrics 含「: 」（会读成第二个键）→ exit 2" 2 "$R_RC"
+  assert_same_tree "observe[F1] anchor 注入被拒后仍不落盘" "$T" "$SNAP0"
+
+  # ③ F6：顶层路由滥用 'ponygo init observe init ...' 不得改跑 observe（也不得写盘）
+  T=$(new_case); SNAP0=$(snap "$T")
+  run_cli "$T" init observe init --kind cli
+  assert_eq "observe[F6] ponygo init observe ... → exit 1（子命令位置非法）" 1 "$R_RC"
+  assert_contains "observe[F6] 报子命令位置非法" "$R_OUT" "子命令位置非法"
+  assert_same_tree "observe[F6] 路由滥用零写（文件树快照不变）" "$T" "$SNAP0"
+
+  # ④ F2：TMPDIR 不可写 → 工具错误 rc=2 + gaps tool_error（绝不误标 declaration_inconsistent、绝不 exit 0）
+  T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3
+  run_cli_stdout_env "$T" TMPDIR=/nonexistent-dir-ponygo observe audit --skill-dir "$SK" --json
+  assert_eq "observe[F2] TMPDIR 不可写 → exit 2（工具错误，非「声明不一致」）" 2 "$STD_RC"
+  assert_contains "observe[F2] TMPDIR 不可写 gaps 含 tool_error" "$STD_OUT" '"gaps":["tool_error"]'
+  assert_not_contains "observe[F2] 不得误标 declaration_inconsistent" "$STD_OUT" \
+    "declaration_inconsistent"
+  assert_contains "observe[F2] current=unknown（本次判定不可信）" "$STD_OUT" '"current":"unknown"'
+
+  # ⑤ F3：SIGTERM 打断执行中的 skill → 临时文件不得残留（$TMPDIR 无 ponygo-obs.*）
+  T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3
+  mkdir -p "$T/tmpd"
+  ( cd "$T" && exec env TMPDIR="$T/tmpd" STUB_SLEEP=2 bash "$ROOT/ponygo" \
+      observe audit --skill-dir "$SK" ) >/dev/null 2>&1 &
+  BG=$!
+  # 条件轮询（禁盲等）：先证明临时文件真的被创建——否则「无残留」是空断言
+  N=0; FIRST=0
+  while [ "$N" -lt 5 ]; do
+    FIRST=$(ls "$T/tmpd" 2>/dev/null | grep -c '^ponygo-obs\.')
+    [ "$FIRST" -gt 0 ] && break
+    sleep 1; N=$((N + 1))
+  done
+  assert_eq "observe[F3] 运行期确有 ponygo-obs.* 临时文件（前提取证）" 1 "$FIRST"
+  kill -TERM "$BG" 2>/dev/null
+  wait "$BG" 2>/dev/null; RC=$?
+  assert_eq "observe[F3] TERM 后按信号语义退出（143，信号不得被吞）" 143 "$RC"
+  assert_eq "observe[F3] TERM 后 TMPDIR 无 ponygo-obs.* 残留" 0 \
+    "$(ls "$T/tmpd" 2>/dev/null | grep -c '^ponygo-obs\.')"
+
+  # ⑥ F7：contract_version 非法 → --json 净化为 unknown 且 compatible=false（绝不产出非法 JSON）
+  T=$(new_case); SK=$(stage_skill "$T" "1.0.x"); make_audit_case "$T" 3
+  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=0 observe audit --skill-dir "$SK" --json
+  assert_contains "observe[F7] 非法 contract_version 净化为 unknown" "$STD_OUT" \
+    '"contract_version":"unknown"'
+  assert_contains "observe[F7] 非法 contract_version → compatible=false" "$STD_OUT" '"compatible":false'
+  run_cli "$T" observe upgrade --check --skill-dir "$SK"
+  assert_eq "observe[F7] upgrade --check 遇非法版本 → exit 2" 2 "$R_RC"
+}
 s28_l2_reachability
 s29_doc_level_parity
 s30_release_chain
@@ -1872,6 +1947,7 @@ s33_observe_stub
 s34_observe_init
 s35_observe_audit
 s36_observe_json
+s37_observe_regress
 
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
