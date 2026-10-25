@@ -55,7 +55,7 @@ target_level_2: ob1
 target_level_3: ob2
 target_level_4: ob2
 target_level_5: ob2
-kind_enum: desktop k8s-service cli batch library
+kind_enum: desktop k8s-service cli batch library frontend pipeline
 contract_version_min: 1.0.3
 declaration_paths: docs/observability.yaml docs/observability.yml
 placeholder_token: __REPLACE_ME__
