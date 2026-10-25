@@ -41,10 +41,16 @@ ponygo observe upgrade --check   # 版本兼容门：兼容 exit 0；不满足 e
 `--kind` 无既有声明时**必填**，取值只在下面枚举内，否则 exit 2：
 
 ```
-desktop  k8s-service  cli  batch  library
+desktop  k8s-service  cli  batch  library  frontend  pipeline
 ```
 
 `kind` 不是标签，是适用性推论的起点：凡以 `kind` 作推论，理由必须写进对应 `reason`（"kind 决定"不算理由）。
+
+> **复合架构裁决原则（以最外层交付的进程边界为准）**：
+> - **全栈桌面端（如 Tauri = 前端 React + Rust Core）**：进程生命周期随用户本地窗口启停，无稳定网络常驻监听，**必须声明为 `kind: desktop`**（前端代码是其内部视图层，不单独声明为 frontend）。
+> - **独立部署的 Web SPA / SSR（部署在 CDN/Nginx/Node 托管）**：独立发布给浏览器访问，**声明为 `kind: frontend`**。
+> - **前后端分离工程**：若在同一仓库中但独立构建部署，应拆分或分别治理；若作为单一服务交付，按对外暴露的主要进程形态判定。
+> - **CI/CD 自动化构建与工程脚本**：声明为 `kind: pipeline`。
 
 ### 3. `--service` 规则
 

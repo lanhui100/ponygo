@@ -70,6 +70,7 @@ local_timeout_seconds: 3
 # ---------- 工具函数 ----------
 die() { printf 'ponygo: %s\n' "$*" >&2; exit 1; }
 info() { printf 'ponygo: %s\n' "$*"; }
+warn() { printf 'ponygo: %s\n' "$*" >&2; }
 
 # 是否已有治理根
 has_meta() { [ -d "$META_DIR" ]; }
@@ -2150,6 +2151,13 @@ observe_status() {
   echo "===== ponygo observe status ====="
   if [ "$present" = "true" ]; then printf '声明: %s\n' "$decl"; else printf '声明: 缺失\n'; fi
   if [ "$ph" = "true" ]; then printf '占位符: 有\n'; else printf '占位符: 无\n'; fi
+  if [ "$present" = "true" ]; then
+    if grep -q '^[[:space:]]*enforcement_points:' "$decl" 2>/dev/null; then
+      printf '收口点: 已配置\n'
+    else
+      printf '收口点: 未配置（enforcement_points 缺失，ob2 变更门禁将空转）\n'
+    fi
+  fi
   if [ "$compat" = "true" ]; then
     printf 'skill: %s（contract_version=%s，兼容=yes）\n' "$skill_dir" "$ver"
   else
@@ -2158,7 +2166,22 @@ observe_status() {
   printf '目标级: %s\n' "$target"
   printf "判定项：需 'ponygo observe audit'（本命令不执行 skill 脚本）\n"
   if [ "$present" != "true" ]; then
-    printf '缺口: declaration_missing —— 未找到可观测性声明；下一步：ponygo observe init --kind <k>\n'
+    local hint_kind=""
+    if [ -f "src-tauri/tauri.conf.json" ] || [ -f "tauri.conf.json" ]; then
+      hint_kind="desktop（检测到 Tauri 桌面端配置）"
+    elif [ -f "package.json" ] && [ ! -f "go.mod" ] && [ ! -f "Cargo.toml" ]; then
+      hint_kind="frontend（检测到 Web 前端配置）"
+    elif [ -f "Cargo.toml" ] || [ -f "go.mod" ]; then
+      hint_kind="k8s-service（检测到后端微服务工程）"
+    elif [ -d ".github/workflows" ] || [ -f ".gitlab-ci.yml" ]; then
+      hint_kind="pipeline（检测到 CI/CD 流水线配置）"
+    fi
+    if [ -n "$hint_kind" ]; then
+      printf '建议形态: %s\n' "$hint_kind"
+      printf '缺口: declaration_missing —— 未找到可观测性声明；下一步：ponygo observe init --kind <k>（参考上述建议形态）\n'
+    else
+      printf '缺口: declaration_missing —— 未找到可观测性声明；下一步：ponygo observe init --kind <k>\n'
+    fi
   fi
   if [ "$ph" = "true" ]; then
     printf '缺口: placeholder_present —— 声明中占位符未替换；下一步：填实四维归属与落点\n'
@@ -2240,12 +2263,15 @@ observe_init() {
     exit 2
   fi
 
-  # 3) 目标路径：已存在声明且无 --force → exit 2；目标 = 已存在声明（含 .yml）否则 docs/observability.yaml
+  # 3) 目标路径：目标 = 已存在声明（含 .yml）否则 docs/observability.yaml；已存在且无 --force：
+  #    若为 --dry-run 则允许预览（提示覆盖需 --force），真实落盘时无 --force 则 exit 2
   decl=$(observe_decl_path)
   if [ -n "$decl" ] && [ "${OBS_FORCE:-0}" != "1" ]; then
-    printf 'ponygo: observe init：声明已存在：%s\n' "$decl" >&2
-    printf '  覆盖请加 --force：ponygo observe init --kind %s --force\n' "$kind" >&2
-    exit 2
+    if [ "${DRY_RUN:-0}" != "1" ]; then
+      printf 'ponygo: observe init：声明已存在：%s\n' "$decl" >&2
+      printf '  覆盖请加 --force：ponygo observe init --kind %s --force\n' "$kind" >&2
+      exit 2
+    fi
   fi
   if [ -n "$decl" ]; then
     target=$decl
@@ -2311,6 +2337,9 @@ EOF
 
   # 5) --dry-run：只打印将写入的完整内容，零落盘
   if [ "${DRY_RUN:-0}" = "1" ]; then
+    if [ -n "$decl" ] && [ "${OBS_FORCE:-0}" != "1" ]; then
+      warn "[dry-run] 声明已存在（${decl}），真实落盘需加 --force"
+    fi
     info "[dry-run] observe init：将写入 ${target}（未落盘）"
     printf '%s\n' "$content"
     exit 0
