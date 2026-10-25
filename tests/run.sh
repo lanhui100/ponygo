@@ -1976,6 +1976,39 @@ s38_observe_frontend_and_pipeline() {
   run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=2 observe audit --skill-dir "$SK" --json
   assert_contains "audit --json declared_kind 为 pipeline" "$STD_OUT" '"declared_kind":"pipeline"'
 }
+
+s39_observe_feedback_upgrades() {
+  echo "--- 场景39：真实反馈4项升级（dry-run 覆盖放行/status 形态建议/收口点状态透出）"
+  local T SK TXT
+
+  # 1. 已有声明时，--dry-run（无 --force）不应 exit 2，必须 exit 0 且零写
+  T=$(new_case); SK=$(stage_skill "$T")
+  run_cli "$T" observe init --kind cli --skill-dir "$SK" --yes
+  assert_eq "observe init 首次落地 exit 0" 0 "$R_RC"
+  local SNAP_BEFORE
+  SNAP_BEFORE=$(snap "$T")
+  run_cli "$T" observe init --kind frontend --skill-dir "$SK" --dry-run
+  assert_eq "已有声明时 init --dry-run（无 --force）exit 0" 0 "$R_RC"
+  assert_same_tree "已有声明时 init --dry-run 零写" "$T" "$SNAP_BEFORE"
+  assert_contains "已有声明时 init --dry-run 提示加 --force" "$R_OUT" "force"
+
+  # 2. status 缺声明时按特征文件提供形态建议
+  T=$(new_case); SK=$(stage_skill "$T")
+  touch "$T/tauri.conf.json"
+  run_cli "$T" observe status --skill-dir "$SK"
+  assert_contains "status 检测到 tauri 给出 desktop 建议" "$R_OUT" "desktop"
+
+  T=$(new_case); SK=$(stage_skill "$T")
+  echo '{"name":"my-ui"}' > "$T/package.json"
+  run_cli "$T" observe status --skill-dir "$SK"
+  assert_contains "status 检测到 package.json 给出 frontend 建议" "$R_OUT" "frontend"
+
+  # 3. status 透出收口点状态 (enforcement_points)
+  T=$(new_case); SK=$(stage_skill "$T")
+  run_cli "$T" observe init --kind cli --skill-dir "$SK" --yes
+  run_cli "$T" observe status --skill-dir "$SK"
+  assert_contains "status 提示收口点未配置" "$R_OUT" "收口点"
+}
 s28_l2_reachability
 s29_doc_level_parity
 s30_release_chain
@@ -1987,6 +2020,7 @@ s35_observe_audit
 s36_observe_json
 s37_observe_regress
 s38_observe_frontend_and_pipeline
+s39_observe_feedback_upgrades
 
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
