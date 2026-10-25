@@ -2156,6 +2156,7 @@ observe_status() {
       printf '收口点: 已配置\n'
     else
       printf '收口点: 未配置（enforcement_points 缺失，ob2 变更门禁将空转）\n'
+      printf '  推荐收口项：http_client（统一网络出口）/ error_boundary（全局异常）/ error_classifier（错误分类）\n'
     fi
   fi
   if [ "$compat" = "true" ]; then
@@ -2589,18 +2590,26 @@ observe_audit() {
     else
       printf '模式: 体检（目标级取自 meta.yaml；判据：当前级 ≥ 目标级；缺口列表为 backlog）\n'
     fi
+    if [ "$code" = "0" ]; then
+      printf '结论: PASS（当前级 %s 已达目标级 %s，exit=0）\n' "$cur" "$target"
+      if [ -n "$ids" ]; then
+        printf '后续升级建议（下一级待办 / Backlog）：\n'
+      fi
+    else
+      printf '结论: FAIL（当前级 %s 未达目标级 %s，exit=%s）\n' "$cur" "$target" "$code"
+    fi
     for g in $ids; do
       case "$g" in
-        declaration_missing) printf '缺口: declaration_missing —— 未找到可观测性声明（查找路径：%s）；下一步：ponygo observe init --kind <k>\n' "$(observe_map_get declaration_paths)" ;;
-        placeholder_present) printf '缺口: placeholder_present —— 声明中占位符未替换；下一步：填实四维归属与落点\n' ;;
-        declaration_inconsistent) printf '缺口: declaration_inconsistent —— 声明与巡检结果不一致（check-declaration rc=2）；下一步：按上面 stderr 修正声明\n' ;;
-        evidence_insufficient) printf '缺口: evidence_insufficient —— 证据不可得（check-declaration 或 audit-diff rc=3，不是「未达标」，也不是声明本身错）；补证据后重跑\n' ;;
-        enforcement_points_missing) printf '缺口: enforcement_points_missing —— 变更门禁里没有 audit-diff 收口点；下一步：挂到 pre-commit / CI\n' ;;
-        diff_warn) printf '缺口: diff_warn —— 变更门禁（enforcement points）有非阻断告警（见上面 stderr）\n' ;;
-        enforcement_violation) printf '缺口: enforcement_violation —— 变更门禁判定不通过（见上面 stderr）\n' ;;
-        mount_missing) printf '缺口: mount_missing —— 未在挂载载体（mount_carriers）发现 audit-diff 调用\n' ;;
-        tool_error) printf '缺口: tool_error —— 工具或环境错误，本次判定不可信（见上面 stderr）\n' ;;
-        below_target) printf '缺口: below_target —— 当前级低于 --level 断言的目标级\n' ;;
+        declaration_missing) printf '  - [ ] declaration_missing: 未找到可观测性声明（查找路径：%s）；下一步：ponygo observe init --kind <k>\n' "$(observe_map_get declaration_paths)" ;;
+        placeholder_present) printf '  - [ ] placeholder_present: 声明中占位符未替换；下一步：填实四维归属与落点\n' ;;
+        declaration_inconsistent) printf '  - [ ] declaration_inconsistent: 声明与巡检结果不一致（check-declaration rc=2）；下一步：按上面 stderr 修正声明\n' ;;
+        evidence_insufficient) printf '  - [ ] evidence_insufficient: 证据不可得（check-declaration 或 audit-diff rc=3，不是「未达标」，也不是声明本身错）；补证据后重跑\n' ;;
+        enforcement_points_missing) printf '  - [ ] enforcement_points_missing: 变更门禁里没有 audit-diff 收口点；下一步：挂到 pre-commit / CI\n' ;;
+        diff_warn) printf '  - [ ] diff_warn: 变更门禁（enforcement points）有非阻断告警（见上面 stderr）\n' ;;
+        enforcement_violation) printf '  - [ ] enforcement_violation: 变更门禁判定不通过（见上面 stderr）\n' ;;
+        mount_missing) printf '  - [ ] mount_missing: 未在挂载载体（mount_carriers）发现 audit-diff 调用\n' ;;
+        tool_error) printf '  - [ ] tool_error: 工具或环境错误，本次判定不可信（见上面 stderr）\n' ;;
+        below_target) printf '  - [ ] below_target: 当前级低于 --level 断言的目标级\n' ;;
       esac
     done
     if [ -z "$ids" ]; then printf '缺口: 无\n'; fi
