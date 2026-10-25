@@ -152,12 +152,12 @@ ob3 = 采样策略 / `gen_ai.*` 成本归因 / SLI 告警组。它依赖流量�
 | `.meta/meta.yaml` 的 level 经映射表 | 不给 `--level` | 项目自报的成熟度级决定它"该到哪一档"（G4：`observe_level = f(ponygo_level)`） |
 | `--level obN` | 显式给 | CI 分档推进用：断言"至少到 ob0/ob1/ob2" |
 
-**缺口列表（`gaps`）是「距下一级的 backlog」，不直接决定退出码**：目标级已达时 `gaps` 仍可能非空，
-人读输出会打印当前模式（`模式: 体检|断言`）以免误读。
+**缺口列表（`gaps`）是「距下一级的 backlog」，默认不直接决定退出码**：目标级已达时 `gaps` 仍可能非空，
+人读输出会打印当前模式（`模式: 体检|断言`）以免误读。若 CI 需要零容忍门禁，显式传 `--strict` 即可强制任一缺口 exit 1（`模式: [strict]`）。
 
-被否决的备选：「任一缺口即 exit 1」。否决理由：目标级已达仍 exit 1 会让 CI 无法分档推进，
+被否决的备选：「默认任一缺口即 exit 1」。否决理由：目标级已达仍 exit 1 会让 CI 无法分档推进，
 且与交接单验收「`observe audit` 与 `check-declaration.sh` 同结论」冲突（试点项目 pony-agent
-`current=ob1 = target=ob1`、`check-declaration` rc=0，旧规则却 exit 1）。
+`current=ob1 = target=ob1`、`check-declaration` rc=0，旧规则却 exit 1）。通过引入可选 `--strict` 旗标两全其美。
 
 `--json` 的字段词表与目标来源无关（`current/target/judges/gaps` 一致），故 CI 若需区分模式，
 应按是否传 `--level` 判断，不要从 JSON 猜。

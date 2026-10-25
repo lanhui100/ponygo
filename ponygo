@@ -2532,9 +2532,11 @@ observe_audit() {
 
   # 退出码优先级：2（工具/输入错误）> 3（证据不可得）> 1（未达目标级）> 0（已达目标级）。
   # 目标级来源：显式 --level obN，否则 .meta/meta.yaml 的 level 经映射表求得。
-  # 缺口列表是「距下一级的 backlog」，不直接决定退出码（否则目标已达仍会 exit 1，CI 无法分档推进）。
+  # 缺口列表是「距下一级的 backlog」，默认不直接决定退出码（否则目标已达仍会 exit 1，CI 无法分档推进）。
+  # --strict 模式下：任一缺口均非零退出（保持最硬门禁，供全量绿门禁使用）。
   if [ "$exit2" = "1" ]; then code=2
   elif [ "$exit3" = "1" ]; then code=3
+  elif [ "${OBSERVE_STRICT:-0}" = "1" ] && [ -n "$ids" ]; then code=1
   elif [ "$cr" -ge 0 ] && [ "$cr" -ge "$trk" ]; then code=0
   else code=1
   fi
@@ -2547,7 +2549,13 @@ observe_audit() {
     printf '[%s] ob2 %s\n' "$s2" "$n2"
     printf '当前级: %s\n' "$cur"
     printf '目标级: %s\n' "$target"
-    if [ -n "${OBSERVE_LEVEL:-}" ]; then
+    if [ "${OBSERVE_STRICT:-0}" = "1" ]; then
+      if [ -n "${OBSERVE_LEVEL:-}" ]; then
+        printf '模式: 断言 ob%s [strict]（任一缺口 exit 非零）\n' "$(observe_rank "$OBSERVE_LEVEL")"
+      else
+        printf '模式: 体检 [strict]（目标级取自 meta.yaml；任一缺口 exit 非零）\n'
+      fi
+    elif [ -n "${OBSERVE_LEVEL:-}" ]; then
       printf '模式: 断言 ob%s（判据：当前级 ≥ 目标级；缺口列表为 backlog）\n' "$(observe_rank "$OBSERVE_LEVEL")"
     else
       printf '模式: 体检（目标级取自 meta.yaml；判据：当前级 ≥ 目标级；缺口列表为 backlog）\n'
@@ -2621,13 +2629,14 @@ observe —— 可观测性治理维度（判定 ob0/ob1/ob2；ob3 仅为目标�
   ponygo observe init   --kind <k> [--service <s>] [--dims a,b] [--anchor-<dim> <path>]
                         [--reason-<dim> <text>] [--force] [--dry-run] [--yes]
                                                   落地四维归属声明（唯一写命令；已存在声明需 --force）
-  ponygo observe audit  [--level ob0|ob1|ob2] [--base <rev>] [--json]
-                                                  判定是否达到目标级（缺口仅作 backlog，不决定退出码）
+  ponygo observe audit  [--level ob0|ob1|ob2] [--base <rev>] [--strict] [--json]
+                                                  判定是否达到目标级（缺口仅作 backlog；--strict 时任一缺口非零）
   ponygo observe upgrade [--check]                与技能契约的版本兼容门（CI 用 --check）
   ponygo observe --help | -h                      本段帮助
 
 observe 选项（仅 observe 接受，其余命令拒绝）：
   --level ob0|ob1|ob2  判定目标档（ob3 是成本与 SLO 的目标画像，不参与判定，显式拒绝）
+  --strict             严格模式：存在任一缺口均非零退出（audit 专用）
   --json               固定词表 JSON 输出（仅 status|audit；供 CI 解析，不含自由文本）
   --skill-dir <dir>    skill 安装目录（等价 env PONYGO_SKILL_DIR）
   --mapping <file>     覆盖嵌入映射数据块（等价 env PONYGO_OBSERVE_MAPPING）
@@ -2667,7 +2676,7 @@ EOF
 DRY_RUN=0; YES=0; LEVEL=""; CMD=""; RETIRE_LEVEL=""; RUN_SPECS=0; UPGRADE_CHECK=0
 # observe 独立变量族：OBSERVE_SUB 承载子命令（与顶层 CMD 分离，防 'observe audit' 被
 # 'audit)' 分支二次覆盖），OBSERVE_LEVEL 只收 ob0|ob1|ob2（不复用 LEVEL 的 S|M 值域）。
-OBSERVE_SUB=""; OBSERVE_LEVEL=""; OBSERVE_JSON=0; OBSERVE_SKILL_DIR=""; OBSERVE_MAPPING_FILE=""
+OBSERVE_SUB=""; OBSERVE_LEVEL=""; OBSERVE_JSON=0; OBSERVE_SKILL_DIR=""; OBSERVE_MAPPING_FILE=""; OBSERVE_STRICT=0
 # observe init/audit 旗标族（值型：--kind/--service/--dims/--anchor-<dim>/--reason-<dim>/--base）
 OBS_KIND=""; OBS_SERVICE=""; OBS_DIMS=""; OBS_FORCE=0; OBSERVE_BASE=""
 OBS_ANCHOR_METRICS=""; OBS_ANCHOR_TRACING=""; OBS_ANCHOR_LOGS=""; OBS_ANCHOR_ISSUES=""
@@ -2686,6 +2695,7 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY_RUN=1 ;;
     --run-specs) RUN_SPECS=1 ;;
     --check) UPGRADE_CHECK=1 ;;
+    --strict) OBSERVE_STRICT=1 ;;
     --json) OBSERVE_JSON=1 ;;
     --force) OBS_FORCE=1 ;;
     --skill-dir) [ $# -ge 2 ] || die "--skill-dir 需要目录取值（如 --skill-dir .agents/skills/observability-onboarding）"; shift; OBSERVE_SKILL_DIR="$1" ;;
@@ -2776,6 +2786,11 @@ fi
 # --check 必须读真实文件：与 --dry-run 互斥（--check --dry-run → die）
 if [ "$UPGRADE_CHECK" = "1" ] && [ "$DRY_RUN" = "1" ]; then
   die "--check 与 --dry-run 互斥——检查必须读真实文件，dry-run 只打印不落盘"
+fi
+# --strict 只属于 'observe audit'（严格门禁：任一缺口非零退出）；其余命令拒绝，避免静默忽略
+if [ "$OBSERVE_STRICT" = "1" ] \
+   && ! { [ "${CMD:-}" = "observe" ] && [ "${OBSERVE_SUB:-}" = "audit" ]; }; then
+  die "--strict 仅适用于 'ponygo observe audit'（严格门禁：任一缺口均非零退出）"
 fi
 # --json 只属于 'observe status|audit'（固定词表 JSON 供 CI）；其余命令拒绝，避免静默忽略
 if [ "$OBSERVE_JSON" = "1" ] \

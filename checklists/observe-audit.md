@@ -34,6 +34,7 @@ ponygo observe upgrade --check   # 版本兼容门：不满足 exit 2
 ```bash
 ponygo observe audit               # 判到"目标级"为止（target 由项目 meta 派生）
 ponygo observe audit --level ob2   # 断言"至少到 ob2"
+ponygo observe audit --strict      # 严格模式：任一缺口均非零退出（CI 零容忍门禁）
 ponygo observe audit --json        # CI 用：stdout 只有一行固定词表 JSON
 ```
 
@@ -41,9 +42,10 @@ ponygo observe audit --json        # CI 用：stdout 只有一行固定词表 JS
 `[SKIP]` 表示该档未执行（前置档已失败），**不是通过**。
 
 退出码**唯一判据是「当前级 ≥ 目标级」**：目标来源是 `--level obN`（断言），否则取 `.meta/meta.yaml` 的 level
-经映射表求得（体检）。缺口（`gaps`）是「距下一级的 backlog」，**不决定退出码**——目标级已达时 `gaps` 仍可能非空
-（实测：`当前级: ob0 / 目标级: ob0 / 缺口: declaration_inconsistent` → exit 0）。人读报告会打印
-`模式: 体检|断言` 以免误读。
+经映射表求得（体检）。缺口（`gaps`）默认是「距下一级的 backlog」，**不决定退出码**——目标级已达时 `gaps` 仍可能非空
+（实测：`当前级: ob0 / 目标级: ob0 / 缺口: declaration_inconsistent` → exit 0）。
+若需「任一缺口均红」的最硬门禁（如全量 CI），加 `--strict` 旗标即可强制任一缺口 exit 1。人读报告会打印
+`模式: 体检|断言 [strict]` 以免误读。
 
 ## 第 3 步：按 gap 处置
 

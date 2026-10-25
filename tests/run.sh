@@ -1941,6 +1941,17 @@ s37_observe_regress() {
   assert_contains "observe[F7] 非法 contract_version → compatible=false" "$STD_OUT" '"compatible":false'
   run_cli "$T" observe upgrade --check --skill-dir "$SK"
   assert_eq "observe[F7] upgrade --check 遇非法版本 → exit 2" 2 "$R_RC"
+
+  # ⑦ strict 模式：目标级已达但仍有缺口时，默认 exit 0，加 --strict 强制 exit 1
+  T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 0
+  run_cli "$T" observe audit --skill-dir "$SK"
+  assert_eq "observe[strict] 默认体检模式当前级 ob0 >= 目标级 ob0 → exit 0" 0 "$R_RC"
+  run_cli "$T" observe audit --skill-dir "$SK" --strict
+  assert_eq "observe[strict] --strict 下存在缺口强制 exit 1" 1 "$R_RC"
+  assert_contains "observe[strict] 人读模式提示 strict" "$R_OUT" "[strict]"
+  run_cli "$T" observe status --strict
+  assert_eq "observe[strict] status --strict 报错拒收" 1 "$R_RC"
+  assert_contains "observe[strict] status --strict 文案提示仅适用于 audit" "$R_OUT" "仅适用于 'ponygo observe audit'"
 }
 s28_l2_reachability
 s29_doc_level_parity
