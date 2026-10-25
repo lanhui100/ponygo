@@ -2224,6 +2224,24 @@ observe_status() {
     printf '%b' "$unmanaged_sub"
   fi
 
+  # CI/CD 流水线工程资产感知：若当前工作区包含流水线且未声明为 pipeline，透出资产信息与治理建议
+  if [ "$kind" != "pipeline" ]; then
+    local pipe_info=""
+    if [ -d ".github/workflows" ]; then
+      local n_wf
+      n_wf=$(find .github/workflows -maxdepth 1 -name '*.yml' -o -name '*.yaml' 2>/dev/null | wc -l | tr -d ' ')
+      if [ "${n_wf:-0}" -gt 0 ]; then
+        pipe_info="  - .github/workflows（检测到 ${n_wf} 个 Actions 工作流；治理建议：ponygo observe init --kind pipeline）\n"
+      fi
+    elif [ -f ".gitlab-ci.yml" ]; then
+      pipe_info="  - .gitlab-ci.yml（检测到 GitLab CI 流水线；治理建议：ponygo observe init --kind pipeline）\n"
+    fi
+    if [ -n "$pipe_info" ]; then
+      printf 'CI/CD 流水线工程资产：\n'
+      printf '%b' "$pipe_info"
+    fi
+  fi
+
   exit 0
 }
 

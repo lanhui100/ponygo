@@ -53,7 +53,11 @@ desktop  k8s-service  cli  batch  library  frontend  pipeline
 >   - **前端子工程**：在 `front_end/` 目录下**独立建立** `front_end/docs/observability.yaml`，声明为 `kind: frontend`，服务名如 `job-copilot-frontend`；
 >   - **排查与门禁**：根目录的 `ponygo observe status` 会自动嗅探未纳管的前端子目录；治理时进入 `front_end/` 独立运行 `ponygo observe init/audit`。
 > - **独立部署的 Web SPA / SSR（部署在 CDN/Nginx/Node 托管）**：独立发布给浏览器访问，**声明为 `kind: frontend`**。
-> - **CI/CD 自动化构建与工程脚本**：声明为 `kind: pipeline`。
+> - **CI/CD 自动化构建与工程交付（.github/workflows / .gitlab-ci.yml）**：声明为 `kind: pipeline`：
+>   - **Metrics**：衡量 DORA 核心效能指标（构建频率、前置时间、失败率、MTTR、Step 耗时 P95）；
+>   - **Tracing**：将每次 Pipeline Run 映射为 Root Trace，各 Step 映射为子 Span，输出耗时瀑布流；
+>   - **Logs**：构建日志带 `workflow_id` / `run_id` 结构化导出至集中日志池（如 Loki / S3）；
+>   - **Issues**：针对 DevOps 基础设施故障（Runner 宕机/磁盘满/发布脚本自身 Panic）上报 Sentry（普通单测断言失败严禁打入 Sentry）。
 
 ### 3. `--service` 规则
 
