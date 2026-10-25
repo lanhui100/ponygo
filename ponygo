@@ -2530,15 +2530,13 @@ observe_audit() {
     if [ "$ob2" = "1" ]; then s2=PASS; elif [ "$ob1" = "1" ]; then s2=FAIL; else s2=SKIP; fi
   fi
 
-  # 退出码优先级：2 > 3 > 1 > 0。
-  # 显式 --level obN 是「目标断言」：只判是否达到该档（超出目标档的缺口不否决 exit）；
-  # 未给 --level（目标取自 meta.yaml）时，任一缺口即 exit 1。
+  # 退出码优先级：2（工具/输入错误）> 3（证据不可得）> 1（未达目标级）> 0（已达目标级）。
+  # 目标级来源：显式 --level obN，否则 .meta/meta.yaml 的 level 经映射表求得。
+  # 缺口列表是「距下一级的 backlog」，不直接决定退出码（否则目标已达仍会 exit 1，CI 无法分档推进）。
   if [ "$exit2" = "1" ]; then code=2
   elif [ "$exit3" = "1" ]; then code=3
-  elif [ -n "${OBSERVE_LEVEL:-}" ]; then
-    if [ "$cr" -ge 0 ] && [ "$cr" -ge "$trk" ]; then code=0; else code=1; fi
-  elif [ -n "$ids" ]; then code=1
-  else code=0
+  elif [ "$cr" -ge 0 ] && [ "$cr" -ge "$trk" ]; then code=0
+  else code=1
   fi
 
   # 人读报告（--json 时整体走 stderr，stdout 只留一行 JSON）
@@ -2550,9 +2548,9 @@ observe_audit() {
     printf '当前级: %s\n' "$cur"
     printf '目标级: %s\n' "$target"
     if [ -n "${OBSERVE_LEVEL:-}" ]; then
-      printf '模式: 断言 ob%s（达到该档即 exit 0；更高档的缺口不否决）\n' "$(observe_rank "$OBSERVE_LEVEL")"
+      printf '模式: 断言 ob%s（判据：当前级 ≥ 目标级；缺口列表为 backlog）\n' "$(observe_rank "$OBSERVE_LEVEL")"
     else
-      printf '模式: 体检（目标级取自 meta.yaml；任一缺口 exit 非零）\n'
+      printf '模式: 体检（目标级取自 meta.yaml；判据：当前级 ≥ 目标级；缺口列表为 backlog）\n'
     fi
     for g in $ids; do
       case "$g" in

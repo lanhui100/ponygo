@@ -141,13 +141,22 @@ ob3 = 采样策略 / `gen_ai.*` 成本归因 / SLI 告警组。它依赖流量�
 - `tests/run.sh`：s33~s36；
 - 不做阶梯语义变更：L0–L5 判据与既有计数不变，observe 是并列维度。
 
-## 附：`observe audit` 的两种模式（K10，审核 B 指出的歧义）
+## 附：`observe audit` 的退出码语义（K10/K11，审核 B 指出的歧义）
 
-`audit` 有两种退出码语义，由是否显式给 `--level` 决定，**人读输出会打印当前模式**：
+**唯一判据：当前级 ≥ 目标级**（优先级 `2`（工具/输入错误）> `3`（证据不可得）> `1`（未达目标级）> `0`（已达））。
+目标级来源有两种，只是目标来源不同，判据完全相同：
 
-| 模式 | 触发 | 退出码 |
+| 目标来源 | 触发 | 说明 |
 |---|---|---|
-| 体检 | 不给 `--level`（目标取自 `.meta/meta.yaml` 的 level 经映射表求得） | 任一缺口非零（对齐框架铁律「凡机械可查的缺口，命令 exit 1」） |
-| 断言 | 显式 `--level obN` | 达到该档即 0；更高档的缺口不否决（否则「我是否至少到 ob1」会被 ob2 的挂载要求否决，CI 分档推进无法用） |
+| `.meta/meta.yaml` 的 level 经映射表 | 不给 `--level` | 项目自报的成熟度级决定它"该到哪一档"（G4：`observe_level = f(ponygo_level)`） |
+| `--level obN` | 显式给 | CI 分档推进用：断言"至少到 ob0/ob1/ob2" |
 
-`--json` 的字段词表与两种模式无关（`current/target/judges/gaps` 一致），故 CI 若需区分模式，应按是否传 `--level` 判断，不要从 JSON 猜。
+**缺口列表（`gaps`）是「距下一级的 backlog」，不直接决定退出码**：目标级已达时 `gaps` 仍可能非空，
+人读输出会打印当前模式（`模式: 体检|断言`）以免误读。
+
+被否决的备选：「任一缺口即 exit 1」。否决理由：目标级已达仍 exit 1 会让 CI 无法分档推进，
+且与交接单验收「`observe audit` 与 `check-declaration.sh` 同结论」冲突（试点项目 pony-agent
+`current=ob1 = target=ob1`、`check-declaration` rc=0，旧规则却 exit 1）。
+
+`--json` 的字段词表与目标来源无关（`current/target/judges/gaps` 一致），故 CI 若需区分模式，
+应按是否传 `--level` 判断，不要从 JSON 猜。

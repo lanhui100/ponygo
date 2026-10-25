@@ -41,7 +41,7 @@ ponygo observe audit --json        # CI 用：stdout 只有一行固定词表 JS
 `[SKIP]` 表示该档未执行（前置档已失败），**不是通过**。
 
 达标线是"没有缺口"，不是"够到 target"：实测一个 `target: ob0` 且 `当前级: ob0` 的项目，因 ob1 判定项
-FAIL 仍 exit 1（`缺口: declaration_inconsistent`）。`--level` 只是断言"至少到哪一档"。
+FAIL 仍 exit 1（`缺口: declaration_inconsistent`）。退出码统一判「当前级 ≥ 目标级」：`--level obN` 只改目标来源（否则目标取自 `.meta/meta.yaml` 的 level）。
 
 ## 第 3 步：按 gap 处置
 

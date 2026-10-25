@@ -1578,7 +1578,8 @@ s34_observe_init() {
   assert_contains "observe status（模板态）报 ob0" "$R_OUT" "ob0"
 
   # ④ A5：正文无占位、注释含占位字面 ⇒ 判「无占位」；stub rc=2 ⇒ ob0 达 / ob1 未达
-  T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 0
+  # K11：退出码口径 = 「当前级 ≥ 目标级」。本 case 需 level: 3（→ target=ob2）才让 current=ob0 判「未达目标」
+  T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3
   run_cli_env "$T" STUB_RC_CHECK_DECL=2 observe audit --skill-dir "$SK"
   assert_eq "observe[A5] 注释含占位/正文无占位 → ob1 未达 exit 1（占位不误判）" 1 "$R_RC"
   run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=2 observe audit --skill-dir "$SK" --json
@@ -1614,6 +1615,9 @@ s34_observe_init() {
   assert_contains "observe init 全参：dims 外 applicable: false" "$TXT" "applicable: false"
   assert_contains "observe init 全参：dims 内 anchor 写入" "$TXT" "src/tracing.txt"
   assert_contains "observe init 全参：dims 外 reason 写入" "$TXT" "指标由 k8s 侧采集"
+  # K11 同步：case 由 init 造声明、无 .meta 时 target=ob0（current=ob0 ⇒ 反而 exit 0）；
+  # 显式写 level: 3 ⇒ target=ob2 ⇒ current=ob0 < target ⇒ exit 1。缺口列表只作 backlog，不决定退出码。
+  mkdir -p "$T/.meta"; printf 'level: 3\n' > "$T/.meta/meta.yaml"
   run_cli_env "$T" STUB_RC_CHECK_DECL=2 observe audit --skill-dir "$SK"
   assert_eq "observe audit（全参 + stub rc=2）→ ob1 未达 exit 1" 1 "$R_RC"
 

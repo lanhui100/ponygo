@@ -182,11 +182,11 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
                         [--reason-<dim> <text>] [--force] [--dry-run] [--yes]
                                                   落地四维归属声明（唯一写命令；已存在声明需 --force）
   ponygo observe audit  [--level ob0|ob1|ob2] [--json]
-                                                  判定当前达标级：有缺口 exit 非零
+                                                  判定是否达到目标级（ob0/ob1/ob2 判据见下表）
   ponygo observe upgrade [--check]                与技能契约的版本兼容门（CI 用 --check）
 ```
 
-- **退出码**：`0` 达标（`gaps: []`）/ `1` 有缺口（含 `below_target`）/ `2` 工具或输入错误（**不是"未达标"**）/
+- **退出码**：`0` 已达目标级（`gaps` 可非空——缺口是距下一级的 backlog）/ `1` 未达目标级（含 `below_target`）/ `2` 工具或输入错误（**不是"未达标"**）/
   `3` 证据不可得。`2` 与 `3` 都不是通过，见 `checklists/observe-audit.md`。
 - **判定权不下沉**：ponygo 只做 ob0 的文件/占位扫描；ob1/ob2 调用 skill 的
   `check-declaration.sh` / `audit-diff.sh` 并聚合退出码，判据口径在
