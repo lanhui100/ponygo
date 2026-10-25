@@ -181,8 +181,8 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
   ponygo observe init   --kind <k> [--service <s>] [--dims a,b] [--anchor-<dim> <path>]
                         [--reason-<dim> <text>] [--force] [--dry-run] [--yes]
                                                   落地四维归属声明（唯一写命令；已存在声明需 --force）
-  ponygo observe audit  [--level ob0|ob1|ob2] [--json]
-                                                  判定是否达到目标级（ob0/ob1/ob2 判据见下表）
+  ponygo observe audit  [--level ob0|ob1|ob2] [--base <rev>] [--json]
+                                                  判定是否达到目标级（缺口仅作 backlog，不决定退出码）
   ponygo observe upgrade [--check]                与技能契约的版本兼容门（CI 用 --check）
 ```
 

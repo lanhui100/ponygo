@@ -2622,7 +2622,7 @@ observe —— 可观测性治理维度（判定 ob0/ob1/ob2；ob3 仅为目标�
                         [--reason-<dim> <text>] [--force] [--dry-run] [--yes]
                                                   落地四维归属声明（唯一写命令；已存在声明需 --force）
   ponygo observe audit  [--level ob0|ob1|ob2] [--base <rev>] [--json]
-                                                  判定当前达标级：有缺口 exit 非零
+                                                  判定是否达到目标级（缺口仅作 backlog，不决定退出码）
   ponygo observe upgrade [--check]                与技能契约的版本兼容门（CI 用 --check）
   ponygo observe --help | -h                      本段帮助
 
@@ -2632,7 +2632,7 @@ observe 选项（仅 observe 接受，其余命令拒绝）：
   --skill-dir <dir>    skill 安装目录（等价 env PONYGO_SKILL_DIR）
   --mapping <file>     覆盖嵌入映射数据块（等价 env PONYGO_OBSERVE_MAPPING）
 
-退出码白话：0=已达/兼容；1=有缺口或用法错；2=工具或输入错误（不是"未达标"）；3=证据不足。
+退出码白话：0=已达目标级/兼容；1=未达目标级或用法错；2=工具或输入错误（不是"未达标"）；3=证据不足。
 
 已知局限：ob1 只判「声明与巡检一致」；四维全 false 的声明同样 PASS（识别谎言是非机械项，见 revisions/proposed/2026-10-25-observe-dimension.md K4）。
 已知局限：ob2 的挂载证据是形状判据（grep 载体），真执行证据是 audit-diff 本身（K7）。

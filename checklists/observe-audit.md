@@ -40,8 +40,10 @@ ponygo observe audit --json        # CI 用：stdout 只有一行固定词表 JS
 人读报告两段：三行判定项（`[PASS]/[FAIL]/[SKIP] ob0|ob1|ob2`）+ `当前级 / 目标级 / 缺口: <gap> —— <白话>`。
 `[SKIP]` 表示该档未执行（前置档已失败），**不是通过**。
 
-达标线是"没有缺口"，不是"够到 target"：实测一个 `target: ob0` 且 `当前级: ob0` 的项目，因 ob1 判定项
-FAIL 仍 exit 1（`缺口: declaration_inconsistent`）。退出码统一判「当前级 ≥ 目标级」：`--level obN` 只改目标来源（否则目标取自 `.meta/meta.yaml` 的 level）。
+退出码**唯一判据是「当前级 ≥ 目标级」**：目标来源是 `--level obN`（断言），否则取 `.meta/meta.yaml` 的 level
+经映射表求得（体检）。缺口（`gaps`）是「距下一级的 backlog」，**不决定退出码**——目标级已达时 `gaps` 仍可能非空
+（实测：`当前级: ob0 / 目标级: ob0 / 缺口: declaration_inconsistent` → exit 0）。人读报告会打印
+`模式: 体检|断言` 以免误读。
 
 ## 第 3 步：按 gap 处置
 

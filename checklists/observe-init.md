@@ -169,14 +169,15 @@ ponygo observe audit --level ob2   # 断言"至少到 ob2"
 
 | 退出码 | 含义 | 是不是"通过" |
 |---|---|---|
-| 0 | 目标级达成，且无任何缺口（`gaps` 为空） | 是 |
-| 1 | 有缺口（未达目标级 / ob1 或 ob2 判定项未通）或用例错误（如 `--level ob3`、`--level S`） | 否 |
+| 0 | 已达目标级（`gaps` 可非空——缺口是距下一级的 backlog） | 是 |
+| 1 | 未达目标级，或用法错误（如 `--level ob3`、`--level S`） | 否 |
 | 2 | 工具或输入错误（skill 缺失、skill 脚本 rc=4、参数非法）——**不是"未达标"**，是判不了 | 否 |
 | 3 | 证据不可得（skill 判据跑不出结论） | 否，且**不得当通过** |
 
-> `0` 的条件是**三条判定项全 PASS（`gaps` 为空）**，不是"达到 target 就绿"：`target: ob0` 的项目若
-> ob1 判定项 FAIL，`audit` 仍 exit 1（实测 `当前级: ob0 / 目标级: ob0 / 缺口: declaration_inconsistent`）。
-> 目标级是"至少到哪一档"的断言，达标线始终是"没有缺口"。
+> `0` 的条件是**当前级 ≥ 目标级**（目标 = `--level obN`，否则 `.meta/meta.yaml` 的 level）。缺口列表是
+> 距下一级的 backlog，不决定退出码：`target: ob0` 且 `当前级: ob0` 时即使 ob1 判定项 FAIL，`audit` 仍 exit 0
+> （`gaps` 里带 `declaration_inconsistent`）；要看门禁把项目卡住，请把目标写在 `.meta/meta.yaml` 的 level
+> 或显式传 `--level`。
 
 > 判定权不在 ponygo：`ob0` 的文件存在性/占位扫描由 ponygo 自己做，`ob1`/`ob2` 交给
 > skill 的 `check-declaration.sh` / `audit-diff.sh`，ponygo 只聚合退出码。判据口径见
