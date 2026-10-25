@@ -2041,6 +2041,7 @@ s41_observe_smart_inheritance_and_examples() {
 
   # 2. observe init --force 智能继承原声明中的非占位内容
   SK=$(stage_skill "$T")
+  mkdir -p "$T/src" && touch "$T/src/trace.ts" "$T/src/err.ts"
   run_cli "$T" observe init --kind desktop --service my-app --skill-dir "$SK" --yes \
     --dims tracing,issues --anchor-tracing src/trace.ts --anchor-issues src/err.ts \
     --reason-metrics "桌面端无端口" --reason-logs "本地单行日志"
@@ -2065,6 +2066,32 @@ EOF
   assert_contains "status 回显收口点 error_boundary 规则名" "$R_OUT" "error_boundary"
   assert_contains "status 回显收口点目标路径 src/main.ts" "$R_OUT" "src/main.ts"
 }
+
+s42_observe_monorepo_subcomponents() {
+  echo "--- 场景42：Monorepo 多组件感知（子目录独立前端/未纳管感知）"
+  local T SK
+
+  T=$(new_case); SK=$(stage_skill "$T")
+  # 根目录初始化为 k8s-service
+  run_cli "$T" observe init --kind k8s-service --service api-svc --skill-dir "$SK" --yes
+  assert_eq "根目录 init k8s-service exit 0" 0 "$R_RC"
+
+  # 创建未纳管的前端子目录 front_end
+  mkdir -p "$T/front_end"
+  echo '{"name":"my-frontend"}' > "$T/front_end/package.json"
+
+  # 在根目录运行 observe status，应探测到未纳管的前端工程
+  run_cli "$T" observe status --skill-dir "$SK"
+  assert_contains "status 提示发现未纳管子组件" "$R_OUT" "未纳管子组件"
+  assert_contains "status 指出未纳管前端目录 front_end" "$R_OUT" "front_end"
+
+  # 在子目录落地声明后，根目录不再报警该子组件
+  mkdir -p "$T/front_end/docs"
+  echo "service: web-svc" > "$T/front_end/docs/observability.yaml"
+  echo "kind: frontend" >> "$T/front_end/docs/observability.yaml"
+  run_cli "$T" observe status --skill-dir "$SK"
+  assert_not_contains "子目录已纳管后根目录不再报警" "$R_OUT" "front_end"
+}
 s28_l2_reachability
 s29_doc_level_parity
 s30_release_chain
@@ -2079,6 +2106,7 @@ s38_observe_frontend_and_pipeline
 s39_observe_feedback_upgrades
 s40_observe_audit_clarity
 s41_observe_smart_inheritance_and_examples
+s42_observe_monorepo_subcomponents
 
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
