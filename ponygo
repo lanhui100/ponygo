@@ -35,6 +35,37 @@ CLASSES="feature bug-fix simplification architecture process testing"
 # 原 L3[文档分层] 并入 L2，原 L4-L6 顺延为 L3-L5（见 revisions/accepted/2026-09-02-doc-governance-frontloaded-to-l0-l1.md）
 LEVELS="L0[播种] L1[决策入册+文档有家] L2[承诺可验+文档分层] L3[流程资产] L4[负空间] L5[领域定制]"
 
+# ---------- observe 映射数据块（数据，非代码） ----------
+# 口径（方案 v2 §3）：数据块只承载「名称/顺序/目标映射/路径枚举」，**不承载判定逻辑**。
+#   * 整段置于**永不调用**的函数体内：bash 只解析函数体、调用才执行，故数据行零副作用；
+#   * BEGIN/END 之间每行严格 `key: value` 平铺——禁止 flow-map {}/缩进嵌套/行内注释；
+#   * 键名与查询名逐字一致（A2 漂移教训：target_level_<n> 对应 --level 目标映射的 L<n>）；
+#   * 消费方 = observe_map_get；必需键与 mapping_version 的 fail-closed 校验属 Executor task-3。
+observe_mapping_data() {
+# ==== OBSERVE MAPPING BEGIN (data, not code) ====
+mapping_version: 1
+ob_levels: ob0 ob1 ob2
+ob_level0_name: 归属声明
+ob_level1_name: 声明与现实一致
+ob_level2_name: 收口与变更门禁
+ob_advisory_name: ob3 成本与 SLO（目标画像，不参与判定）
+target_level_0: ob0
+target_level_1: ob0
+target_level_2: ob1
+target_level_3: ob2
+target_level_4: ob2
+target_level_5: ob2
+kind_enum: desktop k8s-service cli batch library
+contract_version_min: 1.0.3
+declaration_paths: docs/observability.yaml docs/observability.yml
+placeholder_token: __REPLACE_ME__
+mount_carriers: .git/hooks/pre-commit .githooks/pre-commit .githooks/pre-push .pre-commit-config.yaml lefthook.yml .github/workflows .gitlab-ci.yml
+skill_dir_rel: .agents/skills/observability-onboarding
+external_timeout_seconds: 120
+# ==== OBSERVE MAPPING END ====
+:
+}
+
 # ---------- 工具函数 ----------
 die() { printf 'ponygo: %s\n' "$*" >&2; exit 1; }
 info() { printf 'ponygo: %s\n' "$*"; }
@@ -1810,6 +1841,46 @@ cmd_retire() {
   esac
 }
 
+# ---------- observe（可观测性治理维度） ----------
+# W0 契约冻结：此处只暴露**命令面与退出码骨架**，不含任何判定逻辑。
+# ob0/ob1/ob2 的判据实现（声明存在/无占位/check-declaration rc 白名单/audit-diff 收口）
+# 属 Executor task-3；--json 词表、init 声明模板、upgrade 版本比较同属 task-3。
+# EXEC: 完整校验与 --mapping 覆盖见 task-3
+
+# 从嵌入映射数据块取值（桩：只做「逐字取出」这一最小实现——
+# 无键名合法性校验、无 --mapping 覆盖、无 mapping_version 校验，全部留给 task-3）。
+observe_map_get() {
+  sed -n "s/^${1:-}:[[:space:]]*//p" "${BASH_SOURCE[0]:-$0}" | head -n 1
+}
+
+observe_status() { info "observe status: NOT IMPLEMENTED"; exit 3; }
+observe_init() { info "observe init: NOT IMPLEMENTED"; exit 3; }
+observe_audit() { info "observe audit: NOT IMPLEMENTED"; exit 3; }
+observe_upgrade() { info "observe upgrade: NOT IMPLEMENTED"; exit 3; }
+
+# observe 段帮助：usage() 与 'ponygo observe --help' 共用同一份文案（单一真源，防双源漂移）
+usage_observe() {
+  cat <<'EOF'
+observe —— 可观测性治理维度（判定 ob0/ob1/ob2；ob3 仅为目标画像，不参与判定）
+  ponygo observe status                           静态报告（不判定）：声明在场/占位残留/skill 在场与版本；只读，exit 0
+  ponygo observe init   --kind <k> [--service <s>] [--dims a,b] [--anchor-<dim> <path>]
+                        [--reason-<dim> <text>] [--force] [--dry-run] [--yes]
+                                                  落地四维归属声明（唯一写命令；已存在声明需 --force）
+  ponygo observe audit  [--level ob0|ob1|ob2] [--json]
+                                                  判定当前达标级：有缺口 exit 非零
+  ponygo observe upgrade [--check]                与技能契约的版本兼容门（CI 用 --check）
+  ponygo observe --help | -h                      本段帮助
+
+observe 选项（仅 observe 接受，其余命令拒绝）：
+  --level ob0|ob1|ob2  判定目标档（ob3 是成本与 SLO 的目标画像，不参与判定，显式拒绝）
+  --json               固定词表 JSON 输出（仅 status|audit；供 CI 解析，不含自由文本）
+  --skill-dir <dir>    skill 安装目录（等价 env PONYGO_SKILL_DIR）
+  --mapping <file>     覆盖嵌入映射数据块（等价 env PONYGO_OBSERVE_MAPPING）
+
+退出码白话：0=已达/兼容；1=有缺口或用法错；2=工具或输入错误（不是"未达标"）；3=证据不足。
+EOF
+}
+
 # ---------- 帮助 ----------
 usage() {
   cat <<'EOF'
@@ -1822,6 +1893,7 @@ ponygo —— 项目工程化治理元框架命令行（单文件、零依赖）
   ponygo upgrade  [--check]              骨架漂移报告（宇宙=s14 十文件；默认 exit 0；--check 漂移非零供 CI）
   ponygo sync                            把 constitution 投影到 AGENTS.md / CLAUDE.md（模板态投影初始引导）
   ponygo retire   --level <N|off>        退级 / 整体退场（停止线执行器）
+  ponygo observe  status|init|audit|upgrade  可观测性治理维度（ob0/ob1/ob2 判定；详见 'ponygo observe --help'）
 
 选项：
   --yes       破坏性动作前不再确认
@@ -1830,18 +1902,46 @@ ponygo —— 项目工程化治理元框架命令行（单文件、零依赖）
   --run-specs 执行 gates/ 下 *.spec.sh 负样本自检（opt-in；默认不执行仓库脚本）
   --check     ponygo upgrade 专用：存在漂移 → exit 非零（供 CI；与 --dry-run 互斥）
 EOF
+  usage_observe
 }
 
 # ---------- 入口 ----------
 DRY_RUN=0; YES=0; LEVEL=""; CMD=""; RETIRE_LEVEL=""; RUN_SPECS=0; UPGRADE_CHECK=0
+# observe 独立变量族：OBSERVE_SUB 承载子命令（与顶层 CMD 分离，防 'observe audit' 被
+# 'audit)' 分支二次覆盖），OBSERVE_LEVEL 只收 ob0|ob1|ob2（不复用 LEVEL 的 S|M 值域）。
+OBSERVE_SUB=""; OBSERVE_LEVEL=""; OBSERVE_JSON=0; OBSERVE_SKILL_DIR=""; OBSERVE_MAPPING_FILE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --yes) YES=1 ;;
     --dry-run) DRY_RUN=1 ;;
     --run-specs) RUN_SPECS=1 ;;
     --check) UPGRADE_CHECK=1 ;;
-    --level) [ $# -ge 2 ] || die "--level 需要取值（如 --level S / --level off）"; shift; LEVEL="$1" ;;
+    --json) OBSERVE_JSON=1 ;;
+    --skill-dir) [ $# -ge 2 ] || die "--skill-dir 需要目录取值（如 --skill-dir .agents/skills/observability-onboarding）"; shift; OBSERVE_SKILL_DIR="$1" ;;
+    --mapping) [ $# -ge 2 ] || die "--mapping 需要文件取值（如 --mapping ./observe-mapping.txt）"; shift; OBSERVE_MAPPING_FILE="$1" ;;
+    --level) [ $# -ge 2 ] || die "--level 需要取值（如 --level S / --level off）"; shift
+      if [ "${CMD:-}" = "observe" ]; then
+        case "$1" in
+          ob0|ob1|ob2) OBSERVE_LEVEL="$1" ;;
+          ob3) die "--level ob3 不可用于判定：ob3 是成本与 SLO 的目标画像，不参与判定；判定档用 ob0|ob1|ob2" ;;
+          *) die "observe --level 取值非法：$1（用 ob0|ob1|ob2）" ;;
+        esac
+      else
+        LEVEL="$1"
+      fi
+      ;;
     -h|--help) usage; exit 0 ;;
+    observe)
+      CMD=observe
+      # 立刻消费下一词为子命令：否则 'observe audit' 的 audit 会落到下面
+      # 'init|audit|status|upgrade|sync|retire)' 分支把 CMD 覆盖成 audit（路由串味）。
+      shift
+      case "${1:-}" in
+        init|audit|status|upgrade) OBSERVE_SUB="$1" ;;
+        -h|--help) usage_observe; exit 0 ;;
+        *) die "未知 observe 子命令：${1:-（缺）}（用 status|init|audit|upgrade，见 'ponygo observe --help'）" ;;
+      esac
+      ;;
     init|audit|status|upgrade|sync|retire) CMD="$1" ;;
     *) die "未知参数或子命令：$1（见 'ponygo --help'）" ;;
   esac
@@ -1852,13 +1952,26 @@ done
 if [ "$RUN_SPECS" = "1" ] && [ "${CMD:-}" != "audit" ]; then
   die "--run-specs 仅适用于 'ponygo audit'（只读命令不执行仓库脚本）"
 fi
-# --check 只属于 upgrade（漂移非零供 CI）；其余命令一律拒绝（对齐 --run-specs 互斥守卫）
-if [ "$UPGRADE_CHECK" = "1" ] && [ "${CMD:-}" != "upgrade" ]; then
+# --check 只属于 upgrade 与 'observe upgrade'（漂移/版本兼容门）；其余命令一律拒绝（对齐 --run-specs 互斥守卫）
+if [ "$UPGRADE_CHECK" = "1" ] && [ "${CMD:-}" != "upgrade" ] \
+   && ! { [ "${CMD:-}" = "observe" ] && [ "${OBSERVE_SUB:-}" = "upgrade" ]; }; then
   die "--check 仅适用于 'ponygo upgrade'（骨架漂移检查；其余命令无此语义）"
 fi
 # --check 必须读真实文件：与 --dry-run 互斥（--check --dry-run → die）
 if [ "$UPGRADE_CHECK" = "1" ] && [ "$DRY_RUN" = "1" ]; then
   die "--check 与 --dry-run 互斥——检查必须读真实文件，dry-run 只打印不落盘"
+fi
+# --json 只属于 'observe status|audit'（固定词表 JSON 供 CI）；其余命令拒绝，避免静默忽略
+if [ "$OBSERVE_JSON" = "1" ] \
+   && ! { [ "${CMD:-}" = "observe" ] && { [ "${OBSERVE_SUB:-}" = "status" ] || [ "${OBSERVE_SUB:-}" = "audit" ]; }; }; then
+  die "--json 仅适用于 'ponygo observe status|audit'（固定词表输出，供 CI 解析）"
+fi
+# --skill-dir / --mapping 只属于 observe（其余命令拒绝，避免静默忽略）
+if [ -n "$OBSERVE_SKILL_DIR" ] && [ "${CMD:-}" != "observe" ]; then
+  die "--skill-dir 仅适用于 'ponygo observe'（技能安装目录）"
+fi
+if [ -n "$OBSERVE_MAPPING_FILE" ] && [ "${CMD:-}" != "observe" ]; then
+  die "--mapping 仅适用于 'ponygo observe'（嵌入映射数据块的覆盖文件）"
 fi
 
 case "${CMD:-}" in
@@ -1868,5 +1981,14 @@ case "${CMD:-}" in
   upgrade) cmd_upgrade ;;
   sync) do_sync ;;
   retire) cmd_retire "${LEVEL:-}" ;;
+  observe)
+    case "${OBSERVE_SUB:-}" in
+      status) observe_status ;;
+      init) observe_init ;;
+      audit) observe_audit ;;
+      upgrade) observe_upgrade ;;
+      *) die "未知 observe 子命令：${OBSERVE_SUB:-（缺）}（见 'ponygo observe --help'）" ;;
+    esac
+    ;;
   "") usage; exit 0 ;;
 esac
