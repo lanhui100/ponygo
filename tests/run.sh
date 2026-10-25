@@ -2009,6 +2009,26 @@ s39_observe_feedback_upgrades() {
   run_cli "$T" observe status --skill-dir "$SK"
   assert_contains "status 提示收口点未配置" "$R_OUT" "收口点"
 }
+
+s40_observe_audit_clarity() {
+  echo "--- 场景40：audit 输出明晰度（结论行提示/待办区分/收口点推荐指引）"
+  local T SK
+
+  # 1. status 提示收口点未配置时包含标准推荐项提示
+  T=$(new_case); SK=$(stage_skill "$T")
+  run_cli "$T" observe init --kind cli --skill-dir "$SK" --yes
+  run_cli "$T" observe status --skill-dir "$SK"
+  assert_contains "status 包含收口点推荐项 http_client" "$R_OUT" "http_client"
+  assert_contains "status 包含收口点推荐项 error_boundary" "$R_OUT" "error_boundary"
+
+  # 2. audit 达成目标级（如 --level ob1 达成）时打印清晰结论行 PASS
+  make_audit_case "$T" 1
+  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=1 observe audit --level ob1 --skill-dir "$SK"
+  assert_eq "audit --level ob1 达成 exit 0" 0 "$R_RC"
+  assert_contains "audit 达成打印明确结论行 PASS" "$R_OUT" "结论: PASS"
+  assert_contains "audit 打印明确已达目标级提示" "$R_OUT" "已达目标级"
+  assert_contains "audit 将后续缺口标记为下一级待办" "$R_OUT" "下一级待办"
+}
 s28_l2_reachability
 s29_doc_level_parity
 s30_release_chain
@@ -2021,6 +2041,7 @@ s36_observe_json
 s37_observe_regress
 s38_observe_frontend_and_pipeline
 s39_observe_feedback_upgrades
+s40_observe_audit_clarity
 
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
