@@ -14,7 +14,7 @@
 | 名称 | 是什么 | 定位 |
 |---|---|---|
 | `docs/methodology.md` | 原理层：这套方法论的**设计依据**（源自 deepseek-harness 的工程化沉淀） | 讲"为什么"——为什么约定要可验证（P2）、为什么靠自觉会衰减 |
-| `ponygo`（本仓库 + CLI） | 机制层：把原理固化成**可实例化的脚手架 + 命令面** | 讲"怎么做"——`init`/`audit`/`status`/`upgrade`/`sync`/`retire` 六条命令 |
+| `ponygo`（本仓库 + CLI） | 机制层：把原理固化成**可实例化的脚手架 + 命令面** | 讲"怎么做"——`init`/`audit`/`status`/`upgrade`/`sync`/`retire` 六条命令 + `observe` 维度 |
 | 某个具体实例（如 deepseek-harness） | 一个真实项目的 `.meta/` 治理根 | 讲"某家是怎么落地的"——一份实证案例，非模板 |
 
 **阅读顺序**：先本文档（拿到命令面与路径），再按需回读 `docs/methodology.md`（理解每一条命令背后的原理）。
@@ -29,7 +29,7 @@
 
 ---
 
-## 3. 安装与快速开始（六条命令）
+## 3. 安装与快速开始（六条核心命令 + observe）
 
 ### 3.1 安装（一键安装 / 单文件零依赖）
 
@@ -81,7 +81,7 @@ git clone https://github.com/lanhui100/ponygo.git && export PATH="$PWD/ponygo:$P
 平台要求：Git Bash（Windows）/ Linux / macOS（GNU 用户态，见 §6.2）。
 安装后验证：`ponygo --help`
 
-### 3.2 六条命令
+### 3.2 命令面（六条核心命令 + observe）
 
 ```bash
 ponygo init      # 新项目：在仓库根生成 .agents/ + .meta/ 治理骨架 + meta.yaml（level: 0）
@@ -90,9 +90,11 @@ ponygo status    # 查看当前成熟度级（L0-L5）与骨架完整性，并�
 ponygo upgrade   # 跟随框架升级：把本仓库新版 ponygo 的命令面/判据同步进已有治理根
 ponygo sync      # 把 constitution 投影到根 AGENTS.md / CLAUDE.md（生成物，勿手编；槽位未填的模板态投影初始引导 bootstrap）
 ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|off>
+  ponygo observe  status|init|audit|upgrade  可观测性治理维度（ob0/ob1/ob2 判定；详见 'ponygo observe --help'）
 ```
 
-`ponygo` 是单文件 CLI（shell、零依赖）。命令面固定为上述六条。
+`ponygo` 是单文件 CLI（shell、零依赖）。核心命令面固定为上述六条；`observe` 是独立的一组子命令
+（四级判据、skill 定位与 CI 用法见 §4.4）。
 
 ---
 
@@ -161,6 +163,49 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
 > 或在 CI / pre-push 层逐个跑 `bash .meta/gates/<name>.spec.sh`（**勿写 `*.spec.sh` 通配**——
 > shell 只会把第一个匹配当命令、其余沦为参数，静默漏跑）。`--dry-run` 下一律跳过。
 
+### 4.4 可观测性维度（observe）
+
+`ponygo observe` 把"可观测性接入"变成一个可判定的维度：**判据在外部 skill，ponygo 只做骨架扫描与退出码聚合**。
+四级里 ob0/ob1/ob2 参与判定，ob3 是目标画像（advisory）。
+
+| 级 | 判据 | 未达时的 gap |
+|---|---|---|
+| ob0 | `docs/observability.yaml\|yml` 在场，且**非注释行**无占位符 | `declaration_missing` / `placeholder_present` |
+| ob1 | 声明与现实一致：skill 的 `check-declaration.sh` 退出码 0 | `declaration_inconsistent`（rc=2）/ `evidence_insufficient`（rc=3）/ `tool_error`（rc=4） |
+| ob2 | 声明有真实收口点 + 挂载载体里真有 `audit-diff` 调用 + 其退出码 0 | `enforcement_points_missing` / `mount_missing` / `diff_warn`（rc=1）/ `enforcement_violation`（rc=2） |
+
+四条子命令（与 `ponygo observe --help` 逐字一致）：
+
+```
+  ponygo observe status                           静态报告（不判定）：声明在场/占位残留/skill 在场与版本；只读，exit 0
+  ponygo observe init   --kind <k> [--service <s>] [--dims a,b] [--anchor-<dim> <path>]
+                        [--reason-<dim> <text>] [--force] [--dry-run] [--yes]
+                                                  落地四维归属声明（唯一写命令；已存在声明需 --force）
+  ponygo observe audit  [--level ob0|ob1|ob2] [--json]
+                                                  判定当前达标级：有缺口 exit 非零
+  ponygo observe upgrade [--check]                与技能契约的版本兼容门（CI 用 --check）
+```
+
+- **退出码**：`0` 达标（`gaps: []`）/ `1` 有缺口（含 `below_target`）/ `2` 工具或输入错误（**不是"未达标"**）/
+  `3` 证据不可得。`2` 与 `3` 都不是通过，见 `checklists/observe-audit.md`。
+- **判定权不下沉**：ponygo 只做 ob0 的文件/占位扫描；ob1/ob2 调用 skill 的
+  `check-declaration.sh` / `audit-diff.sh` 并聚合退出码，判据口径在
+  `<skill>/references/declaration-rubric.md`。维度映射（kind 枚举、挂载载体清单、版本下限）以数据块形式
+  嵌在 `ponygo` 单文件里——skill 不在 git 下、重装即丢，故不把承接面放在 skill 一侧。
+- **skill 定位**：`--skill-dir <dir>` > 环境变量 `PONYGO_SKILL_DIR` > `~/.agents/skills/observability-onboarding`；
+  版本取 `<skill>/references/contract.json` 的 `contract_version`，兼容门是 `ponygo observe upgrade --check`。
+  目录或契约文件缺失 ⇒ `audit`/`upgrade` 直接 exit 2（fail-closed，不降级判定）；`status` 不因此失败。
+- **ob3 只作 advisory**：报告末尾固定三条待办（采样策略 / `gen_ai.*` 成本归因 / SLI 告警组），
+  `--level ob3` 被显式拒绝——它是成本与 SLO 的目标画像，不参与判定。
+- **CI 用法**：`ponygo observe audit --level ob1 --json`（stdout 只有一行固定词表 JSON，rc 决定门禁红绿）；
+  变更级门禁用 skill 的 `audit-diff.sh` 并以"变更起点"作 `--base`（别用 `HEAD`），ob2 才真的在拦。
+- **已知局限**（诚实标注）：
+  - ob1 只判"声明与巡检一致"；四维全 `false` 的声明同样 PASS——识别谎言是非机械项（K4）。
+  - ob2 的挂载证据是形状判据（grep 载体里出现 `audit-diff`），真执行证据是 `audit-diff` 本身（K7）。
+
+> 清单：落地看 `checklists/observe-init.md`，审计与门禁看 `checklists/observe-audit.md`；
+> 决策背景与被否选项见 `revisions/proposed/2026-10-25-observe-dimension.md`。
+
 ---
 
 ## 5. 与旧项目的关系
@@ -189,7 +234,7 @@ CLI 从不假设项目是空仓；它对"已有治理"与"零治理但历史厚�
 ### 6.2 本文不覆盖的维度（各一句话）
 
 - **依赖 / 供应链安全**：审计（supply-chain audit）、SBOM（软件物料清单）、许可证合规、锁文件校验——另配 `npm audit` / `osv-scanner` 等专业工具，本框架门禁语料外。
-- **可观测性**：遥测 / 日志 / 告警 / oncall——属运维域，独立成体系。
+- **可观测性**：遥测 / 日志 / 告警 / oncall 的**基础设施与选型**属运维域，独立成体系；本框架只承载"接入到哪一级"的可达判定（`ponygo observe`，见 §4.4）与变更级门禁挂载，不替你做埋点设计与容量规划。
 - **安全与密钥管理**：secret 扫描、权限最小化——属独立安全规范。
 - **发布与版本管理**：语义化版本与发布通道的专业治理——不在本框架语料内（版本派生仅由 git 承担）。
 - **开发环境可复现**：devcontainer / Nix——本框架不替它虚构，不覆盖。
@@ -207,8 +252,8 @@ CLI 从不假设项目是空仓；它对"已有治理"与"零治理但历史厚�
 | 文件 / 目录 | 是什么 | 给谁看 |
 |---|---|---|
 | `README.md` | 门面 + 使用总纲：命令面、路径、阶梯、边界 | 所有人；第一入口 |
-| `ponygo` | 单文件 CLI（shell、零依赖），六条命令 | 使用者；执行入口 |
-| `tests/run.sh` | CLI 自测（纯 bash、零依赖、31 场景），`bash tests/run.sh` 全绿为准 | 维护者；回归门禁 |
+| `ponygo` | 单文件 CLI（shell、零依赖），六条核心命令 + `observe` 维度 | 使用者；执行入口 |
+| `tests/run.sh` | CLI 自测（纯 bash、零依赖、36 场景，含 `observe` 的 s33~s36），`bash tests/run.sh` 全绿为准 | 维护者；回归门禁 |
 | `.github/workflows/ci.yml` | 回归门禁挂载：ubuntu + windows Git Bash 双平台跑 tests/run.sh + 聚合门 | 维护者；分支保护依赖 |
 | `.github/workflows/release.yml` | 发布校验和链：tag-push 触发，生成并发布 ponygo.sha256（裸哈希 + CRLF 断言 + 最小权限） | 维护者；发布动作 |
 | `docs/methodology.md` | 原理层：方法论设计依据（源自 deepseek-harness） | 想懂"为什么"的人；机制层的理论源头 |
@@ -216,6 +261,6 @@ CLI 从不假设项目是空仓；它对"已有治理"与"零治理但历史厚�
 | `maturity-ladder.md` | 成熟度阶梯定义（L0–L5 逐档判据） | `ponygo status` 与 review 的判定来源 |
 | `audit/` | 四问记分卡 + 分层细目库 + 自适应深度选择器 | `ponygo audit` 的执行依据 |
 | `audit/checklist.md` | 分层细目（骨架 / 机制 / 精微三层条目） | 审计打分时的逐项参照 |
-| `checklists/` | 双入口清单：init（冷启动）+ audit（改造） | 使用者；落地动作指引 |
+| `checklists/` | 四入口清单：init（冷启动）/ audit（改造）/ observe-init（维度落地）/ observe-audit（维度审计） | 使用者；落地动作指引 |
 | `revisions/` | 框架自身演进记录：proposed / accepted | 维护者；框架"吃自己狗粮"的 ADR |
 | `LICENSE` | MIT 许可证 | 分发与二次使用依据 |
