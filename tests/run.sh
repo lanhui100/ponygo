@@ -2029,6 +2029,42 @@ s40_observe_audit_clarity() {
   assert_contains "audit 打印明确已达目标级提示" "$R_OUT" "已达目标级"
   assert_contains "audit 将后续缺口标记为下一级待办" "$R_OUT" "下一级待办"
 }
+
+s41_observe_smart_inheritance_and_examples() {
+  echo "--- 场景41：智能继承、收口点明细与帮助示例（force 继承/status 回显/examples）"
+  local T SK TXT
+
+  # 1. 帮助信息包含实战示例 Examples
+  T=$(new_case)
+  run_cli "$T" observe --help
+  assert_contains "observe --help 包含示例段" "$R_OUT" "示例："
+
+  # 2. observe init --force 智能继承原声明中的非占位内容
+  SK=$(stage_skill "$T")
+  run_cli "$T" observe init --kind desktop --service my-app --skill-dir "$SK" --yes \
+    --dims tracing,issues --anchor-tracing src/trace.ts --anchor-issues src/err.ts \
+    --reason-metrics "桌面端无端口" --reason-logs "本地单行日志"
+  TXT=$(cat "$T/docs/observability.yaml" 2>/dev/null || true)
+  assert_contains "初始声明含真实 reason-metrics" "$TXT" "桌面端无端口"
+
+  # 二次运行 init --force，只改 service，不传 reason-metrics，原有的结构性理由必须被继承，不得被抹为 __REPLACE_ME__
+  run_cli "$T" observe init --kind desktop --service new-app --dims tracing,issues --skill-dir "$SK" --force --yes
+  TXT=$(cat "$T/docs/observability.yaml" 2>/dev/null || true)
+  assert_contains "二次 force 后 service 更新" "$TXT" "service: new-app"
+  assert_contains "二次 force 智能继承了原有的 reason-metrics" "$TXT" "桌面端无端口"
+  assert_not_contains "二次 force 不得将原有 reason 抹为占位符" "$TXT" "__REPLACE_ME__"
+
+  # 3. status 回显具体收口点名称及目标路径
+  cat << 'EOF' >> "$T/docs/observability.yaml"
+
+enforcement_points:
+  error_boundary:
+    path: src/main.ts
+EOF
+  run_cli "$T" observe status --skill-dir "$SK"
+  assert_contains "status 回显收口点 error_boundary 规则名" "$R_OUT" "error_boundary"
+  assert_contains "status 回显收口点目标路径 src/main.ts" "$R_OUT" "src/main.ts"
+}
 s28_l2_reachability
 s29_doc_level_parity
 s30_release_chain
@@ -2042,6 +2078,7 @@ s37_observe_regress
 s38_observe_frontend_and_pipeline
 s39_observe_feedback_upgrades
 s40_observe_audit_clarity
+s41_observe_smart_inheritance_and_examples
 
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
