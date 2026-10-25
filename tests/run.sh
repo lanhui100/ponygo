@@ -1447,6 +1447,7 @@ placeholder_token: __REPLACE_ME__
 mount_carriers: .git/hooks/pre-commit .githooks/pre-commit .githooks/pre-push .pre-commit-config.yaml lefthook.yml .github/workflows .gitlab-ci.yml
 skill_dir_rel: .agents/skills/observability-onboarding
 external_timeout_seconds: 120
+local_timeout_seconds: 3
 MAPEOF
 }
 
@@ -1578,9 +1579,9 @@ s34_observe_init() {
 
   # ④ A5：正文无占位、注释含占位字面 ⇒ 判「无占位」；stub rc=2 ⇒ ob0 达 / ob1 未达
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 0
-  run_cli_env "$T" STUB_RC_CHECK_DECL=2 CLI observe audit --skill-dir "$SK"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=2 observe audit --skill-dir "$SK"
   assert_eq "observe[A5] 注释含占位/正文无占位 → ob1 未达 exit 1（占位不误判）" 1 "$R_RC"
-  run_cli_stdout "$T" observe audit --skill-dir "$SK" --json
+  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=2 observe audit --skill-dir "$SK" --json
   assert_contains "observe[A5] 该声明 current=ob0（ob0 已达）" "$STD_OUT" '"current":"ob0"'
   assert_contains "observe[A5] no_placeholder 判 pass" "$STD_OUT" \
     '{"id":"no_placeholder","status":"pass"}'
@@ -1613,7 +1614,7 @@ s34_observe_init() {
   assert_contains "observe init 全参：dims 外 applicable: false" "$TXT" "applicable: false"
   assert_contains "observe init 全参：dims 内 anchor 写入" "$TXT" "src/tracing.txt"
   assert_contains "observe init 全参：dims 外 reason 写入" "$TXT" "指标由 k8s 侧采集"
-  run_cli_env "$T" STUB_RC_CHECK_DECL=2 CLI observe audit --skill-dir "$SK"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=2 observe audit --skill-dir "$SK"
   assert_eq "observe audit（全参 + stub rc=2）→ ob1 未达 exit 1" 1 "$R_RC"
 
   # ⑦ A8 版本门：<skill>/references/contract.json 是唯一版本源；低版本 init → 2
@@ -1622,7 +1623,7 @@ s34_observe_init() {
   assert_eq "observe[A8] contract 0.9.9（低于 1.0.3）init → exit 2" 2 "$R_RC"
   assert_contains "observe[A8] 低版本提示 min 版本 1.0.3" "$R_OUT" "1.0.3"
   T=$(new_case); SK=$(stage_skill "$T")
-  run_cli_env "$T" PONYGO_SKILL_DIR="$SK" CLI observe init --kind cli --yes
+  run_cli_env "$T" PONYGO_SKILL_DIR="$SK" observe init --kind cli --yes
   assert_eq "observe[A8] PONYGO_SKILL_DIR 注入 init exit 0" 0 "$R_RC"
   T=$(new_case)
   run_cli "$T" observe init --kind cli --skill-dir "$T/根本没有这个 skill" --yes
@@ -1632,7 +1633,7 @@ s34_observe_init() {
   # ⑧ audit 零写（init 才是唯一写命令）
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; add_mount_carrier "$T"
   SNAP0=$(snap "$T")
-  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 CLI observe audit --skill-dir "$SK"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 observe audit --skill-dir "$SK"
   assert_same_tree "observe audit 零写（文件树快照不变）" "$T" "$SNAP0"
 }
 
@@ -1651,38 +1652,38 @@ s35_observe_audit() {
 
   # ② ob0 判据 ③：check-declaration rc 白名单 {0,2,3}
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3
-  run_cli_env "$T" STUB_RC_CHECK_DECL=2 CLI observe audit --skill-dir "$SK"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=2 observe audit --skill-dir "$SK"
   assert_eq "observe audit（skill rc=2）→ ob1 未达 exit 1" 1 "$R_RC"
-  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=1 CLI observe audit --skill-dir "$SK"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=1 observe audit --skill-dir "$SK"
   assert_eq "observe audit（skill rc=0、audit-diff rc=1）→ ob2 未达 exit 1" 1 "$R_RC"
   assert_contains "observe audit ob2 未达报 enforcement 缺口" "$R_OUT" "enforcement"
-  run_cli_env "$T" STUB_RC_CHECK_DECL=3 CLI observe audit --skill-dir "$SK"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=3 observe audit --skill-dir "$SK"
   assert_eq "observe audit（skill rc=3 证据不足）→ exit 3" 3 "$R_RC"
-  run_cli_env "$T" STUB_RC_CHECK_DECL=4 CLI observe audit --skill-dir "$SK"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=4 observe audit --skill-dir "$SK"
   assert_eq "observe audit（skill rc=4 声明层不可判定）→ exit 2" 2 "$R_RC"
   assert_contains "observe[A4] rc=4 给出两条排查路径（声明层不可判定）" "$R_OUT" "声明层不可判定"
-  run_cli_env "$T" STUB_RC_CHECK_DECL=127 CLI observe audit --skill-dir "$SK"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=127 observe audit --skill-dir "$SK"
   assert_eq "observe audit（skill rc=127 非白名单）→ exit 2（C1 反例，绝不当达标）" 2 "$R_RC"
 
   # ③ A3：audit-diff 的 rc 映射（0 达标候选 / 1 未达 / 2 违例 / 3|4 判定中止 rc=2）
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; add_mount_carrier "$T"
-  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 CLI observe audit --skill-dir "$SK"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 observe audit --skill-dir "$SK"
   assert_eq "observe[A3] audit-diff rc=0 + 挂载载体存在 → 全达 exit 0" 0 "$R_RC"
   assert_contains "observe ob3 advisory 含 gen_ai 成本归因" "$R_OUT" "gen_ai"
   assert_contains "observe ob3 advisory 含 SLI 告警" "$R_OUT" "SLI"
   assert_contains "observe ob3 段存在（不参与退出码）" "$R_OUT" "ob3"
-  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=2 CLI observe audit --skill-dir "$SK"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=2 observe audit --skill-dir "$SK"
   assert_eq "observe[A3] audit-diff rc=2（违规）→ ob2 未达 exit 1" 1 "$R_RC"
   assert_contains "observe[A3] audit-diff rc=2 报 enforcement_violation" "$R_OUT" "enforcement_violation"
-  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=3 CLI observe audit --skill-dir "$SK"
-  assert_eq "observe[A3] audit-diff rc=3（无法判定）→ 判定中止 exit 2" 2 "$R_RC"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=3 observe audit --skill-dir "$SK"
+  assert_eq "observe[A3] audit-diff rc=3（证据不可得）→ 判定中止 exit 3" 3 "$R_RC"
   assert_contains "observe[A3] audit-diff rc=3 报 tool_error" "$R_OUT" "tool_error"
-  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=4 CLI observe audit --skill-dir "$SK"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=4 observe audit --skill-dir "$SK"
   assert_eq "observe[A3] audit-diff rc=4（工具错误）→ 判定中止 exit 2" 2 "$R_RC"
 
   # ④ ob2 挂载缺失（audit-diff rc=0 但无载体）→ ob2 未达 exit 1，gaps 非空
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3
-  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 CLI observe audit --skill-dir "$SK"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 observe audit --skill-dir "$SK"
   assert_eq "observe ob2 挂载缺失 → exit 1" 1 "$R_RC"
   run_cli_stdout "$T" observe audit --skill-dir "$SK" --json
   assert_contains "observe ob2 挂载缺失报 mount_missing" "$STD_OUT" "mount_missing"
@@ -1691,9 +1692,9 @@ s35_observe_audit() {
 
   # ⑤ --level 目标级（ob3 显式拒绝；未达目标 exit 1）
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3
-  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=1 CLI observe audit --level ob2 --skill-dir "$SK"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=1 observe audit --level ob2 --skill-dir "$SK"
   assert_eq "observe audit --level ob2（当前 ob1）→ exit 1" 1 "$R_RC"
-  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=1 CLI observe audit --level ob1 --skill-dir "$SK"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=1 observe audit --level ob1 --skill-dir "$SK"
   assert_eq "observe audit --level ob1（当前 ob1）→ exit 0" 0 "$R_RC"
   run_cli "$T" observe audit --level ob3 --skill-dir "$SK"
   assert_eq "observe audit --level ob3 → die 1（目标画像不参与判定）" 1 "$R_RC"
@@ -1710,10 +1711,10 @@ s35_observe_audit() {
   # ⑦ audit / upgrade --check 只读：零写（快照）
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; add_mount_carrier "$T"
   SNAP0=$(snap "$T")
-  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 CLI observe audit --skill-dir "$SK"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 observe audit --skill-dir "$SK"
   assert_eq "observe audit（全达）exit 0" 0 "$R_RC"
   assert_same_tree "observe audit 只读：零写（文件树快照不变）" "$T" "$SNAP0"
-  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 CLI observe upgrade --check --skill-dir "$SK"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 observe upgrade --check --skill-dir "$SK"
   assert_same_tree "observe upgrade --check 只读：零写" "$T" "$SNAP0"
 }
 
@@ -1733,7 +1734,7 @@ s36_observe_json() {
 
   # ② audit skill rc=0 全达：current=ob2 / target=ob2 / judges 全 pass / gaps []
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; add_mount_carrier "$T"
-  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 CLI \
+  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 \
     observe audit --level ob2 --skill-dir "$SK" --json
   EXP='{"schema":"ponygo.observe/1","command":"audit","declared_kind":"cli","current":"ob2","target":"ob2","skill":{"present":true,"contract_version":"1.0.3","compatible":true},"judges":[{"id":"declaration_present","status":"pass"},{"id":"no_placeholder","status":"pass"},{"id":"declaration_consistent","status":"pass"},{"id":"enforcement_mounted","status":"pass"}],"gaps":[]}'
   assert_eq "observe[A6] audit rc=0 全达 --json 逐字" "$EXP" "$STD_OUT"
@@ -1741,21 +1742,21 @@ s36_observe_json() {
 
   # ③ audit skill rc=2：current=ob0 / declaration_consistent=fail / gaps 含 below_target
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3
-  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=2 CLI observe audit --skill-dir "$SK" --json
+  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=2 observe audit --skill-dir "$SK" --json
   EXP='{"schema":"ponygo.observe/1","command":"audit","declared_kind":"cli","current":"ob0","target":"ob2","skill":{"present":true,"contract_version":"1.0.3","compatible":true},"judges":[{"id":"declaration_present","status":"pass"},{"id":"no_placeholder","status":"pass"},{"id":"declaration_consistent","status":"fail"},{"id":"enforcement_mounted","status":"skip"}],"gaps":["declaration_inconsistent","below_target"]}'
   assert_eq "observe[A6] audit skill rc=2 --json 逐字" "$EXP" "$STD_OUT"
   assert_eq "observe[A6] audit skill rc=2 exit 1" 1 "$STD_RC"
 
   # ④ audit skill rc=3：证据不足 → current=ob0 / declaration_consistent=unknown
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3
-  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=3 CLI observe audit --skill-dir "$SK" --json
+  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=3 observe audit --skill-dir "$SK" --json
   EXP='{"schema":"ponygo.observe/1","command":"audit","declared_kind":"cli","current":"ob0","target":"ob2","skill":{"present":true,"contract_version":"1.0.3","compatible":true},"judges":[{"id":"declaration_present","status":"pass"},{"id":"no_placeholder","status":"pass"},{"id":"declaration_consistent","status":"unknown"},{"id":"enforcement_mounted","status":"skip"}],"gaps":["evidence_insufficient","below_target"]}'
   assert_eq "observe[A6] audit skill rc=3 --json 逐字" "$EXP" "$STD_OUT"
   assert_eq "observe[A6] audit skill rc=3 exit 3" 3 "$STD_RC"
 
   # ⑤ audit skill rc=4：声明层不可判定 → current=unknown / gap=tool_error（A4）
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3
-  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=4 CLI observe audit --skill-dir "$SK" --json
+  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=4 observe audit --skill-dir "$SK" --json
   EXP='{"schema":"ponygo.observe/1","command":"audit","declared_kind":"cli","current":"unknown","target":"ob2","skill":{"present":true,"contract_version":"1.0.3","compatible":true},"judges":[{"id":"declaration_present","status":"pass"},{"id":"no_placeholder","status":"pass"},{"id":"declaration_consistent","status":"unknown"},{"id":"enforcement_mounted","status":"skip"}],"gaps":["tool_error"]}'
   assert_eq "observe[A6] audit skill rc=4（tool_error 路）--json 逐字" "$EXP" "$STD_OUT"
   assert_eq "observe[A6] audit skill rc=4 exit 2" 2 "$STD_RC"
@@ -1763,15 +1764,15 @@ s36_observe_json() {
 
   # ⑥ audit-diff 判定中止（rc=3）：gap=tool_error，current=unknown，exit 2（A3）
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; add_mount_carrier "$T"
-  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=3 CLI \
+  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=3 \
     observe audit --skill-dir "$SK" --json
-  assert_eq "observe[A3] audit-diff rc=3 exit 2" 2 "$STD_RC"
+  assert_eq "observe[A3] audit-diff rc=3 exit 3" 3 "$STD_RC"
   assert_contains "observe[A3] audit-diff rc=3 gaps 含 tool_error" "$STD_OUT" '"gaps":["tool_error"]'
   assert_contains "observe[A3] audit-diff rc=3 current=unknown" "$STD_OUT" '"current":"unknown"'
 
   # ⑦ ob2 挂载缺失的逐字 JSON（current=ob1 / enforcement_mounted=fail / 两缺口）
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3
-  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 CLI \
+  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 \
     observe audit --skill-dir "$SK" --json
   EXP='{"schema":"ponygo.observe/1","command":"audit","declared_kind":"cli","current":"ob1","target":"ob2","skill":{"present":true,"contract_version":"1.0.3","compatible":true},"judges":[{"id":"declaration_present","status":"pass"},{"id":"no_placeholder","status":"pass"},{"id":"declaration_consistent","status":"pass"},{"id":"enforcement_mounted","status":"fail"}],"gaps":["mount_missing","below_target"]}'
   assert_eq "observe[A6] 挂载缺失 --json 逐字" "$EXP" "$STD_OUT"
@@ -1779,21 +1780,23 @@ s36_observe_json() {
 
   # ⑧ A2：--level 前置与后置等价（不得静默丢弃）
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3
-  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=1 CLI \
+  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=1 \
     observe audit --level ob1 --skill-dir "$SK" --json
   JSON1="$STD_OUT"
   assert_eq "observe[A2] observe audit --level ob1（后置）exit 0" 0 "$STD_RC"
-  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=1 CLI \
+  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=1 \
     --level ob1 observe audit --skill-dir "$SK" --json
   assert_eq "observe[A2] --level ob1 observe audit（前置）exit 与后置相同" 0 "$STD_RC"
   assert_eq "observe[A2] 前置/后置 --json stdout 逐字相同" "$JSON1" "$STD_OUT"
+  assert_contains "observe[A2] 前置结果非空（防「空==空」假绿）" "$JSON1" \
+    '"schema":"ponygo.observe/1"'
   assert_contains "observe[A2] --level 前置生效（target=ob1）" "$STD_OUT" '"target":"ob1"'
   run_cli "$T" --level S observe audit --skill-dir "$SK"
   assert_eq "observe[A2] --level S + observe → die 1（值域隔离）" 1 "$R_RC"
 
   # ⑨ A3：--base 透传不破坏判定
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; add_mount_carrier "$T"
-  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 CLI \
+  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 \
     observe audit --base HEAD --skill-dir "$SK"
   assert_eq "observe[A3] audit --base HEAD 透传后仍 exit 0" 0 "$R_RC"
 
@@ -1814,7 +1817,7 @@ s36_observe_json() {
   # ⑪ --mapping fail-closed（缺键 / mapping_version≠1 / 文件不存在）+ 正向控制
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; MAP="$T/map-broken.yaml"
   printf 'mapping_version: 1\n' > "$MAP"
-  run_cli_env "$T" STUB_RC_CHECK_DECL=0 CLI observe audit --skill-dir "$SK" --mapping "$MAP"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=0 observe audit --skill-dir "$SK" --mapping "$MAP"
   assert_eq "observe --mapping 缺必需键 → exit 2（fail-closed）" 2 "$R_RC"
   assert_contains "observe --mapping 缺键时报出缺失键名" "$R_OUT" "contract_version_min"
   MAP="$T/map-v2.yaml"
@@ -1826,19 +1829,38 @@ s36_observe_json() {
   run_cli "$T" observe audit --skill-dir "$SK" --mapping "$T/没有这个映射文件.yaml"
   assert_eq "observe --mapping 文件不存在 → exit 2" 2 "$R_RC"
   MAP="$T/map-full.yaml"; write_mapping_full "$MAP"
-  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 CLI \
+  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 \
     observe audit --skill-dir "$SK" --mapping "$MAP" --level ob1
   assert_eq "observe --mapping 完整块可用（正向控制，非一律拒绝）→ exit 0" 0 "$R_RC"
   run_cli_env "$T" PONYGO_OBSERVE_MAPPING="$MAP" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 \
-    CLI observe audit --skill-dir "$SK" --level ob1
+    observe audit --skill-dir "$SK" --level ob1
   assert_eq "observe PONYGO_OBSERVE_MAPPING env 同效 → exit 0" 0 "$R_RC"
 
   # ⑫ --json 也零写
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; add_mount_carrier "$T"
   SNAP0=$(snap "$T")
-  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 CLI \
+  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 \
     observe audit --skill-dir "$SK" --json
   assert_same_tree "observe audit --json 零写（文件树快照不变）" "$T" "$SNAP0"
+
+  # ⑬ A8 默认分支正向（B12）：不带 --skill-dir，skill 在 $HOME/<skill_dir_rel> 下 ⇒ 走判定路径
+  T=$(new_case); make_audit_case "$T" 3
+  mkdir -p "$T/home/.agents/skills/observability-onboarding"
+  cp -R "$OBS_STUB/." "$T/home/.agents/skills/observability-onboarding/"
+  run_cli_stdout_env "$T" HOME="$T/home" STUB_RC_CHECK_DECL=2 observe audit --json
+  assert_eq "observe[A8] 假 HOME 默认 skill 路径：skill rc=2 → exit 1（ob0 达/ob1 未达）" 1 "$STD_RC"
+  assert_contains "observe[A8] 默认分支 skill.present=true（未走缺 skill 分支）" "$STD_OUT" \
+    '"present":true'
+  assert_contains "observe[A8] 默认分支 contract_version 取自 references/contract.json" "$STD_OUT" \
+    '"contract_version":"1.0.3"'
+  assert_contains "observe[A8] 默认分支 current=ob0（真走了判定）" "$STD_OUT" '"current":"ob0"'
+  assert_not_contains "observe[A8] 默认分支 stdout 不得含「安装」类缺 skill 提示" "$STD_OUT" "安装"
+  #    负向：空 HOME（无 skill）⇒ rc=2 且给安装提示（不猜、不降级）
+  T=$(new_case); make_audit_case "$T" 3
+  mkdir -p "$T/emptyhome"
+  run_cli_env "$T" HOME="$T/emptyhome" observe audit
+  assert_eq "observe[A8] 空 HOME 无 skill → exit 2（缺 skill，非「未达标」）" 2 "$R_RC"
+  assert_contains "observe[A8] 空 HOME 给安装提示" "$R_OUT" "安装"
 }
 
 s28_l2_reachability
