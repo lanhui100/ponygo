@@ -2098,6 +2098,26 @@ s42_observe_monorepo_subcomponents() {
   assert_not_contains "子目录已纳管后根目录不再报警" "$R_OUT" "front_end"
   assert_not_contains "子目录已纳管后不再输出 WARN" "$R_OUT" "[WARN]"
 }
+
+s43_observe_pipeline_awareness() {
+  echo "--- 场景43：CI/CD 流水线工程资产感知（pipeline 探测与指引）"
+  local T SK
+
+  T=$(new_case); SK=$(stage_skill "$T")
+  # 根目录初始化为 k8s-service
+  run_cli "$T" observe init --kind k8s-service --service my-svc --skill-dir "$SK" --yes
+  assert_eq "根目录 init k8s-service exit 0" 0 "$R_RC"
+
+  # 创建 CI/CD 流水线资产文件
+  mkdir -p "$T/.github/workflows"
+  touch "$T/.github/workflows/ci.yml" "$T/.github/workflows/deploy.yml"
+
+  # 在根目录运行 observe status，应探测到 CI/CD 流水线资产
+  run_cli "$T" observe status --skill-dir "$SK"
+  assert_contains "status 提示 CI/CD 流水线工程资产" "$R_OUT" "CI/CD 流水线工程资产"
+  assert_contains "status 列出 workflows 数量或路径" "$R_OUT" ".github/workflows"
+  assert_contains "status 给出 pipeline 治理命令建议" "$R_OUT" "kind pipeline"
+}
 s28_l2_reachability
 s29_doc_level_parity
 s30_release_chain
@@ -2113,6 +2133,7 @@ s39_observe_feedback_upgrades
 s40_observe_audit_clarity
 s41_observe_smart_inheritance_and_examples
 s42_observe_monorepo_subcomponents
+s43_observe_pipeline_awareness
 
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
