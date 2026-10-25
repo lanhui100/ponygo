@@ -1953,6 +1953,29 @@ s37_observe_regress() {
   assert_eq "observe[strict] status --strict 报错拒收" 1 "$R_RC"
   assert_contains "observe[strict] status --strict 文案提示仅适用于 audit" "$R_OUT" "仅适用于 'ponygo observe audit'"
 }
+
+s38_observe_frontend_and_pipeline() {
+  echo "--- 场景38：frontend 与 pipeline 新形态（init/status/audit 闭环）"
+  local T SK TXT
+
+  # 1. observe init --kind frontend 成功落地
+  T=$(new_case); SK=$(stage_skill "$T")
+  run_cli "$T" observe init --kind frontend --skill-dir "$SK" --yes
+  assert_eq "observe init --kind frontend exit 0" 0 "$R_RC"
+  TXT=$(cat "$T/docs/observability.yaml" 2>/dev/null || true)
+  assert_contains "frontend 声明含 kind: frontend" "$TXT" "kind: frontend"
+
+  # 2. observe init --kind pipeline 成功落地
+  T=$(new_case); SK=$(stage_skill "$T")
+  run_cli "$T" observe init --kind pipeline --skill-dir "$SK" --yes
+  assert_eq "observe init --kind pipeline exit 0" 0 "$R_RC"
+  TXT=$(cat "$T/docs/observability.yaml" 2>/dev/null || true)
+  assert_contains "pipeline 声明含 kind: pipeline" "$TXT" "kind: pipeline"
+
+  # 3. status 与 audit --json 正确解析 declared_kind
+  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=2 observe audit --skill-dir "$SK" --json
+  assert_contains "audit --json declared_kind 为 pipeline" "$STD_OUT" '"declared_kind":"pipeline"'
+}
 s28_l2_reachability
 s29_doc_level_parity
 s30_release_chain
@@ -1963,6 +1986,7 @@ s34_observe_init
 s35_observe_audit
 s36_observe_json
 s37_observe_regress
+s38_observe_frontend_and_pipeline
 
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
