@@ -25,8 +25,8 @@ ponygo observe status                           只读静态报告（不判定�
 ponygo observe init   --kind <k> [--service <s>] [--dims a,b] [--anchor-<dim> <path>]
                       [--reason-<dim> <text>] [--force] [--dry-run] [--yes]
                                                 落地四维归属声明（唯一写命令）
-ponygo observe audit  [--level ob0|ob1|ob2] [--json] [--base <rev>]
-                                                判定当前达标级（有缺口 exit 非零）
+ponygo observe audit  [--level ob0|ob1|ob2] [--base <rev>] [--json]
+                                                判定是否达到目标级（缺口仅作 backlog，不决定退出码）
 ponygo observe upgrade [--check]                与技能契约的版本兼容门（CI 用 --check）
 ```
 
@@ -46,9 +46,10 @@ ponygo observe upgrade [--check]                与技能契约的版本兼容�
 | ob1 | 声明与现实一致：skill `check-declaration.sh` 退出码 0 | skill 脚本；ponygo 只看退出码 |
 | ob2 | 声明有真实收口点 + 挂载载体里真有 `audit-diff` 调用 + 其退出码 0 | skill 脚本 + ponygo 的载体 grep |
 
-配套的退出码纪律：`0` 达标（`gaps` 空）；`1` 有缺口（含 `below_target`）；`2` 工具或输入错误；
-`3` 证据不可得。`audit-diff` 的 `rc=3` 原样升为 ponygo `rc=3`，`rc=4`/其它升为 `rc=2` + `tool_error`：
-"判不了"既不伪装成"未达标"，也不伪装成"达标"。
+配套的退出码纪律（K11）：**唯一判据是「当前级 ≥ 目标级」**——`0` 已达目标级（`gaps` 可非空，缺口是
+距下一级的 backlog）；`1` 未达目标级（含 `below_target`）或用法错；`2` 工具或输入错误；`3` 证据不可得。
+`audit-diff` 的 `rc=3` 原样升为 ponygo `rc=3`（gap 记 `evidence_insufficient`），`rc=4`/其它升为 `rc=2` +
+`tool_error`："判不了"既不伪装成"未达标"，也不伪装成"达标"。
 
 ### 3. 数据块策略：嵌入 ponygo，而不是 skill `references/`
 
