@@ -46,10 +46,13 @@ desktop  k8s-service  cli  batch  library  frontend  pipeline
 
 `kind` 不是标签，是适用性推论的起点：凡以 `kind` 作推论，理由必须写进对应 `reason`（"kind 决定"不算理由）。
 
-> **复合架构裁决原则（以最外层交付的进程边界为准）**：
+> **复合架构与 Monorepo 裁决原则（方案 A：进程边界独立契约分离）**：
 > - **全栈桌面端（如 Tauri = 前端 React + Rust Core）**：进程生命周期随用户本地窗口启停，无稳定网络常驻监听，**必须声明为 `kind: desktop`**（前端代码是其内部视图层，不单独声明为 frontend）。
+> - **Monorepo 前后端混合大单体（如 job_copilot = api_v2 + front_end）**：
+>   - **后端微服务**：在仓库根目录（或 `api/` 下）建立 `docs/observability.yaml`，声明为 `kind: k8s-service`，服务名如 `api-v2`；
+>   - **前端子工程**：在 `front_end/` 目录下**独立建立** `front_end/docs/observability.yaml`，声明为 `kind: frontend`，服务名如 `job-copilot-frontend`；
+>   - **排查与门禁**：根目录的 `ponygo observe status` 会自动嗅探未纳管的前端子目录；治理时进入 `front_end/` 独立运行 `ponygo observe init/audit`。
 > - **独立部署的 Web SPA / SSR（部署在 CDN/Nginx/Node 托管）**：独立发布给浏览器访问，**声明为 `kind: frontend`**。
-> - **前后端分离工程**：若在同一仓库中但独立构建部署，应拆分或分别治理；若作为单一服务交付，按对外暴露的主要进程形态判定。
 > - **CI/CD 自动化构建与工程脚本**：声明为 `kind: pipeline`。
 
 ### 3. `--service` 规则

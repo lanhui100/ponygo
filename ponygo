@@ -2202,6 +2202,22 @@ observe_status() {
   if [ "$ph" = "true" ]; then
     printf '缺口: placeholder_present —— 声明中占位符未替换；下一步：填实四维归属与落点\n'
   fi
+
+  # Monorepo 多组件感知（方案 A）：探测当前目录一级子目录中是否存在独立前端工程且未声明
+  local unmanaged_sub=""
+  local sub cand
+  for cand in front_end frontend web client ui app; do
+    if [ -d "$cand" ] && [ -f "$cand/package.json" ]; then
+      if [ ! -f "$cand/docs/observability.yaml" ] && [ ! -f "$cand/docs/observability.yml" ]; then
+        unmanaged_sub="${unmanaged_sub}  - ${cand}/（检测到 Web 前端工程；建议进入该子目录运行：ponygo observe init --kind frontend）\n"
+      fi
+    fi
+  done
+  if [ -n "$unmanaged_sub" ]; then
+    printf '发现未纳管子组件（Monorepo 独立工程）：\n'
+    printf '%b' "$unmanaged_sub"
+  fi
+
   exit 0
 }
 
