@@ -2080,10 +2080,15 @@ s42_observe_monorepo_subcomponents() {
   mkdir -p "$T/front_end"
   echo '{"name":"my-frontend"}' > "$T/front_end/package.json"
 
-  # 在根目录运行 observe status，应探测到未纳管的前端工程
+  # 在根目录运行 observe status，应探测到未纳管的前端工程并发出强警示与待办
   run_cli "$T" observe status --skill-dir "$SK"
-  assert_contains "status 提示发现未纳管子组件" "$R_OUT" "未纳管子组件"
-  assert_contains "status 指出未纳管前端目录 front_end" "$R_OUT" "front_end"
+  assert_contains "status 输出包含 WARN 警示" "$R_OUT" "[WARN]"
+  assert_contains "status 输出包含未纳管子组件待办格式" "$R_OUT" "未纳管子组件待办（Monorepo 架构治理）："
+  assert_contains "status 指出未纳管前端目录 - [ ] front_end/" "$R_OUT" "- [ ] front_end/"
+
+  # status --json 的 gaps 列表应包含 unmanaged_subcomponents
+  run_cli_stdout "$T" observe status --skill-dir "$SK" --json
+  assert_contains "status --json gaps 包含 unmanaged_subcomponents" "$STD_OUT" "unmanaged_subcomponents"
 
   # 在子目录落地声明后，根目录不再报警该子组件
   mkdir -p "$T/front_end/docs"
@@ -2091,6 +2096,7 @@ s42_observe_monorepo_subcomponents() {
   echo "kind: frontend" >> "$T/front_end/docs/observability.yaml"
   run_cli "$T" observe status --skill-dir "$SK"
   assert_not_contains "子目录已纳管后根目录不再报警" "$R_OUT" "front_end"
+  assert_not_contains "子目录已纳管后不再输出 WARN" "$R_OUT" "[WARN]"
 }
 s28_l2_reachability
 s29_doc_level_parity
