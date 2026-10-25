@@ -2125,10 +2125,23 @@ observe_status() {
     esac
   fi
 
-  # gaps：本命令只产 declaration_missing / placeholder_present 两种（顺序固定）
+  # Monorepo 多组件感知（方案 A）：探测当前目录一级子目录中是否存在独立前端工程且未声明
+  local unmanaged_sub="" unmanaged_found=0
+  local sub cand
+  for cand in front_end frontend web client ui app; do
+    if [ -d "$cand" ] && [ -f "$cand/package.json" ]; then
+      if [ ! -f "$cand/docs/observability.yaml" ] && [ ! -f "$cand/docs/observability.yml" ]; then
+        unmanaged_sub="${unmanaged_sub}  - [ ] ${cand}/：Web 前端未接入，请进入该目录执行 ponygo observe init --kind frontend\n"
+        unmanaged_found=1
+      fi
+    fi
+  done
+
+  # gaps：本命令产 declaration_missing / placeholder_present / unmanaged_subcomponents
   gaps=""; sep=""
   if [ "$present" != "true" ]; then gaps="\"declaration_missing\""; sep=","; fi
-  if [ "$ph" = "true" ]; then gaps="${gaps}${sep}\"placeholder_present\""; fi
+  if [ "$ph" = "true" ]; then gaps="${gaps}${sep}\"placeholder_present\""; sep=","; fi
+  if [ "$unmanaged_found" = "1" ]; then gaps="${gaps}${sep}\"unmanaged_subcomponents\""; fi
 
   if [ "${OBSERVE_JSON:-0}" = "1" ]; then
     sp=false
@@ -2149,6 +2162,9 @@ observe_status() {
   fi
 
   echo "===== ponygo observe status ====="
+  if [ "$unmanaged_found" = "1" ]; then
+    printf '[WARN] 发现未纳管的 Monorepo 子组件（存在独立前端工程但未声明）\n'
+  fi
   if [ "$present" = "true" ]; then printf '声明: %s\n' "$decl"; else printf '声明: 缺失\n'; fi
   if [ "$ph" = "true" ]; then printf '占位符: 有\n'; else printf '占位符: 无\n'; fi
   if [ "$present" = "true" ]; then
@@ -2203,18 +2219,8 @@ observe_status() {
     printf '缺口: placeholder_present —— 声明中占位符未替换；下一步：填实四维归属与落点\n'
   fi
 
-  # Monorepo 多组件感知（方案 A）：探测当前目录一级子目录中是否存在独立前端工程且未声明
-  local unmanaged_sub=""
-  local sub cand
-  for cand in front_end frontend web client ui app; do
-    if [ -d "$cand" ] && [ -f "$cand/package.json" ]; then
-      if [ ! -f "$cand/docs/observability.yaml" ] && [ ! -f "$cand/docs/observability.yml" ]; then
-        unmanaged_sub="${unmanaged_sub}  - ${cand}/（检测到 Web 前端工程；建议进入该子目录运行：ponygo observe init --kind frontend）\n"
-      fi
-    fi
-  done
   if [ -n "$unmanaged_sub" ]; then
-    printf '发现未纳管子组件（Monorepo 独立工程）：\n'
+    printf '未纳管子组件待办（Monorepo 架构治理）：\n'
     printf '%b' "$unmanaged_sub"
   fi
 
