@@ -2785,7 +2785,13 @@ EOF
         printf '后续升级建议（下一级待办 / Backlog）：\n'
       fi
     else
-      printf '结论: FAIL（当前级 %s 未达目标级 %s，exit=%s）\n' "$cur" "$target" "$code"
+      # 结论行必须说实话：--strict 下即使已达标也会 exit 非零（缺口强制），
+      # 旧文案会打成「未达目标级」——那是假陈述，会误导排障方向。
+      if [ "$cr" -ge 0 ] && [ "$cr" -ge "$trk" ]; then
+        printf '结论: FAIL（当前级 %s 已达目标级 %s，但 --strict 下存在缺口故 exit=%s）\n' "$cur" "$target" "$code"
+      else
+        printf '结论: FAIL（当前级 %s 未达目标级 %s，exit=%s）\n' "$cur" "$target" "$code"
+      fi
     fi
     if [ -n "$sub_rcs" ]; then
       printf '子组件声明巡检（逐份判定，rc=0 一致 / 2 不一致 / 3 证据不可得）：%s\n' "$sub_rcs"
