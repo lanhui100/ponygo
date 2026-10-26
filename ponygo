@@ -2894,8 +2894,12 @@ observe 选项（仅 observe 接受，其余命令拒绝）：
     --anchor-tracing crates/core/src/otel.rs --anchor-issues crates/core/src/sentry.rs
 
   # 3. 门禁达标自检与 CI 阻断
-  ponygo observe audit --level ob1
-  ponygo observe audit --level ob2 --strict --json
+  ponygo observe audit --level ob1                  # 体检：缺口=backlog，已达目标级即 exit 0
+  ponygo observe audit --level ob1 --strict --json  # CI：任一缺口（含子组件/附加声明不一致）即 exit 1
+
+阻断语义（唯一的两个维度，按需组合，无第三个 scope 维度）：
+  默认      → 缺口只进 backlog，退出码只由「当前级 ≥ 目标级」决定
+  --strict  → 任一缺口即非零；这是「全仓一票否决」的开关（子组件/附加声明的不一致也走这条）
 
 退出码白话：0=已达目标级/兼容；1=未达目标级或用法错；2=工具或输入错误（不是"未达标"）；3=证据不足。
 

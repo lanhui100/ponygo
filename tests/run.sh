@@ -2132,8 +2132,54 @@ s38_observe_frontend_and_pipeline
 s39_observe_feedback_upgrades
 s40_observe_audit_clarity
 s41_observe_smart_inheritance_and_examples
+s44_observe_subcomponent_blocking() {
+  echo "--- 场景44：子组件不一致的阻断语义（默认 backlog / --strict 阻断 / 结论行说实话）"
+  local T SK
+  T=$(new_case)
+  # 自造 skill：根声明 rc=0，子组件声明 rc=2 —— 用来验证「同一判定里两种 rc 并存」时的退出码语义。
+  SK="$T/skill"; mkdir -p "$SK/references" "$SK/scripts"
+  printf '{"contract_version":"1.2.0"}\n' > "$SK/references/contract.json"
+  cat > "$SK/scripts/check-declaration.sh" <<'SH'
+#!/bin/bash
+for a in "$@"; do case "$a" in */front_end) exit 2 ;; esac; done
+exit 0
+SH
+  printf '#!/bin/bash\nexit 0\n' > "$SK/scripts/audit-diff.sh"
+  chmod +x "$SK/scripts/"*.sh
+  # 主声明（无占位符 ⇒ ob0 成立）+ 子组件声明（触发 rc=2）
+  mkdir -p "$T/docs" "$T/front_end/docs"
+  printf 'service: root-svc\nkind: k8s-service\ndimensions:\n  metrics: {applicable: false, reason: "x"}\n  tracing: {applicable: false, reason: "x"}\n  logs: {applicable: false, reason: "x"}\n  issues: {applicable: false, reason: "x"}\nreviewed_at: "2026-10-26"\n' > "$T/docs/observability.yaml"
+  printf 'service: fe\nkind: frontend\nreviewed_at: "2026-10-26"\n' > "$T/front_end/docs/observability.yaml"
+  # 挂载载体（含**非注释**的真调用行）：让 ob2 成立，从而 ids 只剩「子组件」这一类缺口，
+  # ④ 的「不误阻断」才是在验 --strict 本身而不是被 mount_missing 顶掉。
+  mkdir -p "$T/.github/workflows"
+  printf 'jobs:\n  gate:\n    steps:\n      - run: bash scripts/audit-diff.sh --repo . --base origin/main\n' \
+    > "$T/.github/workflows/ci.yml"
+
+  # ① 默认（体检模式）：子组件缺口只进 backlog，不改变退出码
+  run_cli "$T" observe audit --level ob0 --skill-dir "$SK"
+  assert_eq "子组件不一致：默认不阻断（exit 0）" 0 "$R_RC"
+  assert_contains "子组件不一致：报告可见（子组件声明巡检）" "$R_OUT" "子组件声明巡检"
+  assert_contains "子组件不一致：缺口入 backlog" "$R_OUT" "subcomponent_inconsistent"
+
+  # ② --strict：任一缺口即阻断（这是「全仓一票否决」的既有开关，无需新增 --scope）
+  run_cli "$T" observe audit --level ob0 --strict --skill-dir "$SK"
+  assert_eq "子组件不一致 + --strict：阻断（exit 1）" 1 "$R_RC"
+
+  # ③ 结论行必须说实话：已达标时不得打成「未达目标级」（旧缺陷）
+  assert_contains "strict 阻断时结论行承认已达目标级" "$R_OUT" "已达目标级"
+  assert_contains "strict 阻断时结论行点明是 --strict 导致" "$R_OUT" "--strict"
+
+  # ④ 反例保护：子组件一致时 --strict 不得误阻断
+  printf '#!/bin/bash\nexit 0\n' > "$SK/scripts/check-declaration.sh"; chmod +x "$SK/scripts/check-declaration.sh"
+  run_cli "$T" observe audit --level ob0 --strict --skill-dir "$SK"
+  assert_eq "子组件一致 + --strict：不误阻断（exit 0）" 0 "$R_RC"
+  assert_not_contains "子组件一致：无 subcomponent 缺口" "$R_OUT" "subcomponent_inconsistent"
+}
+
 s42_observe_monorepo_subcomponents
 s43_observe_pipeline_awareness
+s44_observe_subcomponent_blocking
 
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
