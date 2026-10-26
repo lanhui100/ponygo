@@ -58,6 +58,7 @@ target_level_5: ob2
 kind_enum: desktop k8s-service cli batch library frontend pipeline
 contract_version_min: 1.0.3
 declaration_paths: docs/observability.yaml docs/observability.yml
+declaration_extra_dir: docs/observability.d
 placeholder_token: __REPLACE_ME__
 mount_carriers: .git/hooks/pre-commit .githooks/pre-commit .githooks/pre-push .pre-commit-config.yaml lefthook.yml .github/workflows .gitlab-ci.yml
 skill_dir_rel: .agents/skills/observability-onboarding
@@ -2034,6 +2035,33 @@ observe_decl_path() {
   printf '%s\n' "$found"
 }
 
+# 软读映射键：键不存在时返回空串（**不** fail-closed）。只给**可选**键用（如 declaration_extra_dir），
+# 避免「新增可选键」把旧的 --mapping 覆盖文件判成坏块。
+observe_map_try() {
+  local key f
+  key=${1:-}
+  case "$key" in ''|*[!a-z0-9_]*) return 0 ;; esac
+  f=$(observe_mapping_file)
+  sed -n "/^${key}:[[:space:]]*/{s/^${key}:[[:space:]]*//;s/\r\$//;p;q;}" "$f" 2>/dev/null
+}
+
+# 附加声明目录（同目录多声明，缺陷 E）：默认 docs/observability.d，可由映射键覆盖。
+observe_decl_extra_dir() {
+  local d
+  d="$(observe_map_try declaration_extra_dir)"
+  [ -n "$d" ] || d="docs/observability.d"
+  printf '%s\n' "$d"
+}
+
+# 附加声明清单（排序；不含主声明）。同目录多形态靠它表达：kind 是单值，
+# 一份 docs/observability.yaml 无法同时是 k8s-service 和 pipeline。
+observe_decl_extra_list() {
+  local d
+  d="$(observe_decl_extra_dir)"
+  [ -d "$d" ] || return 0
+  find "$d" -maxdepth 1 -type f \( -name '*.yaml' -o -name '*.yml' \) 2>/dev/null | LC_ALL=C sort
+}
+
 # YAML 单引号标量（F1）：值内单引号写成两个；只用于已过 observe_scalar_check 的值
 observe_yaml_sq() {
   local v=${1:-}
@@ -2212,6 +2240,13 @@ observe_status() {
     printf 'skill: %s（contract_version=%s，兼容=no）\n' "$skill_dir" "${ver:-unknown}"
   fi
   printf '目标级: %s\n' "$target"
+  local _extras _ext_n=0
+  _extras="$(observe_decl_extra_list)"
+  if [ -n "$_extras" ]; then
+    _ext_n=$(printf '%s\n' "$_extras" | grep -c . )
+    printf '附加声明: %s 份（%s，同目录多形态；本命令只判主声明，audit 会逐份巡检）\n' \
+      "$_ext_n" "$(observe_decl_extra_dir)"
+  fi
   printf "判定项：需 'ponygo observe audit'（本命令不执行 skill 脚本）\n"
   if [ "$present" != "true" ]; then
     local hint_kind=""
@@ -2685,6 +2720,27 @@ observe_audit() {
     if [ "$sub_unknown" = "1" ] && [ "$sub_bad" = "0" ]; then ids="$ids subcomponent_evidence_insufficient"; fi
   fi
 
+  # 同目录多声明（缺陷 E 剩余部分）：`docs/observability.d/*.yaml` 里每份都是独立形态声明
+  # （典型：根声明 k8s-service + docs/observability.d/pipeline.yaml）。逐份跑 check-declaration，
+  # 结果并入 backlog。主声明（docs/observability.yaml）仍独占 ob0/ob1/ob2 的判定权——
+  # 附加声明改变的是「覆盖范围」，不是「主形态的达标线」。
+  local extra_rcs="" extra_f extra_bad=0 extra_rc=0
+  while IFS= read -r extra_f; do
+    [ -n "$extra_f" ] || continue
+    observe_run_skill "$(observe_map_get external_timeout_seconds)" \
+      "$skill/scripts/check-declaration.sh" --declaration "$extra_f" >/dev/null 2>&1
+    extra_rc=$?
+    extra_rcs="${extra_rcs}${extra_rcs:+ }${extra_f##*/}:${extra_rc}"
+  done <<EOF
+$(observe_decl_extra_list)
+EOF
+  if [ -n "$extra_rcs" ]; then
+    for sub_line in $extra_rcs; do
+      case "${sub_line##*:}" in 0) : ;; *) extra_bad=1 ;; esac
+    done
+    if [ "$extra_bad" = "1" ]; then ids="$ids extra_declaration_inconsistent"; fi
+  fi
+
   if [ "$abort" = "1" ]; then
     s0=SKIP; s1=SKIP; s2=SKIP
   else
@@ -2734,6 +2790,9 @@ observe_audit() {
     if [ -n "$sub_rcs" ]; then
       printf '子组件声明巡检（逐份判定，rc=0 一致 / 2 不一致 / 3 证据不可得）：%s\n' "$sub_rcs"
     fi
+    if [ -n "$extra_rcs" ]; then
+      printf '附加声明巡检（docs/observability.d/，逐份判定）：%s\n' "$extra_rcs"
+    fi
     for g in $ids; do
       case "$g" in
         declaration_missing) printf '  - [ ] declaration_missing: 未找到可观测性声明（查找路径：%s）；下一步：ponygo observe init --kind <k>\n' "$(observe_map_get declaration_paths)" ;;
@@ -2748,6 +2807,7 @@ observe_audit() {
         below_target) printf '  - [ ] below_target: 当前级低于 --level 断言的目标级\n' ;;
         subcomponent_inconsistent) printf '  - [ ] subcomponent_inconsistent: 子组件声明与实测不一致（%s）；下一步：进入对应子目录按 stderr 修正声明\n' "${sub_rcs:-?}" ;;
         subcomponent_evidence_insufficient) printf '  - [ ] subcomponent_evidence_insufficient: 子组件证据不可得（%s）；补证据后重跑\n' "${sub_rcs:-?}" ;;
+        extra_declaration_inconsistent) printf '  - [ ] extra_declaration_inconsistent: 同目录附加声明与实测不一致（%s）；下一步：按对应声明的 stderr 修正\n' "${extra_rcs:-?}" ;;
       esac
     done
     if [ -z "$ids" ]; then printf '缺口: 无\n'; fi
@@ -2835,7 +2895,7 @@ observe 选项（仅 observe 接受，其余命令拒绝）：
 
 已知局限：ob1 只判「声明与巡检一致」；四维全 false 的声明同样 PASS（识别谎言是非机械项，见 revisions/proposed/2026-10-25-observe-dimension.md K4）。
 已知局限：ob2 的挂载证据是形状判据（grep 载体，**已排除纯注释行**；仍不解析 AST，也不验证钩子是否真被执行），真执行证据是 audit-diff 本身（K7）。
-已知局限：同目录只能有一份声明（kind 单值），因此「同仓既要 k8s-service 又要 pipeline」须按项目根拆声明；audit 会逐份巡检已探测到的子组件声明（front_end/ web/ client/ …）并列出各自 rc，子组件不一致默认只进 backlog（--strict 才影响退出码）。
+已知局限：kind 是单值。同目录多形态靠附加声明 docs/observability.d/*.yaml（主声明 docs/observability.yaml 定 ob 级；附加声明只扩覆盖，逐份巡检后不一致进 backlog，--strict 才影响退出码）；多组件仓仍按项目根拆目录，audit 会逐份巡检子组件声明（front_end/ web/ client/ …）并列出各自 rc。
 EOF
 }
 
