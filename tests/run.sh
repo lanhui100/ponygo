@@ -2261,6 +2261,17 @@ s45_observe_diff_timeout_budget() {
   assert_eq "observe[45] SIGINT 中断后 audit-diff 捕获临时文件无残留" 0 "$lcount"
   rm -f "${TMPDIR:-/tmp}"/ponygo-obs-diff.* 2>/dev/null
 
+  # ③f CT-10：校验器自身不得 fail-open —— 判据依赖 `tr`，若 `tr` 不可用/失败（PATH 污染、
+  # 裁剪镜像、被替换），旧实现会因「残渣为空」而放行非法值 ⇒ 又回到 timeout invalid interval
+  # ⇒ 假红复活。空输出必须只在 `tr` 成功时才算「纯数字」。
+  T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; add_mount_carrier "$T"
+  local FB="$T/fakebin"
+  mkdir -p "$FB"
+  printf '#!/bin/sh\nexit 3\n' > "$FB/tr"; chmod +x "$FB/tr"
+  run_cli_env "$T" PATH="$FB:$PATH" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 \
+    PONYGO_OBS_DIFF_TIMEOUT=abc observe audit --skill-dir "$SK"
+  assert_contains "observe[45] tr 不可用时仍判非法并告警（不得 fail-open）" "$R_OUT" "PONYGO_OBS_DIFF_TIMEOUT"
+
   # ④ CT-5：快路径零回归
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; add_mount_carrier "$T"
   run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 observe audit --skill-dir "$SK"
