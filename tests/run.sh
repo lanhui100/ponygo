@@ -2177,9 +2177,54 @@ SH
   assert_not_contains "子组件一致：无 subcomponent 缺口" "$R_OUT" "subcomponent_inconsistent"
 }
 
+# 场景45（R4 可观测性审查 P0-1 红相）：ob2 的 audit-diff 超时预算。
+# 缺陷背景：audit-diff 曾用 local_timeout_seconds（3s），而真实 job_copilot 大仓实测 11.6s
+# （636 变更文件 / 1495617 行新增）⇒ timeout 杀进程 rc=124 ⇒ 落入 rc 白名单外 ⇒ gaps=tool_error
+# ⇒ ob2 **恒 FAIL**，真违规与工具超时不可辨（假红淹没真红）。
+# 契约：
+#   CT-1 audit-diff 使用独立预算 diff_timeout_seconds（缺省 ≥60s），不得复用 local_timeout_seconds；
+#   CT-2 允许环境变量 PONYGO_OBS_DIFF_TIMEOUT 覆盖（正整数；非法值忽略并告警）；
+#   CT-3 超时（rc=124/143）必须 fail-closed（exit 2）且诊断文本点名「超时」+ audit-diff；
+#   CT-4 rc=2 真违规语义不变（enforcement_violation），不得被超时路径吞掉；
+#   CT-5 快路径（rc=0 + 载体）零回归。
+s45_observe_diff_timeout_budget() {
+  echo "--- 场景45：ob2 audit-diff 超时预算（慢仓不再被 3s 杀掉 / 超时与违规可辨）"
+  local T SK
+
+  # ① CT-1/CT-4：慢 4s 的 audit-diff 必须跑到完成，并按真实 rc=2 判违规
+  T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; add_mount_carrier "$T"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=2 STUB_SLEEP_AUDIT_DIFF=4 \
+    observe audit --skill-dir "$SK"
+  assert_eq "observe[45] 慢 4s + rc=2 → ob2 未达 exit 1" 1 "$R_RC"
+  assert_contains "observe[45] 慢 4s 的 audit-diff 跑到完成（stub 标记可见）" "$R_OUT" "STUB-AUDIT-DIFF rc=2"
+  assert_contains "observe[45] 慢 4s + rc=2 按真违规判定" "$R_OUT" "enforcement_violation"
+  assert_not_contains "observe[45] 慢 4s 不得退化为 tool_error" "$R_OUT" "tool_error"
+
+  # ② CT-2/CT-3：显式收紧预算 → 超时路径 fail-closed 且诊断可辨（非笼统 tool_error）
+  T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; add_mount_carrier "$T"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 STUB_SLEEP_AUDIT_DIFF=3 \
+    PONYGO_OBS_DIFF_TIMEOUT=1 observe audit --skill-dir "$SK"
+  assert_eq "observe[45] audit-diff 超时 → 判定中止 exit 2（fail-closed）" 2 "$R_RC"
+  assert_contains "observe[45] 超时诊断含「超时」字样" "$R_OUT" "超时"
+  assert_contains "observe[45] 超时诊断点名 audit-diff" "$R_OUT" "audit-diff"
+
+  # ③ CT-2 负样本：非法覆盖值（0/负数/非数字）忽略并告警，退回缺省预算
+  T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; add_mount_carrier "$T"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 STUB_SLEEP_AUDIT_DIFF=4 \
+    PONYGO_OBS_DIFF_TIMEOUT=abc observe audit --skill-dir "$SK"
+  assert_eq "observe[45] 非法覆盖值 → 退回缺省预算，慢 4s 仍跑到完成 exit 0" 0 "$R_RC"
+  assert_contains "observe[45] 非法覆盖值告警" "$R_OUT" "PONYGO_OBS_DIFF_TIMEOUT"
+
+  # ④ CT-5：快路径零回归
+  T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; add_mount_carrier "$T"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 observe audit --skill-dir "$SK"
+  assert_eq "observe[45] 快路径 rc=0 + 载体 → 全达 exit 0" 0 "$R_RC"
+}
+
 s42_observe_monorepo_subcomponents
 s43_observe_pipeline_awareness
 s44_observe_subcomponent_blocking
+s45_observe_diff_timeout_budget
 
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="

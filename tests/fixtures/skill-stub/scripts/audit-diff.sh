@@ -35,6 +35,13 @@ if [ ! -d "$REPO" ]; then
 fi
 
 RC="${STUB_RC_AUDIT_DIFF:-0}"
+# 慢仓模拟：真实 audit-diff 在 job_copilot 大仓实测 11.6s（636 变更文件 / 1495617 行新增），
+# 远超旧版 3s 局部预算。此处只睡不做判定，用于锁定「超时预算必须覆盖真实耗时」这条契约。
+SLEEP="${STUB_SLEEP_AUDIT_DIFF:-0}"
+case "$SLEEP" in
+  ''|*[!0-9]*) printf 'stub: STUB_SLEEP_AUDIT_DIFF 须为非负整数（实得 [%s]）\n' "$SLEEP" >&2; exit 4 ;;
+esac
+if [ "$SLEEP" -gt 0 ]; then sleep "$SLEEP"; fi
 printf 'STUB-AUDIT-DIFF rc=%s repo=%s\n' "$RC" "$REPO"
 printf 'stub: audit-diff 模拟结论 rc=%s（非真实判定，仅供 ponygo observe 测试）\n' "$RC" >&2
 exit "$RC"
