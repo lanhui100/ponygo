@@ -2204,6 +2204,8 @@ s45_observe_diff_timeout_budget() {
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; add_mount_carrier "$T"
   run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 STUB_SLEEP_AUDIT_DIFF=3 \
     PONYGO_OBS_DIFF_TIMEOUT=1 observe audit --skill-dir "$SK"
+  # 注（L3 复审标注）：本条「超时 → exit 2」在修复前亦为 ok（旧实现走通用 tool_error 分支同样 exit 2），
+  # 属**回归守护**而非红相；CT-3 的鉴别力由紧随其后的两条诊断文案断言承担。
   assert_eq "observe[45] audit-diff 超时 → 判定中止 exit 2（fail-closed）" 2 "$R_RC"
   assert_contains "observe[45] 超时诊断含「超时」字样" "$R_OUT" "超时"
   assert_contains "observe[45] 超时诊断点名 audit-diff" "$R_OUT" "audit-diff"
@@ -2220,6 +2222,9 @@ s45_observe_diff_timeout_budget() {
   # ⇒ 原样透传给 `timeout ６０` ⇒ GNU timeout 报 `invalid time interval`、rc=125
   # ⇒ 落入 rc 白名单外 ⇒ gaps=tool_error ⇒ 假红回归（正是本修复要消灭的东西）。
   # 判据：非 ASCII 数字一律判非法 → 告警 + 回落缺省预算，慢 4s 仍跑到完成。
+  # 注（L3 复审标注）：紧随其后的「invalid time interval」与 ③d 的「不得断言内未跑完」两条，
+  # 在修复前亦恒真（旧实现根本不把该值传给 timeout / 旧文案本无此句），属**防回退守护**；
+  # 本组真正的红相是「告警出现」与「慢 4s 跑完 exit 0」两条。
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; add_mount_carrier "$T"
   run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 STUB_SLEEP_AUDIT_DIFF=4 \
     PONYGO_OBS_DIFF_TIMEOUT=６０ observe audit --skill-dir "$SK"
@@ -2256,6 +2261,9 @@ s45_observe_diff_timeout_budget() {
   done
   kill -INT "$lp" 2>/dev/null
   wait "$lp" 2>/dev/null
+  # 注（L3 复审标注）：本用例假设**同一时刻只有一个** audit 实例在跑（临时文件名
+  # `ponygo-obs-diff.XXXXXX` 按 TMPDIR 共享）。若同机并发跑另一份 audit，残留计数会包含
+  # 对方尚未清理的文件而误判。`tests/run.sh` 本身串行，故安全；**不要**把本测试改成并行。
   local lcount
   lcount=$(ls "${TMPDIR:-/tmp}"/ponygo-obs-diff.* 2>/dev/null | wc -l)
   assert_eq "observe[45] SIGINT 中断后 audit-diff 捕获临时文件无残留" 0 "$lcount"
