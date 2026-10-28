@@ -2215,6 +2215,52 @@ s45_observe_diff_timeout_budget() {
   assert_eq "observe[45] 非法覆盖值 → 退回缺省预算，慢 4s 仍跑到完成 exit 0" 0 "$R_RC"
   assert_contains "observe[45] 非法覆盖值告警" "$R_OUT" "PONYGO_OBS_DIFF_TIMEOUT"
 
+  # ③b CT-6（L3 审查 BLOCKING 回归）：取值校验必须 **locale 无关**。
+  # 缺陷：`case "$raw" in ''|*[!0-9]*)` 在 UTF-8 locale 下对全角数字「６０」**不命中**
+  # ⇒ 原样透传给 `timeout ６０` ⇒ GNU timeout 报 `invalid time interval`、rc=125
+  # ⇒ 落入 rc 白名单外 ⇒ gaps=tool_error ⇒ 假红回归（正是本修复要消灭的东西）。
+  # 判据：非 ASCII 数字一律判非法 → 告警 + 回落缺省预算，慢 4s 仍跑到完成。
+  T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; add_mount_carrier "$T"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 STUB_SLEEP_AUDIT_DIFF=4 \
+    PONYGO_OBS_DIFF_TIMEOUT=６０ observe audit --skill-dir "$SK"
+  assert_eq "observe[45] 全角数字覆盖值 → 判非法并回落缺省（慢 4s 跑完 exit 0）" 0 "$R_RC"
+  assert_contains "observe[45] 全角数字覆盖值告警" "$R_OUT" "PONYGO_OBS_DIFF_TIMEOUT"
+  assert_not_contains "observe[45] 全角数字不得落到 timeout 的 invalid time interval" "$R_OUT" \
+    "invalid time interval"
+
+  # ③c CT-6：超出可接受范围的天文数字同样判非法（否则等价于「永不超时」，破坏 fail-closed）。
+  # 注：GNU timeout 接受 20 位数字（rc=0，等价不超时），故「exit 0 跑完」不能作为判据，
+  # 唯一有鉴别力的是**必须告警**。
+  T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; add_mount_carrier "$T"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 STUB_SLEEP_AUDIT_DIFF=1 \
+    PONYGO_OBS_DIFF_TIMEOUT=99999999999999999999 observe audit --skill-dir "$SK"
+  assert_contains "observe[45] 天文数字覆盖值告警" "$R_OUT" "PONYGO_OBS_DIFF_TIMEOUT"
+
+  # ③d CT-8：rc=143 只说明「进程死于 SIGTERM」，不等于「预算内没跑完」。
+  # 瞬时返回的 143（skill 自身崩溃）不得被断言成「超时」，否则给出错误的处置建议（抬高预算）。
+  T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; add_mount_carrier "$T"
+  run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=143 observe audit --skill-dir "$SK"
+  assert_eq "observe[45] rc=143 仍 fail-closed exit 2" 2 "$R_RC"
+  assert_not_contains "observe[45] 瞬时 143 不得断言「预算内未跑完」" "$R_OUT" "内未跑完"
+
+  # ③e CT-9：audit-diff 期间被 SIGINT 打断时，捕获用的临时文件必须被清理（否则 /tmp 泄漏）。
+  # 用条件轮询等到临时文件出现再中断，避免硬 sleep 造成 flaky。
+  T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; add_mount_carrier "$T"
+  rm -f "${TMPDIR:-/tmp}"/ponygo-obs-diff.* 2>/dev/null
+  ( cd "$T" && exec env STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 STUB_SLEEP_AUDIT_DIFF=20 \
+      bash "$ROOT/ponygo" observe audit --skill-dir "$SK" ) >/dev/null 2>&1 &
+  local lp=$! lwait=0
+  while [ "$lwait" -lt 100 ]; do
+    ls "${TMPDIR:-/tmp}"/ponygo-obs-diff.* >/dev/null 2>&1 && break
+    sleep 0.1; lwait=$((lwait+1))
+  done
+  kill -INT "$lp" 2>/dev/null
+  wait "$lp" 2>/dev/null
+  local lcount
+  lcount=$(ls "${TMPDIR:-/tmp}"/ponygo-obs-diff.* 2>/dev/null | wc -l)
+  assert_eq "observe[45] SIGINT 中断后 audit-diff 捕获临时文件无残留" 0 "$lcount"
+  rm -f "${TMPDIR:-/tmp}"/ponygo-obs-diff.* 2>/dev/null
+
   # ④ CT-5：快路径零回归
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; add_mount_carrier "$T"
   run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 observe audit --skill-dir "$SK"
