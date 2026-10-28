@@ -64,6 +64,7 @@ mount_carriers: .git/hooks/pre-commit .githooks/pre-commit .githooks/pre-push .p
 skill_dir_rel: .agents/skills/observability-onboarding
 external_timeout_seconds: 120
 local_timeout_seconds: 3
+diff_timeout_seconds: 60
 # ==== OBSERVE MAPPING END ====
 :
 }
@@ -1893,7 +1894,10 @@ local_timeout_seconds"
     printf '  期望每键恰好一行且取值非空；排查：grep -n "^<key>:" %s\n' "$f" >&2
     exit 2
   fi
-  mv=$(sed -n 's/^mapping_version:[[:space:]]*//p' "$f" | head -n1 | tr -d '\r')
+  # CRLF 归一改用 bash 参数展开而非 `tr`（CT-10 同源）：tr 缺失/被替换时管道输出为空，
+  # 会让版本解析误判「mapping_version 不支持（空）」而 exit 2，把工具缺失伪装成数据块损坏。
+  mv=$(sed -n 's/^mapping_version:[[:space:]]*//p' "$f" | head -n1)
+  mv=${mv%$'\r'}
   if [ "$mv" != "1" ]; then
     printf 'ponygo: 映射数据块版本不支持：%s（本版本只认 mapping_version: 1）\n' "${mv:-（空）}" >&2
     exit 2
@@ -1993,6 +1997,78 @@ observe_timeout_ok() {
     printf 'ponygo: WARN 未找到可用的 timeout，外部命令无超时保护（评审建议：安装 coreutils timeout）\n' >&2
   fi
   [ "$OBS_TIMEOUT_OK" = "1" ]
+}
+
+# 超时秒数判据（CT-6，**locale 无关**）：只接受纯 ASCII 十进制数字，且长度 ≤ 6 位。
+# 为什么不只靠 `case "$v" in *[!0-9]*)`：UTF-8 locale 下该字符类对**全角数字**（如 ６０）不命中，
+# 值会原样透传给 `timeout ６０` → GNU timeout 报 `invalid time interval`、rc=125 → 落回 rc 白名单外
+# ⇒ gaps=tool_error ⇒ 假红复活（正是本修复要消灭的形态）。故改用 LC_ALL=C 的 tr 在**字节层**剔除
+# ASCII 0-9 后判残渣，与 locale 无关。
+# 长度上限同理：GNU timeout 接受 20 位天文数字（rc=0）等于「永不超时」，会破坏 fail-closed 语义。
+# CT-10：判据自身也必须 fail-closed——`tr` 缺失/被替换而失败时输出为空，若只看输出就会把**任意值**
+# 判成「纯数字」并放行（于是又回到 `timeout abc` → invalid interval → 假红）。故把 tr 的退出码纳入
+# 判据：非零即判非法。
+observe_timeout_num_ok() {
+  local v=${1:-} rest
+  [ -n "$v" ] || return 1
+  [ "${#v}" -le 6 ] || return 1
+  rest=$(printf '%s' "$v" | LC_ALL=C tr -d '0-9') || return 1
+  [ -z "$rest" ] || return 1
+  return 0
+}
+
+# audit-diff 独立超时预算（CT-1/CT-2）：
+#   * 取数 = data 块 diff_timeout_seconds（缺省 60 秒）。**不复用** local_timeout_seconds——
+#     后者是本地快命令预算（3s），而 audit-diff 要扫描整仓变更（实测大仓 12.1s / 637 文件），
+#     3s 会稳定把进程打死成 rc=124，真违规与工具超时因此不可辨（假红淹没真红）。
+#   * 覆盖 = env PONYGO_OBS_DIFF_TIMEOUT（正整数）优先。非法值（空/0/负数/非数字/非整数/全角数字/
+#     超长数字）一律**忽略并告警**，绝不静默接受——预算漂移必须留痕（0 在 GNU timeout 下等于
+#     「不限时」，会把 fail-closed 变成挂死，故 0 与 00 同样判非法）。
+#   * $1 = data 块原值（可空：旧 --mapping 覆盖文件没有该键，按可选键软读处理）。
+observe_diff_timeout() {
+  local base raw bad orig cleaned
+  orig=${1:-}
+  base=$orig
+  # 值清洗与 observe_audit 里 kind 的取数同口径：去行内注释、去首尾空白、去成对引号。
+  base=${base%%[[:space:]]#*}
+  base=${base#"${base%%[![:space:]]*}"}
+  base=${base%"${base##*[![:space:]]}"}
+  case "$base" in \"*\") base=${base#\"}; base=${base%\"} ;; esac
+  case "$base" in \'*\') base=${base#\'}; base=${base%\'} ;; esac
+  cleaned=$base
+  bad=0
+  if [ -n "$cleaned" ]; then
+    observe_timeout_num_ok "$cleaned" || bad=1
+    if [ "$bad" = "0" ]; then
+      while [ "${base#0}" != "$base" ]; do base=${base#0}; done
+      [ -n "$base" ] || bad=1      # 全 0（0/00/000…）：GNU timeout 0 = 不限时，等同 fail-open
+    fi
+  fi
+  if [ "$bad" = "1" ]; then
+    # 显式写了却清洗不出来：必须告警，否则与 env 路径「非法必告警」不对称，预算漂移无法追溯。
+    printf 'ponygo: WARN 映射键 diff_timeout_seconds 取值非法（须为纯 ASCII 十进制正整数且 ≤6 位，实得 [%s]），已回退缺省 60 秒\n' \
+      "$orig" >&2
+    base=60
+  elif [ -z "$cleaned" ]; then
+    # 键缺失（旧 --mapping 覆盖文件没这一行）＝「未声明」，按缺省 60 处理；不算清洗失败，不告警。
+    base=60
+  fi
+  raw=${PONYGO_OBS_DIFF_TIMEOUT:-}
+  # 区分「未设置」与「显式设为空串」：后者是非法值（CT-2 明列），必须告警而不是静默沿用缺省。
+  [ -n "${PONYGO_OBS_DIFF_TIMEOUT+set}" ] || { printf '%s\n' "$base"; return 0; }
+  bad=0
+  observe_timeout_num_ok "$raw" || bad=1
+  if [ "$bad" = "0" ]; then
+    while [ "${raw#0}" != "$raw" ]; do raw=${raw#0}; done
+    [ -n "$raw" ] || bad=1         # 全 0：同上，timeout 0 等于不限时
+  fi
+  if [ "$bad" = "1" ]; then
+    printf 'ponygo: WARN 环境变量 PONYGO_OBS_DIFF_TIMEOUT 取值非法（须为纯 ASCII 十进制正整数且 ≤6 位，实得 [%s]），已忽略，沿用 diff_timeout_seconds=%s 秒\n' \
+      "${PONYGO_OBS_DIFF_TIMEOUT:-}" "$base" >&2
+    printf '%s\n' "$base"
+    return 0
+  fi
+  printf '%s\n' "$raw"
 }
 
 # $1=timeout_seconds $2=script 其余=args → 返回 skill 的 rc；skill 原始输出统一走 stderr
@@ -2527,7 +2603,7 @@ EOF
 #   2=工具/输入错误（判定中止）；3=证据不足；1=有缺口（含 below_target）；0=达标。
 observe_audit() {
   local skill decl present ph rc rd ver min compat sp kind raw target cur
-  local ob0 ob1 ob2 s0 s1 s2 jp jph jc jm mounted diff_log diff_ep abort exit2 exit3
+  local ob0 ob1 ob2 s0 s1 s2 jp jph jc jm mounted diff_log diff_tmo diff_ep abort exit2 exit3
   local gap_incon gap_ev gap_ep gap_diff gap_viol gap_mount gap_tool gap_below
   local ids gaps sep g c n0 n1 n2 adv code cr trk dabort glob_on
   local sub_rcs="" sub_bad=0 sub_unknown=0 sub_line sub_dir
@@ -2624,18 +2700,24 @@ observe_audit() {
   fi
 
   # ob1 成立才跑 audit-diff；rc=1 的 gap 需读 skill 输出关键词，故临时文件捕获后原样转发 stderr
-  rd="-"; diff_log=""; diff_ep=0; mounted=0
+  # 预算：独立键 diff_timeout_seconds（缺省 60，可被 PONYGO_OBS_DIFF_TIMEOUT 覆盖），**不得**复用
+  # local_timeout_seconds（3s 级快命令预算）——否则大仓 audit-diff 必被 timeout 打死成假红。
+  rd="-"; diff_log=""; diff_tmo=""; diff_ep=0; mounted=0
   if [ "$ob1" = "1" ]; then
+    diff_tmo=$(observe_diff_timeout "$(observe_map_try diff_timeout_seconds)")
     diff_log=$(mktemp "${TMPDIR:-/tmp}/ponygo-obs-diff.XXXXXX") || diff_log=""
+    # 登记到全局供 trap 兜底（CT-9）：预算从 3s 放宽到 60s 后，Ctrl-C 撞上 audit-diff 运行窗口的
+    # 概率放大约 20 倍，只清 observe_run_skill 的临时文件会在 /tmp 残留 ponygo-obs-diff.XXXXXXXX。
+    OBS_DIFF_TMPFILE=$diff_log
     if [ -n "$diff_log" ]; then
-      observe_run_skill "$(observe_map_get local_timeout_seconds)" \
+      observe_run_skill "$diff_tmo" \
         "$skill/scripts/audit-diff.sh" --repo "$PWD" --base "${OBSERVE_BASE:-HEAD}" 2>"$diff_log"
       rd=$?
       cat "$diff_log" >&2
       if grep -q -F '收口点' "$diff_log"; then diff_ep=1; fi
     else
       # 建不了临时文件：无法分关键词，rc=1 退化为 diff_warn
-      observe_run_skill "$(observe_map_get local_timeout_seconds)" \
+      observe_run_skill "$diff_tmo" \
         "$skill/scripts/audit-diff.sh" --repo "$PWD" --base "${OBSERVE_BASE:-HEAD}"
       rd=$?
     fi
@@ -2665,10 +2747,24 @@ observe_audit() {
       2) jm=fail; gap_viol=1 ;;
       # F7：rc=3 是「证据不可得」（与 check-declaration rc=3 同义），不是工具错误；exit 仍 3、current 仍 unknown
       3) jm=fail; gap_ev=1; exit3=1; dabort=1 ;;
+      # CT-3/CT-8 超时专支（timeout 默认 124；--preserve-status 或子进程自行处理 SIGTERM 时为 143）：
+      # 仍然 fail-closed（exit 2 + gaps 含 tool_error），但诊断必须点名「超时」与「audit-diff」，
+      # 否则与检查器自身崩溃混为一谈，假红淹没真红。绝不并进 240/2xx 哨兵分支——哨兵语义是
+      # 「临时文件建不了」，与「预算用尽/被杀」是两种不同故障，处置动作也不同。
+      # 文案纪律（CT-8）：143 只说明「进程死于 SIGTERM」，**不等于**「预算内没跑完」（瞬时崩溃也会
+      # 是 143），故不得写「N 秒内未跑完」这类断言，否则会给出「加预算」这种错误处置建议。
+      124|143)
+        jm=fail; gap_tool=1; exit2=1; dabort=1
+        printf 'ponygo: audit-diff（变更级收口门禁）疑似超时或进程被 SIGTERM 终止：退出码=%s，预算 diff_timeout_seconds=%s 秒\n' "$rd" "$diff_tmo" >&2
+        printf '  退出码 124 = 预算用尽被 timeout 杀掉；143 = 进程死于 SIGTERM（可能是超时，也可能是 skill 自身崩溃/被外部信号打断）\n' >&2
+        printf '  这意味着「未判定」，不是「无违规」；ob2 按 fail-closed 处理（exit 2）\n' >&2
+        printf '  处置：大仓且确为预算不足 → 抬高 data 块 diff_timeout_seconds 或 env PONYGO_OBS_DIFF_TIMEOUT=<正整数>；瞬时 143 → 先修 skill 自身，别只加预算\n' >&2
+        ;;
       240|2[0-9][0-9]) jm=fail; gap_tool=1; exit2=1; dabort=1 ;;
       *) jm=fail; gap_tool=1; exit2=1; dabort=1 ;;
     esac
     if [ -n "$diff_log" ]; then rm -f "$diff_log"; fi
+    OBS_DIFF_TMPFILE=""
   fi
 
   cur=unknown
@@ -2946,10 +3042,19 @@ OBS_REASON_METRICS=""; OBS_REASON_TRACING=""; OBS_REASON_LOGS=""; OBS_REASON_ISS
 OBS_MAP_VERIFIED=0; OBS_TIMEOUT_OK=""; OBS_TIMEOUT_WARNED=0
 # observe 外部命令临时文件（F3）：路径登记到全局，EXIT 兜底 rm，防信号打断执行中的 skill 时残留。
 # INT/TERM 单独处理：清理后按默认信号语义退出（若只 rm 不退出，Ctrl-C/TERM 会被吞掉、进程继续跑）。
-OBS_TMPFILE=""
-trap 'rm -f "${OBS_TMPFILE:-}"' EXIT
-trap 'rm -f "${OBS_TMPFILE:-}"; trap - EXIT INT TERM; exit 130' INT
-trap 'rm -f "${OBS_TMPFILE:-}"; trap - EXIT INT TERM; exit 143' TERM
+# CT-9：需同时覆盖两个临时文件——observe_run_skill 的输出捕获与 audit-diff 的 stderr 捕获；
+# 原实现的 trap 只删单个路径，预算放宽到 60s 后 audit-diff 运行窗口变长，残留概率显著上升。
+OBS_TMPFILE=""; OBS_DIFF_TMPFILE=""
+observe_tmp_cleanup() {
+  local f
+  for f in "${OBS_TMPFILE:-}" "${OBS_DIFF_TMPFILE:-}"; do
+    [ -n "$f" ] && rm -f "$f" 2>/dev/null
+  done
+  return 0
+}
+trap 'observe_tmp_cleanup' EXIT
+trap 'observe_tmp_cleanup; trap - EXIT INT TERM; exit 130' INT
+trap 'observe_tmp_cleanup; trap - EXIT INT TERM; exit 143' TERM
 while [ $# -gt 0 ]; do
   case "$1" in
     --yes) YES=1 ;;
