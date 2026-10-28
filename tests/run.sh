@@ -2250,22 +2250,23 @@ s45_observe_diff_timeout_budget() {
 
   # ③e CT-9：audit-diff 期间被 SIGINT 打断时，捕获用的临时文件必须被清理（否则 /tmp 泄漏）。
   # 用条件轮询等到临时文件出现再中断，避免硬 sleep 造成 flaky。
+  # 隔离（L3 复审 ADVISORY A）：ponygo 的捕获文件落在 `${TMPDIR:-/tmp}`，若与同机其它 audit
+  # 实例共用 /tmp，残留计数会把别人的文件算进来（本轮复审实测 6 次全量跑 3 次假红）。
+  # 故本用例给被测进程注入**独立 TMPDIR**，断言只看该目录，形成进程级隔离。
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; add_mount_carrier "$T"
-  rm -f "${TMPDIR:-/tmp}"/ponygo-obs-diff.* 2>/dev/null
-  ( cd "$T" && exec env STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 STUB_SLEEP_AUDIT_DIFF=20 \
+  local lsm="$T/obstmp"
+  mkdir -p "$lsm"
+  ( cd "$T" && exec env TMPDIR="$lsm" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 STUB_SLEEP_AUDIT_DIFF=20 \
       bash "$ROOT/ponygo" observe audit --skill-dir "$SK" ) >/dev/null 2>&1 &
   local lp=$! lwait=0
   while [ "$lwait" -lt 100 ]; do
-    ls "${TMPDIR:-/tmp}"/ponygo-obs-diff.* >/dev/null 2>&1 && break
+    ls "$lsm"/ponygo-obs-diff.* >/dev/null 2>&1 && break
     sleep 0.1; lwait=$((lwait+1))
   done
   kill -INT "$lp" 2>/dev/null
   wait "$lp" 2>/dev/null
-  # 注（L3 复审标注）：本用例假设**同一时刻只有一个** audit 实例在跑（临时文件名
-  # `ponygo-obs-diff.XXXXXX` 按 TMPDIR 共享）。若同机并发跑另一份 audit，残留计数会包含
-  # 对方尚未清理的文件而误判。`tests/run.sh` 本身串行，故安全；**不要**把本测试改成并行。
   local lcount
-  lcount=$(ls "${TMPDIR:-/tmp}"/ponygo-obs-diff.* 2>/dev/null | wc -l)
+  lcount=$(ls "$lsm"/ponygo-obs-diff.* 2>/dev/null | wc -l)
   assert_eq "observe[45] SIGINT 中断后 audit-diff 捕获临时文件无残留" 0 "$lcount"
   rm -f "${TMPDIR:-/tmp}"/ponygo-obs-diff.* 2>/dev/null
 
