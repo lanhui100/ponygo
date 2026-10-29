@@ -3427,6 +3427,68 @@ s68_f_hookspath_escape() {
   assert_exists "正向控制：生成 .githooks/pre-commit" "$T/.githooks/pre-commit"
 }
 
+# ============================================================
+# Wave-4 收尾红相（s69~s70）—— L2-T 独立测试者冻结，实现方只读
+# 真源：Lead R4 裁决（对 77d1eb9 复验）：①特尾随/重复哨兵块不得删用户行；
+# ②函数体内 exit 不得被误判为「顶层早退」（否则 2.4 假红）。
+# 铁律不变：每条反例配正向/反向控制；失败描述写清期望/实得。
+# ============================================================
+
+s69_f_trailing_sentinel_no_user_loss() {
+  echo "--- 场景69：重复/尾随哨兵块不得删用户行（零字节删除 + 非零 + WARN）"
+  local T
+  T=$(new_case); git_seed_repo "$T"
+  ( cd "$T" && mkdir -p .githooks && git config core.hooksPath .githooks ) >/dev/null 2>&1
+  # 完整规范块 + 其后的重复 BEGIN + 用户行（无 END）——写中断/重复装配的残留形态
+  { printf '#!/usr/bin/env bash\n'; gate_block_lines; \
+    printf '# >>> ponygo-gate: adr-verify v1 >>>\necho USER-KEEP-ME\n'; } \
+    > "$T/.githooks/pre-commit"
+  chmod +x "$T/.githooks/pre-commit"
+  run_cli "$T" init --yes
+  assert_eq "① 用户行零删除（grep -c USER-KEEP-ME = 1）" 1 \
+    "$(grep -c 'USER-KEEP-ME' "$T/.githooks/pre-commit" 2>/dev/null || printf 0)"
+  assert_nonzero "② 尾随哨兵块残留 → init 必须非零（需人工清理，不得静默）" "$R_RC"
+  assert_matches "③ 输出含 [WARN]" "$R_OUT" '\[WARN\]|WARN'
+  assert_matches "③ WARN 点名哨兵块" "$R_OUT" '哨兵'
+  assert_matches "③ WARN 说明残留/未闭合/需人工清理" "$R_OUT" '残留|未闭合|人工|外来'
+  # 幂等守卫：再跑一次 init，用户行仍必须恰好 1（重复装配不得累积删除/重复插入）
+  run_cli "$T" init --yes
+  assert_eq "①b 二次 init 后用户行仍恰好 1" 1 \
+    "$(grep -c 'USER-KEEP-ME' "$T/.githooks/pre-commit" 2>/dev/null || printf 0)"
+
+  # ④ 正向对照：两个**纯规范**块（无外来行）→ 去重为一个块、语法合法、rc=0
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init --yes; set_level2 "$T"
+  { printf '#!/usr/bin/env bash\n'; gate_block_lines; gate_block_lines; } > "$T/.githooks/pre-commit"
+  chmod +x "$T/.githooks/pre-commit"
+  run_cli "$T" init --yes
+  assert_eq "④ 纯规范重复块 → init exit 0" 0 "$R_RC"
+  assert_eq "④ 去重后哨兵尾行恰好 1" 1 \
+    "$(grep -cF "$GATE_MARKER_END" "$T/.githooks/pre-commit" 2>/dev/null || printf 0)"
+  bash -n "$T/.githooks/pre-commit" 2>/dev/null
+  assert_eq "④ 去重后 bash -n rc=0" 0 "$?"
+}
+
+s70_f_function_body_exit_not_early_exit() {
+  echo "--- 场景70：函数体内 exit 不算顶层早退（否则 2.4 假红）；顶层裸 exit 仍必须红"
+  local T G; G=$(sanitize_git)
+  # ① 正向：cleanup() { exit 1; } 在规范块之前 —— 函数体内 exit 不是顶层早退，块照常执行
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init --yes; set_level2 "$T"
+  { printf '#!/usr/bin/env bash\ncleanup() { exit 1; }\n'; gate_block_lines; } > "$T/.githooks/pre-commit"
+  chmod +x "$T/.githooks/pre-commit"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G status
+  assert_eq "① 函数体内 exit 不算早退 → status exit 0（不得假红）" 0 "$R_RC"
+  assert_contains "① 结论行 L0-L2（2.4 判 PASS）" "$R_OUT" "L0-L2"
+  # ② 反向对照：顶层裸 exit + 规范块 → 必须红并报 2.4（位置判据不得被放宽掉）
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init --yes; set_level2 "$T"
+  { printf '#!/usr/bin/env bash\nexit\n'; gate_block_lines; } > "$T/.githooks/pre-commit"
+  chmod +x "$T/.githooks/pre-commit"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G status
+  assert_eq "② 顶层裸 exit 之后的块 → status exit 1" 1 "$R_RC"
+  assert_contains "② 报 2.4" "$R_OUT" "2.4"
+}
+
 s42_observe_monorepo_subcomponents
 s43_observe_pipeline_awareness
 s44_observe_subcomponent_blocking
@@ -3454,6 +3516,8 @@ s65_f9_f10_symlink_and_selfheal
 s66_f1_bare_exit_position
 s67_f2_foreign_lines_not_truncated
 s68_f_hookspath_escape
+s69_f_trailing_sentinel_no_user_loss
+s70_f_function_body_exit_not_early_exit
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
 [ "$FAIL" -eq 0 ] || exit 1
