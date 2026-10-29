@@ -2236,13 +2236,35 @@ gate_hook_block() { # <hook 文件>
   sed -n '/>>> ponygo-gate: adr-verify v1 >>>/,/<<< ponygo-gate: adr-verify v1 <</p' "$1" 2>/dev/null
 }
 
-# 块必须位于首个顶层 exit/exec **之前**（F1）：末尾追加在 `exit 0` / `exec 他脚本` 钩子里
-# 永不执行，而旧判据仍报「已接线」= 假绿。
+# F13「首个顶层早退行」识别的**唯一实现**（位置判决只在这里落地一次）。
+# 旧判据 `^[[:space:]]*(exit|exec)[[:space:]]` 要求命令后必须有空白，于是**裸 `exit`**、
+# `exit;`、`exit $?`、`[ -z "$X" ] && exit 0`（复合命令右侧）全被漏判——块被插在其后、
+# 永不执行，而 2.4 仍报「已接线」（假绿）。
+# 判据 = 词边界 + 命令分隔：`exit` / `exit 0` / `exit $?` / `exit;` / `… && exit 0` /
+# `exec /bin/true` 均命中；`return` 只认**行首**（顶层 return 约定不缩进，函数体内的
+# `return` 不构成早退，不得误判）；注释行不算。
+# 哨兵区间**内部**的 `|| exit 1` 属于块自身，不计入（否则块会把自己判成「在早退之后」）。
+gate_hook_early_exit_line() { # <hook 文件> → 首个顶层早退行号（无则空）
+  local f="$1"
+  [ -f "$f" ] || return 0
+  awk -v b="$GATE_SENT_BEGIN" -v e="$GATE_SENT_END" '
+    { line = $0; sub(/\r$/, "", line); t = line; sub(/^[[:space:]]+/, "", t) }
+    line == b { inb = 1; next }
+    line == e { inb = 0; next }
+    inb { next }
+    t ~ /^#/ { next }
+    line ~ /(^|[;&|()[:space:]])(exit|exec)([[:space:];&|)]|$)/ { print NR; exit }
+    line ~ /^return([[:space:];&|]|$)/ { print NR; exit }
+  ' "$f" 2>/dev/null | head -n1
+}
+
+# 块必须位于首个顶层早退行（exit/exec/return）**之前**（F1/F13）：末尾追加在 `exit 0` /
+# 裸 `exit` / `exec 他脚本` 钩子里永不执行，而旧判据仍报「已接线」= 假绿。
 gate_hook_block_before_exit() { # <hook 文件> → 0 = 位置安全
   local f="$1" bs="" es=""
   bs=$(grep -nF -m1 "$GATE_SENT_BEGIN" "$f" 2>/dev/null | head -n1 | cut -d: -f1)
   [ -n "$bs" ] || return 1
-  es=$(grep -nE '^[[:space:]]*(exit|exec)[[:space:]]' "$f" 2>/dev/null | head -n1 | cut -d: -f1)
+  es=$(gate_hook_early_exit_line "$f")
   [ -n "$es" ] || return 0
   [ "$bs" -lt "$es" ]
 }
@@ -2290,12 +2312,14 @@ gate_write_fail() { # <目标> <因由>
   GATE_WRITE_FAILS="${GATE_WRITE_FAILS}${1} — ${2}"$'\n'
 }
 
-# 汇总打印失败清单 + 补救；返回 0 表示「确实有失败」（调用方据此非零退出）
+# 汇总打印失败清单 + 补救；返回 0 表示「确实有失败」（调用方据此非零退出）。
+# 清单口径 = 「装配没能完整达成」：既含写入失败（F4），也含**拒绝装配**（F15 越界、F14 含
+# 外来内容需人工清理）——两者都不得以 rc=0 冒充成功。
 gate_assembly_failed() {
   [ -n "$GATE_WRITE_FAILS" ] || return 1
   local n=0 ln=""
   n=$(printf '%s' "$GATE_WRITE_FAILS" | grep -c . 2>/dev/null || true)
-  warn "[WARN] 门禁装配写入失败 ${n:-1} 项——写入失败 = 装配不完整（本次不会假装成功）："
+  warn "[WARN] 门禁装配未完成 ${n:-1} 项（写入失败或被拒绝——本次不会假装成功）："
   printf '%s' "$GATE_WRITE_FAILS" | while IFS= read -r ln; do
     [ -n "$ln" ] && warn "  - $ln"
   done
@@ -2345,11 +2369,40 @@ gate_asset_put() { # <目标路径> <权限> <资产名>；规范内容走 stdin
   return 0
 }
 
+# F14 未闭合哨兵块（BEGIN 有、END 无）里是否含**外来内容**。
+# 重写路径会把 BEGIN..文件尾 整段摘除——若该区间含用户自有行，摘除即静默数据丢失（F14）。
+# 判据：BEGIN 之后到文件尾的每一非空行，必须逐行等于规范块后续行（**前缀**序列，即写到一半的
+# 规范块 = 纯半截块）；任何一行不等 → 外来内容 → 禁止删字节，改为「只插入 + WARN + 非零」。
+# 块已闭合（有 END）→ 区间语义由哨兵界定，不属 F14；无 BEGIN → 无区间。
+gate_hook_block_unclosed_foreign() { # <hook 文件> → 0 = 含外来内容（禁止删字节）
+  local f="$1" verdict=""
+  [ -f "$f" ] || return 1
+  grep -qxF "$GATE_SENT_END" "$f" 2>/dev/null && return 1
+  grep -qxF "$GATE_SENT_BEGIN" "$f" 2>/dev/null || return 1
+  verdict=$(PONYGO_CANON="$GATE_BLOCK_CANONICAL" awk -v b="$GATE_SENT_BEGIN" '
+      BEGIN { n = split(ENVIRON["PONYGO_CANON"], C, "\n"); inblk = 0; idx = 0; v = "" }
+      v != "" { next }
+      { line = $0; sub(/\r$/, "", line) }
+      inblk {
+        if (line ~ /^[[:space:]]*$/) next
+        idx++
+        if (idx > n || line != C[idx]) { v = "FOREIGN"; next }
+        next
+      }
+      line == b { inblk = 1; idx = 1; next }
+      END { print (v == "" ? (inblk ? "PURE" : "NOBLOCK") : v) }
+    ' "$f" 2>/dev/null)
+  [ "$verdict" = "FOREIGN" ]
+}
+
 # F1+F2：把规范块前置到 shebang 行之后（无 #! 首行 → 文件最前），一次原子替换。
-# 既有字节顺序/内容零改动、权限不动；旧块（规范与否）与半截块（有 BEGIN 无 END）先整段摘除
-# 再前置重建——单次 awk 产出完整新内容，杜绝「半截钩子」跨写窗口。
-gate_hook_write_block() { # <hook 文件> → 0 = 已写
-  local f="$1" dir="" tmp="" mode="" blk=""
+# 既有字节顺序/内容零改动、权限不动。
+#   purge=1（默认）：旧块（规范与否）与纯半截块（有 BEGIN 无 END 且只含规范行）先整段摘除
+#     再前置重建——自愈；单次 awk 产出完整新内容，杜绝「半截钩子」跨写窗口。
+#   purge=0（F14 保字节模式）：只插入规范块，**一行都不删**——用于「未闭合块里含外来内容」
+#     的现场（删了就会丢用户的自有行；清理责任交回人）。
+gate_hook_write_block() { # <hook 文件> [purge=1|0] → 0 = 已写
+  local f="$1" purge="${2:-1}" dir="" tmp="" mode="" blk=""
   [ -f "$f" ] || return 1
   dir=$(dirname "$f")
   mode=$(file_mode "$f" 2>/dev/null || true)
@@ -2360,10 +2413,10 @@ gate_hook_write_block() { # <hook 文件> → 0 = 已写
   if grep -q $'\r' "$f" 2>/dev/null; then
     warn "既有钩子为 CRLF 行尾（bash 下 then\r 非法）→ 已统一归一为 LF 后前置规范块"
   fi
-  if ! PONYGO_BLK="$blk" awk -v b="$GATE_SENT_BEGIN" -v e="$GATE_SENT_END" '
+  if ! PONYGO_BLK="$blk" awk -v b="$GATE_SENT_BEGIN" -v e="$GATE_SENT_END" -v purge="$purge" '
       BEGIN { blk = ENVIRON["PONYGO_BLK"]; if (blk != "") blk = blk "\n" }
       { line = $0; sub(/\r$/, "", line) }
-      line == b { inblk = 1; next }
+      purge && line == b { inblk = 1; next }
       inblk && line == e { inblk = 0; next }
       inblk { next }
       !placed {
@@ -2419,17 +2472,51 @@ hook_dir_resolved() { # <repo root> <hooksPath>
   printf '%s' "${d:-}"
 }
 
+# F15 越界判定（**单点**）：钩子目录必须落在仓库根之下，否则装配会把钩子写到仓库外
+# （`core.hooksPath=..` → 父目录/pre-commit，等于往别人的目录里塞文件）。
+# 两侧都取真实路径（符号链接同一口径）；`<root>/x` 与 root 自身算仓内。
+hook_dir_under_root() { # <repo root> <已解析钩子目录> → 0 = 在仓库根之下
+  local root="$1" dir="$2" rr=""
+  [ -n "$root" ] && [ -n "$dir" ] || return 1
+  rr=$(cd "$root" 2>/dev/null && pwd -P) || rr="$root"
+  [ -n "$rr" ] || return 1
+  case "$dir" in
+    "$rr"|"$rr"/*) return 0 ;;
+  esac
+  return 1
+}
+
+# F15 装配侧守卫：hooksPath 越界 → **拒绝装配**（不写任何文件、不 chmod、不改 git config）。
+# 返回 0 = 已判定越界（打 WARN + 登记装配失败 → cmd_init 非零）；1 = 无越界 / 无从判定
+# （非 git、hooksPath 未设、目录不可达三类各有自己的分支，不在这里抢）。
+gate_hooks_path_escape() {
+  local root="" hp="" dir=""
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
+  hp=$(git config core.hooksPath 2>/dev/null || true)
+  [ -n "$hp" ] || return 1
+  root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+  [ -n "$root" ] || return 1
+  dir=$(hook_dir_resolved "$root" "$hp")
+  [ -n "$dir" ] || return 1
+  hook_dir_under_root "$root" "$dir" && return 1
+  warn "[WARN] core.hooksPath 越界（钩子目录不在仓库根之下，装配会把钩子写到仓库外）：$hp → $dir"
+  warn "  已拒绝装配：不写任何文件、不改权限、不动 git config。补救：git config core.hooksPath .githooks 后重跑 ponygo init"
+  gate_write_fail "$dir/pre-commit" "装配被拒绝：core.hooksPath 越界（落点在仓库外 $dir）——未写任何文件"
+  return 0
+}
+
 # 2.4「本地层已接 ADR 门」判据的**唯一实现**（verify_ladder 2.4 与 status 的
 # gate_wiring_report 共用一处口径——两处各写一份必然漂移，F5 的按因补救会有一处退回统一文案）。
-# 判据 = ① hooksPath 已设 ② 归一化目录可达 ③ pre-commit 存在且可执行
-# ④ 哨兵区间逐字节等于规范块（F3）⑤ 块起始行 < 首个顶层 exit/exec 行（位置判据：
-# 块落在 exit/exec 之后 = 永不执行 = 假绿）⑥ <root>/.meta/gates/adr-verify.sh 存在。
+# 判据 = ① hooksPath 已设 ② 归一化目录可达且在仓库根之下（F15：越界=落点在仓库外，拒绝）
+# ③ pre-commit 存在且可执行
+# ④ 哨兵区间逐字节等于规范块（F3）⑤ 块起始行 < 首个顶层早退行（F13：exit/exit 0/exit;/
+# `&& exit 0`/exec/return——块落在早退之后 = 永不执行 = 假绿）⑥ <root>/.meta/gates/adr-verify.sh 存在。
 # F5：失败**按因**给补救——非 git / 目录不可达 / 钩子不可执行三类给统一「bash ponygo init」
 # 是缺陷（对它们无效），各自需要 git init / git config / chmod +x。
 # 输出（全局）：G24_OK=1 通过；G24_CAUSE 失败因由；G24_FIX 可执行补救命令。
 gate_24_probe() {
   G24_OK=0; G24_CAUSE=""; G24_FIX=""
-  local root="" hp="" dir="" hook=""
+  local root="" hp="" dir="" hook="" es=""
   if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     G24_CAUSE="不在 git 仓库内，本地钩子无从挂载"
     G24_FIX="git init（本目录还不是仓库）后重跑 ponygo init 装配本地层"
@@ -2448,6 +2535,12 @@ gate_24_probe() {
     G24_FIX="git config core.hooksPath .githooks（把落点改回仓内目录）后重跑 ponygo init 装配"
     return 1
   fi
+  # F15：落点在仓库外 → 装配与判据都必须拒绝（不得往仓库外写钩子）
+  if ! hook_dir_under_root "${root:-.}" "$dir"; then
+    G24_CAUSE="core.hooksPath 越界（钩子目录不在仓库根之下，装配会把钩子写到仓库外）：$hp → $dir"
+    G24_FIX="git config core.hooksPath .githooks（把落点改回仓内目录）后重跑 ponygo init 装配"
+    return 1
+  fi
   hook="$dir/pre-commit"
   if [ ! -f "$hook" ]; then
     G24_CAUSE="钩子缺失：$hp/pre-commit"
@@ -2456,7 +2549,9 @@ gate_24_probe() {
   fi
   if [ ! -x "$hook" ]; then
     G24_CAUSE="钩子不可执行（git 会静默忽略）：$hp/pre-commit"
-    G24_FIX="chmod +x $hp/pre-commit（init 不会替你激活沉睡钩子——执行位是人的决定）"
+    # F16：只给 chmod +x 是**半截补救**——照做后 2.4 仍红（块还可能未接线/位置不对）。
+    # 两步化，且第一句仍是本分支特有因由（不得退化成统一「bash ponygo init」文案，F5）。
+    G24_FIX="分两步：① chmod +x $hp/pre-commit（恢复执行位——init 不会替你激活沉睡钩子，执行位是人的决定）② ponygo init（幂等补块：块未接线或位置在早退行之后时按规范块前置；已接线则一字不动）"
     return 1
   fi
   if ! grep -qxF "$GATE_SENT_END" "$hook" 2>/dev/null; then
@@ -2471,7 +2566,9 @@ gate_24_probe() {
       G24_CAUSE="钩子哨兵块与规范块不逐字节一致（echo/|| true/if false/注释掉调用行等变体一律不算接线）：$hp/pre-commit"
       G24_FIX="bash ponygo init（删旧块 + 前置规范块为一次原子替换）"
     else
-      G24_CAUSE="哨兵块位于首个顶层 exit/exec 之后（该块永不执行）：$hp/pre-commit"
+      # F13：位置因由复用 gate_hook_early_exit_line（位置判决的单点实现），点名首个早退行号
+      es=$(gate_hook_early_exit_line "$hook")
+      G24_CAUSE="哨兵块位于首个顶层早退行（第 ${es:-?} 行：exit/exec/return，含裸 exit 与 exit;）之后（该块永不执行）：$hp/pre-commit"
       G24_FIX="bash ponygo init（删旧块并把规范块前置到 shebang 之后）"
     fi
     return 1
@@ -2520,12 +2617,18 @@ ensure_gate_wiring() {
     fi
     info "[dry-run] 既有 core.hooksPath=$hp —— 不动，只在其中补/前置 pre-commit 哨兵块"
     dir=$(hook_dir_resolved "$root" "$hp")
+    if [ -n "$dir" ] && ! hook_dir_under_root "${root:-.}" "$dir"; then
+      info "[dry-run] core.hooksPath 越界（钩子目录不在仓库根之下）：$hp → $dir —— 将拒绝装配（不写任何文件、不改权限；2.4 会 FAIL）"
+      return 0
+    fi
     if [ -z "$dir" ]; then
       info "[dry-run] hooksPath 目录不可达：$hp（2.4 会 FAIL）"
     elif [ ! -f "$dir/pre-commit" ]; then
       info "[dry-run] 将新建 $hp/pre-commit（A3）+ chmod +x"
     elif gate_hook_wired "$dir/pre-commit"; then
       info "[dry-run] $hp/pre-commit 已接线（规范块 + 前置位置）—— 不动"
+    elif gate_hook_block_unclosed_foreign "$dir/pre-commit"; then
+      info "[dry-run] $hp/pre-commit 含外来内容的未闭合哨兵块 → 只在 shebang 之后插入规范块（不删任何字节）+ WARN + 本次 init 非零（需人工清理）"
     elif [ -x "$dir/pre-commit" ]; then
       info "[dry-run] 将把规范哨兵块前置到 shebang 之后（原字节顺序与权限不动；旧块/半截块一并重建）"
     else
@@ -2582,6 +2685,13 @@ ensure_gate_wiring() {
 ensure_gate_wiring_locked() {
   local root="" hp="" dir="" hook="" provid=""
   provid=$(ci_provider)
+
+  # 0) F15 越界守卫：hooksPath 解析到仓库外（如 `core.hooksPath=..`）→ 拒绝装配。
+  #    放在资产写入之前，保证「不写任何文件、不 chmod、不动 git config」；失败登记进
+  #    装配失败清单 → cmd_init 非零（越界不是「装好了」，是「拒绝装」）。
+  if gate_hooks_path_escape; then
+    return 0
+  fi
 
   # 1) A1/A2/A4：缺失才写 + 内容与规范不一致则自愈覆盖（F10）+ chmod +x
   write_gate_assets
@@ -2654,6 +2764,16 @@ ensure_gate_wiring_locked() {
     fi
   elif [ "$fresh" = "1" ] && gate_hook_block_complete "$hook"; then
     warn "$hp/pre-commit 哨兵块非规范或位置在 exit/exec 之后（首次播种不改写既有块）→ 再跑一次 ponygo init 将按规范块重建（2.4 现报未接线）"
+  elif gate_hook_block_unclosed_foreign "$hook"; then
+    # F14：未闭合块（有 BEGIN 无 END）里含**外来内容** → **一个字节都不删**：只在 shebang 之后
+    # 插入规范块，原文件每一行（含用户自有行）原样保留，并让 init 非零——清理责任交回人。
+    if gate_hook_write_block "$hook" 0; then
+      warn "[WARN] 检测到含外来内容的未闭合哨兵块（有 BEGIN 无 END），需人工清理：$hp/pre-commit"
+      warn "  已只在 shebang 之后插入规范块，原文件每一行（含用户自有行）都保留——未删除任何字节；请人工清理残块后重跑 ponygo init"
+      gate_write_fail "$hp/pre-commit" "未闭合哨兵块含外来内容 → 未自愈（避免删除用户行），需人工清理残块后重跑 ponygo init"
+    else
+      gate_write_fail "$hp/pre-commit" "写入失败（原子替换 mktemp/mv 失败，目录不可写？）——规范块未能插入"
+    fi
   elif gate_hook_write_block "$hook"; then
     warn "$hp/pre-commit 哨兵块非规范或位置在 exit/exec 之后 → 已重写为规范块并前置到 shebang 之后（原字节顺序与权限不动）"
     [ -x "$hook" ] || info "提示：该钩子不可执行（沉睡钩子）——框架不改权限：chmod +x $hp/pre-commit"

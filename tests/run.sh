@@ -3300,6 +3300,133 @@ s65_f9_f10_symlink_and_selfheal() {
   assert_nonzero "F10 正向控制：自愈后的 A1 拒绝 1.7 违例" "$S_RC"
 }
 
+# ============================================================
+# Wave-3 复验红相（s66~s68）—— L2-T 独立测试者冻结，实现方只读
+# 真源：review-verify-1.json / review-l3p-verify.json（2 BLOCKING + 1 ADVISORY，commit 5ee46ea）。
+# 铁律不变：每条反例配正向控制；失败描述写清期望/实得。
+# ============================================================
+
+# 更严的顶层 exit/exec 行号探测：覆盖 `exit`（裸）、`exit;`、`exit $?`、`exec …`。
+# 既有 first_exit_line 只认「exit + 空白」，裸 exit / 分号形态会漏检（正是 s66 的缺陷面）；
+# 此处不改既有 helper（避免动老场景断言），另立新名供 wave-3 使用。
+first_exit_line_v2() { # <hook 文件> → 首个顶层 exit/exec 行号（无则空）
+  grep -nE '^[[:space:]]*(exit|exec)([[:space:];]|$)' "$1" 2>/dev/null | head -n1 | cut -d: -f1
+}
+gate_block_lines() { # 打印规范哨兵块（与 prepend_gate_block/ponygo 生成器逐字同款）
+  printf '%s\n' "$GATE_MARKER"
+  printf 'if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then\n'
+  printf '  bash "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" || exit 1\n'
+  printf 'fi\n'
+  printf '%s\n' "$GATE_MARKER_END"
+}
+
+s66_f1_bare_exit_position() {
+  echo "--- 场景66：F1 位置判据须识别裸 exit / exit;（块落其后的 legacy 钩子=假接线）"
+  local T V EXITLINE bs es G; G=$(sanitize_git)
+  for V in bare semi dollar; do
+    case "$V" in
+      bare)   EXITLINE='exit' ;;
+      semi)   EXITLINE='exit;' ;;
+      dollar) EXITLINE='exit $?' ;;
+    esac
+    T=$(new_case); git_seed_repo "$T"; run_cli "$T" init --yes; set_level2 "$T"
+    # 模拟旧版「末尾追加」留下的 legacy 钩子：块在 exit 之后
+    { printf '#!/usr/bin/env bash\n'; printf 'echo custom\n'; printf '%s\n' "$EXITLINE"; gate_block_lines; } \
+      > "$T/.githooks/pre-commit"
+    chmod +x "$T/.githooks/pre-commit"
+    # shellcheck disable=SC2046
+    run_cli_env "$T" $G status
+    assert_eq "变体 $V（$EXITLINE）：legacy 假接线 → status exit 1" 1 "$R_RC"
+    assert_contains "变体 $V：legacy 报 2.4" "$R_OUT" "2.4"
+    run_cli "$T" init --yes
+    bs=$(block_begin_line "$T/.githooks/pre-commit"); es=$(first_exit_line_v2 "$T/.githooks/pre-commit")
+    if [ -n "$bs" ] && [ -n "$es" ] && [ "$bs" -lt "$es" ]; then
+      ok "变体 $V：init 后哨兵块前置到 exit 之前（块 $bs 行 < exit $es 行）"
+    else
+      bad "变体 $V：哨兵块仍在 exit 之后或缺失（块 ${bs:-缺失} 行 vs exit ${es:-无} 行）——该块永不执行（BLOCKING）"
+    fi
+    assert_file_has "变体 $V：用户原有行 echo custom 仍在" "$T/.githooks/pre-commit" "echo custom"
+    stage_status_violation "$T" "2026-01-11-$V.md" >/dev/null
+    run_git_commit "$T" "must be rejected"
+    assert_nonzero "变体 $V：非法 ADR 提交必须 rc≠0（块真被执行）" "$C_RC"
+  done
+
+  # 正向控制：块正确前置在裸 exit 之前 → status 0 且非法 ADR 必被拒（证明判据可满足）
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init --yes; set_level2 "$T"
+  { printf '#!/usr/bin/env bash\n'; gate_block_lines; printf 'echo custom\nexit\n'; } \
+    > "$T/.githooks/pre-commit"
+  chmod +x "$T/.githooks/pre-commit"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G status
+  assert_eq "正向控制：块前置在裸 exit 之前 → status exit 0" 0 "$R_RC"
+  assert_contains "正向控制：结论行 L0-L2" "$R_OUT" "L0-L2"
+  stage_status_violation "$T" "2026-01-11-ok.md" >/dev/null
+  run_git_commit "$T" "must be rejected"
+  assert_nonzero "正向控制：裸 exit 钩子下非法 ADR 被拒（rc≠0）" "$C_RC"
+}
+
+s67_f2_foreign_lines_not_truncated() {
+  echo "--- 场景67：未闭合哨兵块含外来行 → 不得静默截断（须 WARN + 非零）；纯半截块仍自愈"
+  local T
+  T=$(new_case); git_seed_repo "$T"
+  ( cd "$T" && mkdir -p .githooks && git config core.hooksPath .githooks ) >/dev/null 2>&1
+  cat > "$T/.githooks/pre-commit" <<'EOF'
+#!/usr/bin/env bash
+echo user-line-1
+# >>> ponygo-gate: adr-verify v1 >>>
+if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
+echo user-line-2
+echo user-line-3
+EOF
+  chmod +x "$T/.githooks/pre-commit"
+  run_cli "$T" init --yes
+  assert_nonzero "含外来内容的未闭合哨兵块 → init 必须非零退出（不得静默截断）" "$R_RC"
+  assert_contains "输出含 WARN" "$R_OUT" "WARN"
+  assert_matches "WARN 说明哨兵块未闭合" "$R_OUT" '未闭合'
+  assert_matches "WARN 说明含外来内容/需人工清理" "$R_OUT" '外来|人工'
+  assert_file_has "原有行 echo user-line-1 必须保留" "$T/.githooks/pre-commit" "echo user-line-1"
+  assert_file_has "外来行 echo user-line-2 必须保留" "$T/.githooks/pre-commit" "echo user-line-2"
+  assert_file_has "外来行 echo user-line-3 必须保留" "$T/.githooks/pre-commit" "echo user-line-3"
+
+  # 正向对照：纯半截块（区域内只有规范行、无外来行）仍必须自愈为单块 + 语法合法
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init --yes; set_level2 "$T"
+  cat > "$T/.githooks/pre-commit" <<'EOF'
+#!/usr/bin/env bash
+# >>> ponygo-gate: adr-verify v1 >>>
+if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
+EOF
+  chmod +x "$T/.githooks/pre-commit"
+  run_cli "$T" init --yes
+  assert_eq "正向对照：纯半截块自愈 init exit 0" 0 "$R_RC"
+  assert_eq "正向对照：自愈后哨兵尾行恰好 1" 1 \
+    "$(grep -cF "$GATE_MARKER_END" "$T/.githooks/pre-commit" 2>/dev/null || printf 0)"
+  bash -n "$T/.githooks/pre-commit" 2>/dev/null
+  assert_eq "正向对照：自愈后 bash -n rc=0" 0 "$?"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $(sanitize_git) status
+  assert_eq "正向对照：自愈后 status exit 0（2.4 认接线）" 0 "$R_RC"
+}
+
+s68_f_hookspath_escape() {
+  echo "--- 场景68：hooksPath 越界（core.hooksPath=..）→ init 必须拒绝且不得在仓外落钩子"
+  local T parent
+  T=$(new_case); git_seed_repo "$T"; parent=$(dirname "$T")
+  ( cd "$T" && git config core.hooksPath .. ) >/dev/null 2>&1
+  rm -f "$parent/pre-commit"
+  run_cli "$T" init --yes
+  assert_nonzero "hooksPath=.. → init 必须非零拒绝（不得写到仓库外）" "$R_RC"
+  assert_contains "输出含 WARN" "$R_OUT" "WARN"
+  assert_matches "WARN 说明越界/仓库外" "$R_OUT" '仓库外|仓外|越界'
+  assert_missing "不得在仓外创建 ../pre-commit" "$parent/pre-commit"
+  rm -f "$parent/pre-commit"
+
+  # 正向控制：hooksPath 未设 → init 正常装配（拒绝只针对越界，不是把正常路径也拒了）
+  T=$(new_case); git_seed_repo "$T"
+  run_cli "$T" init --yes
+  assert_eq "正向控制：hooksPath 未设 → init exit 0" 0 "$R_RC"
+  assert_exists "正向控制：生成 .githooks/pre-commit" "$T/.githooks/pre-commit"
+}
+
 s42_observe_monorepo_subcomponents
 s43_observe_pipeline_awareness
 s44_observe_subcomponent_blocking
@@ -3324,6 +3451,9 @@ s62_f5_remedy_by_cause
 s63_f6_tilde_expansion
 s64_f8_f11_dry_run_provider
 s65_f9_f10_symlink_and_selfheal
+s66_f1_bare_exit_position
+s67_f2_foreign_lines_not_truncated
+s68_f_hookspath_escape
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
 [ "$FAIL" -eq 0 ] || exit 1
