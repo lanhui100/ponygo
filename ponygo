@@ -3,13 +3,13 @@
 # ponygo —— 项目工程化治理元框架的命令行入口（单文件、零依赖 shell）
 #
 # 用法：
-#   ponygo init     [--yes] [--dry-run]   在项目根建立/注入 .agents/ + .meta/ 治理骨架
+#   ponygo init     [--dry-run]           在项目根建立/注入 .agents/ + .meta/ 治理骨架
 #   ponygo audit    [--level S|M] [--run-specs] [--dry-run]  自适应体检：打分 + 缺口 + 最小改进动作（有治理根时内嵌级自洽验证，判据不符 exit 1）
 #   ponygo status                         查看成熟度级与骨架完整度（骨架缺口或声明级判据不符 exit 1）
 #   ponygo upgrade                        跟随框架升级指引（首版不实际合并，见 -h）
 #   ponygo sync                           把 constitution 投影到根 AGENTS.md / CLAUDE.md（模板态投影初始引导）
 #
-# 设计约束：判定优先只读；破坏性动作前必须确认（或 --yes）。
+# 设计约束：判定优先只读；所有命令无交互确认（破坏性动作收到即执行）；`--dry-run` 仅预览、零落盘。
 #           只读命令（status/audit）不执行仓库脚本——执行需显式 opt-in（audit --run-specs）。
 #           非零退出（non-zero exit）语义：凡机器可查的缺口，命令 exit 1。
 # 平台边界：Windows Git Bash / GNU 用户态（find -printf、sed -i、date -d 按 GNU 语义）。
@@ -121,23 +121,6 @@ looks_empty() {
   for d in src lib app packages crates; do
     [ -d "$d" ] && return 1
   done
-  return 0
-}
-
-confirm_or_skip() {
-  # 除非 --yes，否则打印即将执行并等确认；--dry-run 只打印
-  if [ "${DRY_RUN:-0}" = "1" ]; then
-    info "[dry-run] $*"
-    return 1
-  fi
-  if [ "${YES:-0}" != "1" ]; then
-    printf 'ponygo: 即将执行：%s\nponygo: 回车继续 / 输入 n 取消：' "$*"
-    read -r ans || ans=n
-    case "$ans" in
-      ""|[Yy]|[Yy][Ee][Ss]) return 0 ;;
-      *) info "已取消"; return 1 ;;
-    esac
-  fi
   return 0
 }
 
@@ -1174,6 +1157,27 @@ do_sync() {
 # 五条机械 WARN：非 git 仓库 / 根目录游离计划文档 / git 仓库内无 .gitignore /
 # 文档新鲜度启发式（v2.1）/ 未来日期决策文件（v2.1）。
 # "先 ADR 后代码"的时序不可机械判（语义，靠 review 用 git log 校准）——机械锁的是时序的可判定性载体。
+# ---------- 决策登记探测（docs-tier opt-out / 替代治理形态适配） ----------
+# docs-tier decision：.agents/notes/** 下文件名含 docs-tier 的 decision（任何 lifecycle/class）
+docs_tier_decision_exists() {
+  [ -d "$DECISIONS_DIR" ] || return 1
+  find "$DECISIONS_DIR" -type f -name '*docs-tier*.md' -print -quit 2>/dev/null | grep -q .
+}
+
+# 适配决策：.agents/notes/**/process/*alt-governance*.md（status/audit 的 WARN 完成判据）
+alt_gov_decision_exists() {
+  [ -d "$DECISIONS_DIR" ] || return 1
+  find "$DECISIONS_DIR" -type f -path '*/process/*alt-governance*.md' -print -quit 2>/dev/null | grep -q .
+}
+
+# 已检出替代治理形态但未登记适配决策 → WARN（报告性，不改退出码）；登记后静默
+warn_adaptation_pending() {
+  if [ -z "$(detect_alt_gov_hits)" ]; then return 0; fi
+  if alt_gov_decision_exists; then return 0; fi
+  printf 'ponygo: WARN 适配决策未登记（完成判据：落一条 .agents/notes/**/process/*alt-governance*.md；任务书见 .meta/adaptation/alt-governance.md）\n' >&2
+  return 0
+}
+
 warn_governance_hygiene() {
   # 1. 治理根已建但不在 git 仓库内（版本派生/提交边界/钩子挂载全部悬空）
   if { [ -d "$META_DIR" ] || [ -d "$AGENTS_RUNTIME_DIR" ]; } && \
@@ -1479,7 +1483,10 @@ verify_ladder() {
           # 与事实矛盾（实际已激活）时 WARN 催对齐，不判 FAIL。
           # spec §3.3：off 是显式 opt-out，须录一条 decision（对齐 retire 的"退级须录 decision"指引式，非硬校验）
           DT_OFF=1
-          printf 'ponygo: 提示 docs-tier: off 是显式 opt-out——建议录一条 decision（.agents/notes/implemented/process/）说明为何不上文档分层（对齐 retire 的退级须录 decision 纪律）\n' >&2
+          # wave-5：假提示修复——已登记 `*docs-tier*` decision 时静默（提示的目的已达成）
+          if ! docs_tier_decision_exists; then
+            printf 'ponygo: 提示 docs-tier: off 是显式 opt-out——建议录一条 decision（.agents/notes/implemented/process/）说明为何不上文档分层（对齐 retire 的退级须录 decision 纪律）\n' >&2
+          fi
           if [ "$dt_active" = "1" ]; then
             printf 'ponygo: WARN docs-tier: off 但 .meta/docs-tier/README.md 已含「已激活文档家清单」——声明与事实矛盾，请对齐（去掉 off 或退回模板态）\n' >&2
           fi
@@ -2905,31 +2912,203 @@ gate_wiring_report() {
   return 0
 }
 
-# ---------- 命令实现 ----------
-# 探测既有治理形态（"已认可替代物"条款，见 checklists/audit.md）——init 前提示，防盲目双轨
-detect_alt_gov() {
-  local hits="" d
+# ---------- 替代治理形态：检出 → 适配任务书（wave-5：不阻断 init） ----------
+ADAPT_BOOK_DIR="$META_DIR/adaptation"
+ADAPT_BOOK="$ADAPT_BOOK_DIR/alt-governance.md"
+
+# 检出既有治理形态（"已认可替代物"条款），输出按固定序的 "路径<TAB>类别" 行（无命中输出空）。
+# 类别：decision=决策载体 hook=本地钩子 ci=远端流水线 contract=协作契约 owner=代码所有权 agents=AI 常载命约
+detect_alt_gov_hits() {
+  local d
   for d in docs/adr docs/decisions docs/architecture/decisions; do
-    [ -d "$d" ] && hits="$hits $d(决策载体)"
+    [ -d "$d" ] && printf '%s\tdecision\n' "$d"
   done
   # [ -e ] 同时覆盖文件与目录（.github/workflows 是目录，其余是文件）
-  for d in CONTRIBUTING.md CODEOWNERS .pre-commit-config.yaml lefthook.yml .github/workflows .gitlab-ci.yml Jenkinsfile azure-pipelines.yml; do
-    [ -e "$d" ] && hits="$hits $d(强制/流程)"
+  for d in .pre-commit-config.yaml lefthook.yml .husky; do
+    [ -e "$d" ] && printf '%s\thook\n' "$d"
   done
-  printf '%s' "$hits"
+  # .github/workflows/：只装框架自己生成的 A5（ponygo-governance.yml）不算替代治理形态——
+  # 框架自身产物不是「别家流水线」（否则模板仓/已接线实例会永久假 WARN）。
+  if [ -d .github/workflows ] \
+     && find .github/workflows -maxdepth 1 -type f ! -name 'ponygo-governance.yml' -print -quit 2>/dev/null | grep -q .; then
+    printf '%s\tci\n' .github/workflows
+  fi
+  for d in .gitlab-ci.yml Jenkinsfile azure-pipelines.yml .drone.yml bitbucket-pipelines.yml; do
+    [ -e "$d" ] && printf '%s\tci\n' "$d"
+  done
+  [ -e CONTRIBUTING.md ] && printf 'CONTRIBUTING.md\tcontract\n'
+  [ -e CODEOWNERS ] && printf 'CODEOWNERS\towner\n'
+  # 既有 AI 常载命约：文件存在且**不含** ponygo 标记（ponygo / BEGIN constitution）才算替代物
+  for d in AGENTS.md CLAUDE.md; do
+    [ -f "$d" ] || continue
+    grep -qE 'ponygo|BEGIN constitution' "$d" 2>/dev/null || printf '%s\tagents\n' "$d"
+  done
 }
+
+adapt_kind_label() {
+  case "$1" in
+    decision) printf '决策载体' ;;
+    hook)     printf '本地钩子' ;;
+    ci)       printf '远端流水线' ;;
+    contract) printf '协作契约' ;;
+    owner)    printf '代码所有权' ;;
+    agents)   printf 'AI 常载命约' ;;
+    *)        printf '未知' ;;
+  esac
+}
+
+# 语义映射：与 .agents/notes / .githooks / ci-verify.sh / constitution 的对应关系
+adapt_map_text() {
+  case "$1" in
+    decision) printf '与 `.agents/notes/` 同权——notes 是决策的唯一真源（lifecycle/class 归档 + `Status:` 头）；既有目录降级为历史存档，不再新增' ;;
+    hook)     printf '与 `.githooks/`（A3 钩子）同权——pre-commit 的强制点唯一，哨兵块由框架前置插入，不双跑' ;;
+    ci)       printf '与 `.meta/gates/ci-verify.sh`（A4 远端门）同权——流水线只做「调一步门」的薄壳，不承载判定逻辑' ;;
+    contract) printf '与 `constitution` 同权——贡献流程属常载命约（`.meta/constitution/constitution.md` → 根 AGENTS.md / CLAUDE.md 投影）' ;;
+    owner)    printf '与 `.meta/gates/` 的人审侧互补——机械门判「有没有/对不对」，CODEOWNERS 判「谁批」' ;;
+    agents)   printf '与 ponygo 的常载命约投影同权——同一入口文件，ponygo 只占哨兵块区间（`<!-- BEGIN constitution -->`…`<!-- END constitution -->`）' ;;
+  esac
+}
+
+# 唯一动作（每项只有一条可执行动作，不做迁移工程）
+adapt_action_text() {
+  case "$1" in
+    decision) printf '既有决策目录原样保留只读（不迁移、不改写），新决策一律落 `.agents/notes/{lifecycle}/process/`；并落一条 `*alt-governance*.md` 写明两处分工' ;;
+    hook)     printf '无需动手：框架已自动把哨兵块插入其 pre-commit，hooksPath 不动（若 `.pre-commit-config.yaml` 是外部框架的配置文件而 hooksPath 为空，框架挂 `.githooks`，两者同时生效但不重复跑同一脚本）' ;;
+    ci)       printf '在既有流水线加一步 `bash .meta/gates/ci-verify.sh`，不要新建 workflow' ;;
+    contract) printf '在既有 CONTRIBUTING.md 顶部加一行指向 `.meta/constitution/constitution.md` 与根 `AGENTS.md`（不迁移、不重写既有正文）' ;;
+    owner)    printf '在 constitution 的 Mission 节写一句「CODEOWNERS 即人审门」，不新建第二份所有权文件' ;;
+    agents)   printf '把既有正文与 ponygo 常载命约并入同一文件：ponygo 区块用哨兵块包裹，其余正文一字不动，随后 `ponygo sync` 只替换哨兵区间' ;;
+  esac
+}
+
+# 完成判据（机器可查或一次人工确认）
+adapt_done_text() {
+  case "$1" in
+    decision) printf '`.agents/notes/**/process/*alt-governance*.md` 存在，且写明旧决策目录「只读 / 新决策入 notes」' ;;
+    hook)     printf '该配置的 pre-commit 内含 ponygo 哨兵块且 `git commit` 仍能通过；`ponygo status` 的 2.4 无 FAIL' ;;
+    ci)       printf '流水线里出现 `bash .meta/gates/ci-verify.sh` 这一步，且一次 PR 运行通过' ;;
+    contract) printf 'CONTRIBUTING.md 内出现指向 `.meta/constitution/constitution.md` 的路径' ;;
+    owner)    printf 'constitution 的 Mission 节有一句明确 CODEOWNERS 是评审门' ;;
+    agents)   printf '`AGENTS.md` / `CLAUDE.md` 同时含既有项目指令与 ponygo 标记区（`ponygo` / `BEGIN constitution`），重跑 `ponygo sync` 后既有正文不变' ;;
+  esac
+}
+
+# 终端摘要用的极短句（一行一项）
+adapt_short_text() {
+  case "$1" in
+    decision) printf '旧决策目录只读，新决策落 .agents/notes/' ;;
+    hook)     printf '哨兵块已自动插入其 pre-commit，hooksPath 不动' ;;
+    ci)       printf '流水线加一步 bash .meta/gates/ci-verify.sh，勿新建 workflow' ;;
+    contract) printf '顶部加一行指向 .meta/constitution/ 与 AGENTS.md' ;;
+    owner)    printf 'constitution 记一句「CODEOWNERS = 人审门」' ;;
+    agents)   printf '与 ponygo 常载命约合并为同一文件（哨兵块隔离）' ;;
+  esac
+}
+
+# 幂等重写任务书：命中即生成（内容纯函数 → 二次 init md5 不变）；无命中删文件。
+# dry=1 时只打印计划，零落盘。
+write_adaptation_book() {
+  local dry="${1:-0}" hits n i path kind tmp
+  hits=$(detect_alt_gov_hits)
+  if [ -z "$hits" ]; then
+    if [ -f "$ADAPT_BOOK" ]; then
+      if [ "$dry" = "1" ]; then
+        info "[dry-run] 已无替代治理形态 → 将删除 $ADAPT_BOOK"
+      else
+        rm -f "$ADAPT_BOOK"
+        rmdir "$ADAPT_BOOK_DIR" 2>/dev/null
+        info "已无替代治理形态——$ADAPT_BOOK 已移除"
+      fi
+    fi
+    return 0
+  fi
+  n=$(printf '%s\n' "$hits" | wc -l | tr -d ' ')
+  if [ "$dry" = "1" ]; then
+    info "[dry-run] 将幂等重写 $ADAPT_BOOK（检出替代治理形态 $n 项）"
+    return 0
+  fi
+  mkdir -p "$ADAPT_BOOK_DIR" 2>/dev/null
+  tmp=$(mktemp "$ADAPT_BOOK_DIR/.alt-governance.XXXXXX" 2>/dev/null) || { warn "无法创建临时文件：适配任务书未更新（重跑 ponygo init）"; return 0; }
+  {
+    printf '# 替代治理形态适配任务书\n\n'
+    printf '> 由 `ponygo init` 生成：**幂等重写，勿手工编辑**（检测清单真源 = `ponygo` 的 `detect_alt_gov_hits`）。\n'
+    printf '> 本文件**不阻断**装配（`ponygo init` 照常完成，rc=0）；它替代「先别注入、先去 audit」的旧阻断叙事。\n'
+    printf '> 未登记适配决策前 `ponygo status` / `ponygo audit` 会持续 WARN；全局完成判据 = 落一条\n'
+    printf '> `.agents/notes/**/process/*alt-governance*.md` 写明下表各项的处置。\n\n'
+    printf '## 检出项（%s 项）\n\n' "$n"
+    printf '| # | 检出项 | 类别 |\n|---|---|---|\n'
+    i=0
+    while IFS="$(printf '\t')" read -r path kind; do
+      i=$((i+1))
+      printf '| %s | `%s` | %s |\n' "$i" "$path" "$(adapt_kind_label "$kind")"
+    done <<EOF_HITS
+$hits
+EOF_HITS
+    printf '\n## 逐项适配（检出项 → 语义映射 → 唯一动作 → 完成判据）\n'
+    i=0
+    while IFS="$(printf '\t')" read -r path kind; do
+      i=$((i+1))
+      printf '\n### %s. `%s`（%s）\n\n' "$i" "$path" "$(adapt_kind_label "$kind")"
+      printf -- '- **检出项**：`%s`（%s）\n' "$path" "$(adapt_kind_label "$kind")"
+      printf -- '- **语义映射**：%s\n' "$(adapt_map_text "$kind")"
+      printf -- '- **唯一动作**：%s\n' "$(adapt_action_text "$kind")"
+      printf -- '- **完成判据**：%s\n' "$(adapt_done_text "$kind")"
+    done <<EOF_HITS
+$hits
+EOF_HITS
+  } > "$tmp" 2>/dev/null
+  if [ -f "$ADAPT_BOOK" ] && cmp -s "$tmp" "$ADAPT_BOOK"; then
+    rm -f "$tmp"
+    info "适配任务书已是最新：$ADAPT_BOOK（$n 项）"
+  else
+    if mv -f "$tmp" "$ADAPT_BOOK" 2>/dev/null; then
+      chmod 644 "$ADAPT_BOOK" 2>/dev/null || true
+      info "适配任务书已写入：$ADAPT_BOOK（$n 项）"
+    else
+      rm -f "$tmp"
+      warn "写入失败：$ADAPT_BOOK（目录不可写）——适配任务书未更新"
+    fi
+  fi
+  return 0
+}
+
+# 终端摘要：首行 N 项 + 任务书路径，每项一行，末行 WARN 提示；总行数恒 ≤ 6（>4 项折叠）
+print_adaptation_summary() {
+  local hits n i path kind shown=0 rest
+  hits=$(detect_alt_gov_hits)
+  [ -n "$hits" ] || return 0
+  n=$(printf '%s\n' "$hits" | wc -l | tr -d ' ')
+  info "检出替代治理形态 $n 项 → 适配任务书：$ADAPT_BOOK"
+  if [ "$n" -le 4 ]; then
+    while IFS="$(printf '\t')" read -r path kind; do
+      info "  - $path（$(adapt_kind_label "$kind")）：$(adapt_short_text "$kind")"
+    done <<EOF_HITS
+$hits
+EOF_HITS
+  else
+    while IFS="$(printf '\t')" read -r path kind; do
+      shown=$((shown+1))
+      if [ "$shown" -le 3 ]; then
+        info "  - $path（$(adapt_kind_label "$kind")）：$(adapt_short_text "$kind")"
+      fi
+    done <<EOF_HITS
+$hits
+EOF_HITS
+    rest=$((n-3))
+    info "  + $rest 项见任务书"
+  fi
+  info "未登记适配决策前 status 会持续 WARN（完成判据：.agents/notes/**/process/*alt-governance*.md）"
+  return 0
+}
+
+# ---------- 命令实现 ----------
 
 cmd_init() {
   local dry=0
   [ "${DRY_RUN:-0}" = "1" ] && dry=1
-  # R15：非 TTY 且未显式 --yes → 明确拒绝。旧实现在空 stdin 下 read 失败即「已取消」→
-  # exit 0 静默 no-op（等于没装配），与 C2「不得静默缺席」矛盾。
-  # F8：--dry-run 豁免本判据——dry-run 不落盘、只打印计划，无需确认；若也被 die 拦住，
-  #     非交互环境（CI / 管道 / </dev/null）就永远看不到装配预览。R15 的本意是「不让
-  #     破坏性动作在无人确认时静默发生」，dry-run 不具破坏性，不在其射程内。
-  if [ "${YES:-0}" != "1" ] && [ "$dry" = "0" ] && [ ! -t 0 ]; then
-    die "非交互环境（stdin 非 TTY）无法确认——请显式加 --yes，例如：ponygo init --yes"
-  fi
+  # wave-5：`--yes` 与交互确认已彻底移除，R15「非 TTY 且无 --yes → die」随之删除——
+  # 无确认可等，非交互环境（CI / 管道 / </dev/null）与 TTY 走同一条路径。
+  # --dry-run 语义不变：每个写点显式守 `dry`，dry 下零落盘、零 git config 变更。
 
   if has_meta; then
     info "已存在 .meta/ 治理根（level=$(read_level)）。"
@@ -2939,26 +3118,30 @@ cmd_init() {
     # F4：写入失败必须响亮——WARN + 失败清单 + 可执行补救，然后非零退出
     # （禁止裸 `Permission denied` 一行噪声 + rc=0：那等于「装配没做成但机器说成功」）
     gate_assembly_failed && exit 1
+    write_adaptation_book "$dry"
+    print_adaptation_summary
     info "完成（幂等装配）。下一步：ponygo status 看级自洽与门禁接线，ponygo audit 体检。"
     exit 0
   fi
 
   if looks_empty; then
     info "探测：空项目 / 新项目 → 全新铺骨架"
-    confirm_or_skip "在新项目根建立 .agents/ + .meta/ 治理骨架（level: 0）" || [ "$dry" = "1" ] || exit 0
-    [ "$dry" = "1" ] || write_skeleton 0
+    if [ "$dry" = "1" ]; then
+      info "[dry-run] 将在新项目根建立 .agents/ + .meta/ 治理骨架（level: 0）"
+    else
+      write_skeleton 0
+    fi
   else
-    local alt
-    alt=$(detect_alt_gov)
-    if [ -n "$alt" ]; then
-      info "探测：有代码，且发现既有治理形态（已认可替代物候选）：$alt"
-      info "  同等治理效果可用别的形态达成——不建议盲目注入，制造两套并行体系。"
-      info "  建议：先 'ponygo audit' 体检对照 checklists/audit.md「已认可替代物」条款，再决定迁移。"
+    if [ -n "$(detect_alt_gov_hits)" ]; then
+      info "探测：有代码，且发现既有治理形态（已认可替代物）→ 照常装配，并生成适配任务书（不阻断）"
     else
       info "探测：有代码但无治理 → 注入骨架（不碰业务代码）"
     fi
-    confirm_or_skip "注入 .agents/ + .meta/ 治理骨架到既有代码仓库（只增不改业务文件）" || [ "$dry" = "1" ] || exit 0
-    [ "$dry" = "1" ] || write_skeleton 0
+    if [ "$dry" = "1" ]; then
+      info "[dry-run] 注入 .agents/ + .meta/ 治理骨架到既有代码仓库（只增不改业务文件）"
+    else
+      write_skeleton 0
+    fi
   fi
 
   # 「交付即接线」：A1/A2/A4 已随骨架落地，这里补本地层（hooksPath + A3 钩子）并按 forge 生成 A5。
@@ -2971,8 +3154,17 @@ cmd_init() {
   # F4：同 has_meta 分支——写失败一律非零退出
   gate_assembly_failed && exit 1
 
+  # 替代治理形态 → 适配任务书（幂等；无命中删文件）；摘要打印在同步之前，WARN 指引先于「完成」行
+  write_adaptation_book "$dry"
+  print_adaptation_summary
+
   # 铺完骨架后始终投影：模板态投初始引导（bootstrap），已填槽投常载命约
-  confirm_or_skip "把 constitution 投影到根 AGENTS.md / CLAUDE.md（模板态投影初始引导）" && do_sync
+  # （--dry-run 只打印计划：原来由 confirm_or_skip 的 dry-run 分支挡住 do_sync，这里显式守）
+  if [ "$dry" = "1" ]; then
+    info "[dry-run] 把 constitution 投影到根 AGENTS.md / CLAUDE.md（模板态投影初始引导）"
+  else
+    do_sync
+  fi
   info "完成。当前 level=$(read_level)。下一步：ponygo status 查看骨架完整度。"
 }
 
@@ -3093,6 +3285,7 @@ cmd_audit() {
   info "当前治理级：$(fmt_level "$(read_level)")"
   warn_meta_violations
   warn_governance_hygiene
+  warn_adaptation_pending
   echo ""
   echo "缺口与最小改进动作（按杠杆排序，优先「强制层」）："
   if [ ! -f "$META_YAML" ]; then
@@ -3161,6 +3354,7 @@ cmd_status() {
   echo "治理级：$(fmt_level "$lv")"
   warn_meta_violations
   warn_governance_hygiene
+  warn_adaptation_pending
   echo ""
   echo "骨架完整度："
   local missing=0
@@ -3306,14 +3500,21 @@ cmd_retire() {
   [ -f "$META_YAML" ] || die "$META_YAML 缺失或不是常规文件——先 'ponygo init' 再退级"
   case "$target" in
     off)
-      confirm_or_skip "把 ai-surface 置 off 且 level 归 0（整体退场到纯 L0 长驻模式）" || return 0
+      # wave-5：无交互确认（收到即执行）；--dry-run 仍须零落盘
+      if [ "${DRY_RUN:-0}" = "1" ]; then
+        info "[dry-run] 把 ai-surface 置 off 且 level 归 0（整体退场到纯 L0 长驻模式）"
+        return 0
+      fi
       sed -i 's/^level:.*/level: 0/' "$META_YAML"
       grep -qE '^ai-surface:' "$META_YAML" || printf 'ai-surface: off\n' >> "$META_YAML"
       sed -i 's/^ai-surface:.*/ai-surface: off/' "$META_YAML"
       info "已整体退场：level 0 + ai-surface off。勿忘录一条退级 decision。"
       ;;
     [0-5])
-      confirm_or_skip "把 level 降级到 $target（并提示移除超档机制）" || return 0
+      if [ "${DRY_RUN:-0}" = "1" ]; then
+        info "[dry-run] 把 level 降级到 $target（并提示移除超档机制）"
+        return 0
+      fi
       sed -i "s/^level:.*/level: $target/" "$META_YAML"
       # 联动：降到 L0 时应清掉 ai-surface 悬挂（否则 sync 仍会生成投影，与退场语义冲突）
       if [ "$target" = "0" ] && grep -qE '^ai-surface:[[:space:]]*on' "$META_YAML"; then
@@ -4445,7 +4646,7 @@ usage_observe() {
 observe —— 可观测性治理维度（判定 ob0/ob1/ob2；ob3 仅为目标画像，不参与判定）
   ponygo observe status                           静态报告（不判定）：声明在场/占位残留/skill 在场与版本；只读，exit 0
   ponygo observe init   --kind <k> [--service <s>] [--dims a,b] [--anchor-<dim> <path>]
-                        [--reason-<dim> <text>] [--force] [--dry-run] [--yes]
+                        [--reason-<dim> <text>] [--force] [--dry-run]
                                                   落地四维归属声明（唯一写命令；已存在声明需 --force）
   ponygo observe audit  [--level ob0|ob1|ob2] [--base <rev>] [--strict] [--json]
                                                   判定是否达到目标级（缺口仅作 backlog；--strict 时任一缺口非零）
@@ -4491,7 +4692,7 @@ usage() {
 ponygo —— 项目工程化治理元框架命令行（单文件、零依赖）
 
 用法：
-  ponygo init     [--yes] [--dry-run]    建立/注入 .agents/ + .meta/ 治理骨架（自判新/旧项目）
+  ponygo init     [--dry-run]            建立/注入 .agents/ + .meta/ 治理骨架（自判新/旧项目）
   ponygo audit    [--level S|M] [--run-specs]  自适应体检：打分 + 缺口 + 最小改进动作（判据不符 exit 1）
   ponygo status                          查看成熟度级与骨架完整度（骨架缺口或声明级判据不符 exit 1）
   ponygo upgrade  [--check]              骨架漂移报告（宇宙=s14 十文件；默认 exit 0；--check 漂移非零供 CI）
@@ -4500,17 +4701,19 @@ ponygo —— 项目工程化治理元框架命令行（单文件、零依赖）
   ponygo observe  status|init|audit|upgrade  可观测性治理维度（ob0/ob1/ob2 判定；详见 'ponygo observe --help'）
 
 选项：
-  --yes       破坏性动作前不再确认
-  --dry-run   只打印将执行的动作，不落盘
+  --dry-run   只打印将执行的动作，不落盘（唯一预览手段）
   --level S|M 强制指定审计深度档（默认按项目特征自适应）
   --run-specs 执行 gates/ 下 *.spec.sh 负样本自检（opt-in；默认不执行仓库脚本）
   --check     ponygo upgrade 专用：存在漂移 → exit 非零（供 CI；与 --dry-run 互斥）
+
+确认语义：所有命令**无交互确认**（init / sync / retire 收到即执行，无需也无法确认）；
+          预览与试跑只用 `--dry-run`（零落盘）；`--yes` 已彻底移除，传入即为未知选项。
 EOF
   usage_observe
 }
 
 # ---------- 入口 ----------
-DRY_RUN=0; YES=0; LEVEL=""; CMD=""; RETIRE_LEVEL=""; RUN_SPECS=0; UPGRADE_CHECK=0
+DRY_RUN=0; LEVEL=""; CMD=""; RETIRE_LEVEL=""; RUN_SPECS=0; UPGRADE_CHECK=0
 # observe 独立变量族：OBSERVE_SUB 承载子命令（与顶层 CMD 分离，防 'observe audit' 被
 # 'audit)' 分支二次覆盖），OBSERVE_LEVEL 只收 ob0|ob1|ob2（不复用 LEVEL 的 S|M 值域）。
 OBSERVE_SUB=""; OBSERVE_LEVEL=""; OBSERVE_JSON=0; OBSERVE_SKILL_DIR=""; OBSERVE_MAPPING_FILE=""; OBSERVE_STRICT=0
@@ -4537,7 +4740,6 @@ trap 'observe_tmp_cleanup; trap - EXIT INT TERM; exit 130' INT
 trap 'observe_tmp_cleanup; trap - EXIT INT TERM; exit 143' TERM
 while [ $# -gt 0 ]; do
   case "$1" in
-    --yes) YES=1 ;;
     --dry-run) DRY_RUN=1 ;;
     --run-specs) RUN_SPECS=1 ;;
     --check) UPGRADE_CHECK=1 ;;
@@ -4585,6 +4787,10 @@ while [ $# -gt 0 ]; do
       fi
       ;;
     *)
+      # wave-5：`--yes` 已彻底移除（无兼容分支、无交互确认）——按未知选项报错并给替代指引
+      if [ "$1" = "--yes" ]; then
+        die "未知选项：--yes（已彻底移除，无兼容开关）：已移除交互确认——init/sync/retire 已无交互确认，直接运行 ponygo init；预览用 --dry-run"
+      fi
       # observe 上下文里的裸词：不是第二个子命令词就是未知子命令，绝不落到顶层未知参数
       if [ "${CMD:-}" = "observe" ] && [ "${1#-}" = "$1" ]; then
         if [ -n "${OBSERVE_SUB:-}" ]; then

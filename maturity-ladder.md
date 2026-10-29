@@ -157,6 +157,7 @@ L0–L2 的每条退出标准，落到**布尔检查项 + 锚定命令**。这�
 > ```
 > 2.5 的"文档分层已激活"由 `ponygo init` 生成**模板态**（仅骨架占位）——升到 L2 时把 `.meta/docs-tier/README.md` 推进为"已激活文档家清单"（doc-sync 门作为 L3 依赖，§2），判据只锁"已从模板态离开"这一形状。tier 放置正确性靠 review（§2 诚实声明）。
 > **2.5 为条件判据（v2.4 起，Q1=A）**：声明载体是 `meta.yaml` 的 `docs-tier: on|off` 键（顶格、值仅小写 on/off；`on` = 启用文档分层并校验 2.5，`off` = 显式 opt-out，未声明 = SKIP + WARN 催声明）。状态机：**undeclared = SKIP + WARN 催声明（不计入 PASS）**；**off = 显式 opt-out（结论行改写为"2.1–2.4 PASS；2.5 未启用"，禁写"全部 PASS"）**；**on + 家清单仍有 `【TODO】` 残留 = FAIL**；**off + 已激活 = 矛盾 WARN（声明与事实不符，催对齐）**；**undeclared + 已激活 = PASS（实际做到优先于声明）**。`docs-tier: on` 但模板态未激活同样 FAIL。仅 `level >= 2` 时生效（L1 声明 docs-tier: on 被忽略，2.x 不在 L1 判据内），`lv >= 3` 同 L2 分支处理。声明为何不是"目录存在即可"：目录在 init 时即生成模板态，存在 ≠ 已激活——若"存在即声明"，模板态实例会被误判为已启用（见 §3.3 的 L 包实施）。
+> **`off` 的提示闭环**：`off` 时 `status` 提示"建议录一条 decision 说明为何不上文档分层"（对齐 `retire` 退级须录 decision 的纪律）；但 `.agents/notes/**` 下**已有文件名含 `docs-tier` 的 decision** 时该提示**静默**（已回应的建议不再重复催，避免 WARN 通胀）。上面"off + 已激活 = 矛盾 WARN"不受此静默影响——那说的是声明与事实不符，仍须对齐。
 
 ---
 

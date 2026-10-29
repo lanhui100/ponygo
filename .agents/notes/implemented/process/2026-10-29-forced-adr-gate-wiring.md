@@ -112,9 +112,12 @@ v1 的"fail-closed 拒绝 + 打印补救片段"也否决了：**fail-closed 在�
 **R14 非 git 目录下 `git config` 不可用** → **采纳**（非 git → 不设 hooksPath、打印
 `git init` 后重跑的指引；`init` 保持 exit 0，多场景测试依赖这一语义；2.4 在非 git 下自然 FAIL）。
 
-**R15 空 stdin 下 `confirm_or_skip` 静默 no-op** → **采纳**（非 TTY 且未给 `--yes` → `die`
-「非交互环境请显式 --yes」；交互 TTY 行为不变）。备选"空 stdin 当默认拒绝、继续走非交互路径"：
-否决，静默 no-op 会让 `printf '' | ponygo init` 在 CI 里"成功"却什么都没做。
+**R15 空 stdin 下 `confirm_or_skip` 静默 no-op** → **已作废**：`--yes` 与交互确认整体移除
+（确认既不防误操作，又制造两条逃逸路径：非 TTY 直接失败 / 交互读失败静默取消）。原裁决是
+"非 TTY 且未给 `--yes` → `die`「非交互环境请显式 --yes」"，属在一个不该存在的机制里做局部修补；
+正确修法是删掉"要不要确认"这个问题本身——写入路径本就幂等/只增不改，"确认"无法变更任何结果。
+现行语义：`init` 不读 stdin、无 `--yes`，`--dry-run` 是唯一预览手段。取代者见
+`implemented/process/2026-10-29-remove-yes-and-adapt-alt-governance.md`。
 
 **否决：新增 `ponygo gate adr` 子命令**（终裁 §6.4）。它看起来最"框架正统"——一个统一的
 门禁入口。否决理由：会在 CLI 内造**第三份** 1.1–1.9 判定逻辑副本（真源 = `verify-note.sh`，
@@ -190,8 +193,9 @@ A2 把该 case 做成**探针**：真源将来覆盖则断言拒绝，未覆盖�
 - `.agents/skills/write-adr/SKILL.md` 增「非平凡判定边界」一节：非平凡/平凡清单 + 明写
   「判定权在模型，框架只锁落盘后的格式门」（用户硬约束 C1）；
 - `ponygo` 侧（Executor 写域）：`ensure_gate_wiring` + `has_meta` 早退废除 + `write_skeleton`
-  去 `git config` + `verify_ladder` 2.4 五条 AND + R15 非 TTY `die` + `cmd_upgrade` 基准不受
-  git config 污染；`tests/` 侧（Test Agent 写域）：s12/s24/s28 正例夹具补 marker + wiring +
+  去 `git config` + `verify_ladder` 2.4 五条 AND + `cmd_upgrade` 基准不受
+  git config 污染（原 R15 非 TTY `die` 已作废，见 `implemented/process/2026-10-29-remove-yes-and-adapt-alt-governance.md`）；
+  `tests/` 侧（Test Agent 写域）：s12/s24/s28 正例夹具补 marker + wiring +
   chmod + 新增装配/追加/不可执行分支用例。
 
 **连锁效应（预期，非缺陷）**：已声明 L2 但尚未接线的实例（如 ponyfun / job_copilot），

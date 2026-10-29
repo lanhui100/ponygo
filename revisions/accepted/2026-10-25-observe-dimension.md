@@ -23,12 +23,16 @@ ponygo 既有判据（L0–L5）只看治理骨架与声明级通用判据，**�
 ```
 ponygo observe status                           只读静态报告（不判定），exit 0
 ponygo observe init   --kind <k> [--service <s>] [--dims a,b] [--anchor-<dim> <path>]
-                      [--reason-<dim> <text>] [--force] [--dry-run] [--yes]
+                      [--reason-<dim> <text>] [--force] [--dry-run]
                                                 落地四维归属声明（唯一写命令）
 ponygo observe audit  [--level ob0|ob1|ob2] [--base <rev>] [--json]
                                                 判定是否达到目标级（缺口仅作 backlog，不决定退出码）
 ponygo observe upgrade [--check]                与技能契约的版本兼容门（CI 用 --check）
 ```
+
+> 上述命令面已同步至最新口径：`--yes` 与交互确认在后续一轮（2026-10-29）整体移除，
+> 覆盖只能由 `--force` 显式表达、`--dry-run` 是唯一预览手段。
+> 决策与迁移见 `revisions/accepted/2026-10-29-forced-adr-gate-wiring.md` 的「v2 迁移补充」。
 
 - `--level` 的**值**决定语义（与位置无关）：`ob0|ob1|ob2` 是断言；`ob3` 与 `S|M` 被显式拒绝（exit 1）。
 - `--json` 只属 `status|audit`：stdout 只有一行固定词表 JSON，人读与 skill 原始输出走 stderr。

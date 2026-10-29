@@ -12,6 +12,10 @@ ponygo status        # 若报缺少 .meta/，进入下方流程；若已存在�
 git rev-parse --is-inside-work-tree 2>/dev/null   # 是否在 git 仓库内
 ```
 
+> **`init` 不读 stdin、不弹确认**：写入只增不改、重复跑零改动（不碰业务文件），故无需确认提示；
+> 预览用 `--dry-run`（只打印装配计划，不落盘、不动 `git config`）。`--yes` 已移除，传入即按未知选项报错——
+> 脚本与 CI 直接跑 `ponygo init` 即可。
+
 ---
 
 ## 步骤清单（逐项勾选）
@@ -19,6 +23,10 @@ git rev-parse --is-inside-work-tree 2>/dev/null   # 是否在 git 仓库内
 ### 阶段 A：铺骨架（机械，`ponygo init` 完成）
 
 - [ ] 运行 `ponygo init`，确认它正确识别了"空项目 / 有代码无治理"两场景之一
+- [ ] 若 `init` 检出**替代治理形态**（`docs/adr/` 等既有决策目录、CONTRIBUTING.md、CODEOWNERS、pre-commit/lefthook、CI 配置等）：
+      读 `.meta/adaptation/alt-governance.md` 任务书，逐项按「检出项 / 语义映射 / 唯一动作 / 完成判据」处置
+      （任务书是生成物：幂等重写、勿手编）。不阻断注入，未处置时 `ponygo status` / `audit` 会 WARN，
+      落一条 `.agents/notes/**/process/*alt-governance*.md` 写明各项处置后消失
 - [ ] 验证骨架落地：`ponygo status` 应显示 `[ok]` 满格、`level: 0`
 - [ ] 核对 `.meta/meta.yaml` 只有 `level: 0` 一个字段（版本/组件别手填，git 和目录说了算）
 - [ ] 确认根 `AGENTS.md` / `CLAUDE.md` 已生成且内容为**初始引导（bootstrap）**——这是 AI agent 进场的指引入口

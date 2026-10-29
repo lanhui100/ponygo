@@ -227,7 +227,7 @@ s01_help() {
 s02_init() {
   echo "--- 场景2：init 骨架 + 不投影 + 重复 init"
   local T d; T=$(new_case)
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_eq "init exit 0" 0 "$R_RC"
   for d in proposed implemented rejected archived; do
     [ -d "$T/.agents/notes/$d" ] && ok "notes/$d 存在" || bad "notes/$d 缺失"
@@ -255,7 +255,7 @@ s02_init() {
   grep -q '读触发规则' "$T/.agents/notes/README.md" && ok "notes/README 含读触发枚举" || bad "notes/README 缺读触发枚举"
   [ -f "$T/AGENTS.md" ] && [ -f "$T/CLAUDE.md" ] && ok "模板态投影初始引导（bootstrap）" || bad "模板态未投影初始引导"
   grep -q '初始引导' "$T/AGENTS.md" && ok "投影含 bootstrap 标记" || bad "投影缺 bootstrap 标记"
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_eq "重复 init exit 0（不覆盖）" 0 "$R_RC"
   assert_contains "重复 init 提示已存在" "$R_OUT" "已存在"
   grep -q '^level: 0' "$T/.meta/meta.yaml" && ok "重复 init 未改 level" || bad "重复 init 改了 level"
@@ -264,7 +264,7 @@ s02_init() {
 s03_status() {
   echo "--- 场景3：status 完整（exit 0）"
   local T; T=$(new_case)
-  run_cli "$T" init --yes
+  run_cli "$T" init
   run_cli "$T" status
   assert_eq "新 init 后 status exit 0" 0 "$R_RC"
   assert_contains "骨架完整" "$R_OUT" "骨架完整"
@@ -274,7 +274,7 @@ s03_status() {
 s04_bootstrap_projection() {
   echo "--- 场景4：TODO 模板 → bootstrap 引导投影；填槽后自动替换为常载命约"
   local T; T=$(new_case)
-  run_cli "$T" init --yes
+  run_cli "$T" init
   [ -f "$T/AGENTS.md" ] && [ -f "$T/CLAUDE.md" ] && ok "模板态生成 bootstrap 投影" || bad "模板态未生成 bootstrap 投影"
   assert_contains "含初始引导标记" "$(cat "$T/AGENTS.md")" "初始引导"
   assert_contains "引导含填槽步骤" "$(cat "$T/AGENTS.md")" "填宪法槽位"
@@ -289,7 +289,7 @@ s04_bootstrap_projection() {
 s05_sync_idempotent() {
   echo "--- 场景5：填槽后 sync 投影 + 幂等"
   local T h1 h2; T=$(new_case)
-  run_cli "$T" init --yes
+  run_cli "$T" init
   write_constitution_filled "$T"
   run_cli "$T" sync
   assert_eq "sync exit 0" 0 "$R_RC"
@@ -305,14 +305,14 @@ s06_ai_surface_off() {
   echo "--- 场景6：ai-surface off 跳投影（含 Off 大小写，F8）"
   # 注意次序：init 会投影（模板态投 bootstrap），故先清掉投影文件再置 off 验 sync 拦截
   local T T2; T=$(new_case); T2=$(new_case)
-  run_cli "$T" init --yes; write_constitution_filled "$T"
+  run_cli "$T" init; write_constitution_filled "$T"
   rm -f "$T/AGENTS.md" "$T/CLAUDE.md"
   printf 'ai-surface: off\n' >> "$T/.meta/meta.yaml"
   run_cli "$T" sync
   assert_eq "ai-surface: off → sync exit 0" 0 "$R_RC"
   [ ! -f "$T/AGENTS.md" ] && [ ! -f "$T/CLAUDE.md" ] && ok "off 不投影" || bad "off 仍投影"
   assert_contains "提示 off 跳投影" "$R_OUT" "ai-surface: off"
-  run_cli "$T2" init --yes; write_constitution_filled "$T2"
+  run_cli "$T2" init; write_constitution_filled "$T2"
   rm -f "$T2/AGENTS.md" "$T2/CLAUDE.md"
   printf 'ai-surface: Off\n' >> "$T2/.meta/meta.yaml"
   run_cli "$T2" sync
@@ -328,16 +328,16 @@ s07_retire() {
   assert_contains "打印用法" "$R_OUT" "用法"
   run_cli "$E" retire --level off
   assert_eq "无 meta 带 --level → die exit 1" 1 "$R_RC"
-  run_cli "$T" init --yes
+  run_cli "$T" init
   printf 'level: 3\n' > "$T/.meta/meta.yaml"
-  run_cli "$T" retire --level 1 --yes
+  run_cli "$T" retire --level 1
   assert_eq "retire --level 1 exit 0" 0 "$R_RC"
   grep -q '^level: 1' "$T/.meta/meta.yaml" && ok "level 降到 1" || bad "level 未降级"
-  run_cli "$T" retire --level off --yes
+  run_cli "$T" retire --level off
   assert_eq "retire --level off exit 0" 0 "$R_RC"
   grep -q '^level: 0' "$T/.meta/meta.yaml" && ok "off 归 level 0" || bad "off 未归 0"
   grep -q '^ai-surface: off' "$T/.meta/meta.yaml" && ok "off 置 ai-surface" || bad "off 未置 ai-surface"
-  run_cli "$T" retire --level 9 --yes
+  run_cli "$T" retire --level 9
   assert_eq "非法值 die exit 1" 1 "$R_RC"
   assert_contains "非法值报错" "$R_OUT" "目标非法"
 }
@@ -345,7 +345,7 @@ s07_retire() {
 s08_level_normalize() {
   echo "--- 场景8：level L 前缀归一 + level: 12 拒绝"
   local T; T=$(new_case)
-  run_cli "$T" init --yes
+  run_cli "$T" init
   printf 'level: L0\n' > "$T/.meta/meta.yaml"
   run_cli "$T" status
   assert_eq "level: L0 归一后 status exit 0" 0 "$R_RC"
@@ -360,8 +360,8 @@ s09_audit_counts() {
   echo "--- 场景9：audit 确定性命中（非 git temp + GIT_CONFIG 消毒，spec rev3 P0-2）"
   local G T; G=$(mktemp "$SBASE/gitconf.XXXXXX"); : > "$G"
   T=$(new_case)
-  run_cli "$T" init --yes
-  run_cli "$T" init --yes
+  run_cli "$T" init
+  run_cli "$T" init
   G=$(sanitize_git)
   # shellcheck disable=SC2046
   run_cli_env "$T" $G audit --level S
@@ -375,7 +375,7 @@ s09_audit_counts() {
 s10_audit_level_arg() {
   echo "--- 场景10：audit --level 缺值 / 非法值"
   local T; T=$(new_case)
-  run_cli "$T" init --yes
+  run_cli "$T" init
   run_cli "$T" audit --level
   assert_eq "--level 缺值 die exit 1" 1 "$R_RC"
   assert_contains "--level 缺值报错" "$R_OUT" "--level 需要取值"
@@ -387,28 +387,28 @@ s10_audit_level_arg() {
 s11_l1_criteria() {
   echo "--- 场景11：L1 判据（合法/缺 class 轴/坏文件名/Status 不符/archived/非法日期/depth-4/空格文件名/CRLF）"
   local T
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-add-widget.md"
   run_cli "$T" status
   assert_eq "合法决策 → exit 0" 0 "$R_RC"
   assert_contains "L0-L1 通过" "$R_OUT" "L0-L1"
 
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/2026-01-02-bare.md"
   run_cli "$T" status
   assert_eq "缺 class 轴 → exit 1" 1 "$R_RC"
   assert_contains "报 1.5" "$R_OUT" "1.5"
 
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/badname.md"
   run_cli "$T" status
   assert_eq "坏文件名 → exit 1" 1 "$R_RC"
   assert_contains "报 1.6" "$R_OUT" "1.6"
 
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-x.md"
   sed -i 's/^Status: implemented/Status: proposed/' "$T/.agents/notes/implemented/feature/2026-01-02-x.md"
@@ -416,13 +416,13 @@ s11_l1_criteria() {
   assert_eq "Status 不符 → exit 1" 1 "$R_RC"
   assert_contains "报 1.7" "$R_OUT" "1.7"
 
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "archived/testing/2026-01-02-old.md"
   run_cli "$T" status
   assert_eq "archived 下 Status: implemented 豁免 → exit 0" 0 "$R_RC"
 
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "archived/testing/2026-01-02-old.md"
   sed -i 's/^Status: implemented/Status: rejected/' "$T/.agents/notes/archived/testing/2026-01-02-old.md"
@@ -430,14 +430,14 @@ s11_l1_criteria() {
   assert_eq "archived 下 Status: rejected → exit 1" 1 "$R_RC"
   assert_contains "报 1.7（archived 违例）" "$R_OUT" "1.7"
 
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-02-30-topic.md"
   run_cli "$T" status
   assert_eq "非法日期 2026-02-30 → exit 1" 1 "$R_RC"
   assert_contains "日期不合法被判" "$R_OUT" "日期不合法"
 
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-x.md"
   mkdir -p "$T/.agents/notes/implemented/feature/extra"
@@ -446,13 +446,13 @@ s11_l1_criteria() {
   assert_eq "depth-4 违例 → exit 1" 1 "$R_RC"
   assert_contains "报 1.5（depth-4）" "$R_OUT" "1.5"
 
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-my topic.md"
   run_cli "$T" status
   assert_eq "含空格文件名（合法）→ exit 0" 0 "$R_RC"
 
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-crlf.md"
   sed -i 's/$/\r/' "$T/.agents/notes/implemented/feature/2026-01-02-crlf.md"
@@ -460,21 +460,21 @@ s11_l1_criteria() {
   assert_eq "CRLF 决策文件不假 FAIL（1.7）→ exit 0" 0 "$R_RC"
 
   # 1.8 正文骨架与 lifecycle 匹配（ponyllm 实证漂移回归）
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-x.md"
   write_proposal_decision "$T" "proposed/architecture/2026-01-02-y.md"
   run_cli "$T" status
   assert_eq "1.8 合法（Decision+Proposal 各归其位）→ exit 0" 0 "$R_RC"
 
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "proposed/architecture/2026-01-02-y.md"
   run_cli "$T" status
   assert_eq "1.8 proposed 误用 ## Decision → exit 1" 1 "$R_RC"
   assert_contains "报 1.8" "$R_OUT" "1.8"
 
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_proposal_decision "$T" "implemented/feature/2026-01-02-x.md"
   run_cli "$T" status
@@ -482,7 +482,7 @@ s11_l1_criteria() {
   assert_contains "报 1.8" "$R_OUT" "1.8"
 
   # 1.9 文档有家（v2.0）：删掉 docs/AGENTS.md → FAIL；根 AGENTS.md 断链 → FAIL
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-x.md"
   rm -f "$T/docs/AGENTS.md"
@@ -490,7 +490,7 @@ s11_l1_criteria() {
   assert_eq "缺 docs/AGENTS.md → exit 1" 1 "$R_RC"
   assert_contains "报 1.9" "$R_OUT" "1.9"
 
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-x.md"
   sed -i 's/docs\/AGENTS\.md//g' "$T/AGENTS.md"
@@ -499,7 +499,7 @@ s11_l1_criteria() {
   assert_contains "报 1.9" "$R_OUT" "1.9"
 
   # 1.9c 包文档缺失：packages/ 下子目录无 AGENTS.md/README.md → FAIL；豁免清单可免
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-x.md"
   mkdir -p "$T/packages/mod-a" "$T/packages/mod-b"
@@ -507,7 +507,7 @@ s11_l1_criteria() {
   assert_eq "包文档缺失 → exit 1" 1 "$R_RC"
   assert_contains "报 1.9" "$R_OUT" "1.9"
 
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-x.md"
   mkdir -p "$T/packages/mod-a" "$T/packages/mod-b"
@@ -520,7 +520,7 @@ s11_l1_criteria() {
 s12_l2_criteria() {
   echo "--- 场景12：L2 判据（齐 → 过；缺钩子 → FAIL；2.5 条件判据四分支）"
   local T
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
   printf 'level: 2\n' > "$T/.meta/meta.yaml"
@@ -539,7 +539,7 @@ s12_l2_criteria() {
   assert_contains "2.2 标注代理判据" "$R_OUT" "代理判据"
   assert_not_contains "已激活不触发 2.5 告警" "$R_OUT" "WARN docs-tier"
 
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
   printf 'level: 2\n' > "$T/.meta/meta.yaml"
@@ -552,7 +552,7 @@ s12_l2_criteria() {
   assert_contains "报 2.4" "$R_OUT" "2.4"
 
   # 分支：未声明 docs-tier + 模板态（未激活）→ SKIP + WARN 催声明，exit 0（2.5 不计入 PASS）
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
   printf 'level: 2\n' > "$T/.meta/meta.yaml"
@@ -569,7 +569,7 @@ s12_l2_criteria() {
   assert_contains "结论行标 SKIPPED" "$R_OUT" "2.5 SKIPPED"
 
   # 分支：docs-tier: off + 模板态 → 显式 opt-out，结论行禁写"全部 PASS"，改写为"2.1–2.4 PASS；2.5 未启用"
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
   printf 'level: 2\n' > "$T/.meta/meta.yaml"
@@ -587,7 +587,7 @@ s12_l2_criteria() {
   assert_not_contains "off 禁写全部 PASS" "$R_OUT" "全部 PASS"
 
   # 分支：docs-tier: on + 模板态（未激活）→ FAIL（声明即承诺，未激活即违约）
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
   printf 'level: 2\n' > "$T/.meta/meta.yaml"
@@ -614,7 +614,7 @@ s12_l2_criteria() {
 
   # 分支：docs-tier: off + 已激活 → 矛盾 WARN + off 结论行（exit 0）
   # P3-3 单变量：全新目录 + 重写 docs-tier/README（无 TODO 残留），只留"off 声明 vs 已激活事实"一个变量
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
   printf 'level: 2\ndocs-tier: off\n' > "$T/.meta/meta.yaml"
@@ -633,7 +633,7 @@ s12_l2_criteria() {
   assert_contains "off 提示录 decision" "$R_OUT" "建议录一条 decision"
 
   # 分支：docs-tier: on + 已激活 + 无 TODO → PASS（声明且做到）
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
   printf 'level: 2\n' > "$T/.meta/meta.yaml"
@@ -652,7 +652,7 @@ s12_l2_criteria() {
   assert_contains "on 全过结论行" "$R_OUT" "L0-L2"
 
   # 分支（P1-1 回归）：引号值（docs-tier: "off"）不得激活状态机——走非法键 WARN + 未声明 SKIP，不兑现 off
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
   printf 'level: 2\n' > "$T/.meta/meta.yaml"
@@ -673,7 +673,7 @@ s12_l2_criteria() {
 s13_meta_violations() {
   echo "--- 场景13：meta.yaml 违例键告警（双挂 WARN，exit 0）+ CRLF 不假 WARN"
   local T
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'foo: bar\n' >> "$T/.meta/meta.yaml"
   run_cli "$T" status
   assert_eq "status 违例键仍 exit 0" 0 "$R_RC"
@@ -683,13 +683,13 @@ s13_meta_violations() {
   assert_eq "audit 违例键仍 exit 0" 0 "$R_RC"
   assert_contains "audit WARN（双挂）" "$R_OUT" "WARN"
 
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf '  level: 2\n' >> "$T/.meta/meta.yaml"
   run_cli "$T" status
   assert_contains "缩进 level: 行告警" "$R_OUT" "WARN"
 
   # 注意：非 git 场景会触发卫生 WARN（s22），本例在 git 仓库内隔离出 meta 键 WARN 单变量
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   ( cd "$T" && git init -q ) >/dev/null 2>&1
   printf '# comment\r\n\r\nlevel: 0\r\n' > "$T/.meta/meta.yaml"
   run_cli "$T" status
@@ -697,17 +697,17 @@ s13_meta_violations() {
   assert_eq "CRLF meta.yaml status exit 0" 0 "$R_RC"
 
   # docs-tier: on|off 是合法键（L 包原子补丁）：顶格声明不告警，缩进才告警
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 0\ndocs-tier: off\n' > "$T/.meta/meta.yaml"
   run_cli "$T" status
   assert_eq "docs-tier: off 为合法键 → exit 0" 0 "$R_RC"
   assert_not_contains "docs-tier: off 不告警" "$R_OUT" "非法键"
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 0\n  docs-tier: on\n' > "$T/.meta/meta.yaml"
   run_cli "$T" status
   assert_contains "缩进 docs-tier 行告警" "$R_OUT" "WARN"
   # docs-tier 非法值（yes/大写 ON）走违例键 WARN（新键从严，不继承 ai-surface 的 Off 大小写先例）
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 0\ndocs-tier: ON\n' > "$T/.meta/meta.yaml"
   run_cli "$T" status
   assert_contains "docs-tier 非法值告警" "$R_OUT" "非法键"
@@ -716,7 +716,7 @@ s13_meta_violations() {
 s14_decisions_readme() {
   echo "--- 场景14：生成 decisions/ skills/ README 与模板 eol 归一逐字节一致（F3 + skills 契约）"
   local T; T=$(new_case)
-  run_cli "$T" init --yes
+  run_cli "$T" init
   if diff <(tr -d '\r' < "$T/.agents/notes/README.md") \
           <(tr -d '\r' < "$ROOT/.agents/notes/README.md") >/dev/null 2>&1; then
     ok "生成 decisions/README 与模板 eol 归一后一致"
@@ -789,7 +789,7 @@ s15_upgrade() {
   assert_contains "含升级纪律" "$R_OUT" "升级纪律"
   # 健康实例（init 后未动宇宙文件）→ exit 0 且含漂移报告头（双断言同属 s15）
   local T; T=$(new_case)
-  run_cli "$T" init --yes
+  run_cli "$T" init
   run_cli "$T" upgrade
   assert_eq "健康实例 upgrade exit 0" 0 "$R_RC"
   assert_contains "含漂移报告头" "$R_OUT" "漂移报告"
@@ -806,11 +806,11 @@ s16_status_no_meta() {
 s17_dry_run() {
   echo "--- 场景17：--dry-run 零落盘（init / retire）"
   local T; T=$(new_case)
-  run_cli "$T" init --yes --dry-run
+  run_cli "$T" init --dry-run
   assert_eq "init --dry-run exit 0" 0 "$R_RC"
   [ ! -e "$T/.meta" ] && ok "init --dry-run 零落盘" || bad "init --dry-run 落盘了"
   T=$(new_case)
-  run_cli "$T" init --yes
+  run_cli "$T" init
   printf 'level: 2\n' > "$T/.meta/meta.yaml"
   run_cli "$T" retire --level 1 --dry-run
   assert_eq "retire --dry-run exit 0" 0 "$R_RC"
@@ -845,7 +845,7 @@ s19_boundary_regress() {
   echo "--- 场景19：双审补盲（封闭集执法、缺 Status 行、sync 三分支）"
   local T
   # 1.3 lifecycle 顶层杂项目录
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-a.md"
   mkdir -p "$T/.agents/notes/random-stuff"
@@ -853,14 +853,14 @@ s19_boundary_regress() {
   assert_eq "1.3 杂项目录 → exit 1" 1 "$R_RC"
   assert_contains "报 1.3" "$R_OUT" "1.3"
   # 1.4 class 越界
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/not-a-class/2026-01-02-b.md"
   run_cli "$T" status
   assert_eq "1.4 class 越界 → exit 1" 1 "$R_RC"
   assert_contains "报 1.4" "$R_OUT" "1.4"
   # 1.7 缺 Status: 行
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-c.md"
   sed -i '/^Status:/d' "$T/.agents/notes/implemented/feature/2026-01-02-c.md"
@@ -868,7 +868,7 @@ s19_boundary_regress() {
   assert_eq "缺 Status 行 → exit 1" 1 "$R_RC"
   assert_contains "报 1.7" "$R_OUT" "1.7"
   # sync：既有 AGENTS.md 带标记区 → 只替换块内、块外保留
-  T=$(new_case); run_cli "$T" init --yes; write_constitution_filled "$T"
+  T=$(new_case); run_cli "$T" init; write_constitution_filled "$T"
   printf 'my notes head\n<!-- BEGIN constitution -->\nold body\n<!-- END constitution -->\nmy notes tail\n' > "$T/AGENTS.md"
   run_cli "$T" sync
   assert_eq "标记区替换 exit 0" 0 "$R_RC"
@@ -877,7 +877,7 @@ s19_boundary_regress() {
   grep -q 'old body' "$T/AGENTS.md" && bad "旧投影体未替换" || ok "旧投影体已替换"
   [ -f "$T/AGENTS.md.tmp" ] && bad "残留 .tmp" || ok "无 .tmp 残留"
   # sync：既有 AGENTS.md 无标记区 → 追加、原文保留
-  T=$(new_case); run_cli "$T" init --yes; write_constitution_filled "$T"
+  T=$(new_case); run_cli "$T" init; write_constitution_filled "$T"
   printf 'handwritten rules\n' > "$T/AGENTS.md"
   run_cli "$T" sync
   assert_eq "无标记区追加 exit 0" 0 "$R_RC"
@@ -947,13 +947,13 @@ s21_external001_regress() {
   echo "--- 场景21：EXTERNAL-001 回归（空 level 0.4 / classes.local / sync 锚点 / audit 内嵌验级 / 深度信号4）"
   local T G
   # P1-4：空 level 不假 L0 PASS
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: \n' > "$T/.meta/meta.yaml"
   run_cli "$T" status
   assert_eq "空 level → exit 1" 1 "$R_RC"
   assert_contains "报 0.4" "$R_OUT" "0.4"
   # P2-1：classes.local 扩展 class
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/domain-x/2026-01-02-ext.md"
   run_cli "$T" status
@@ -963,7 +963,7 @@ s21_external001_regress() {
   run_cli "$T" status
   assert_eq "classes.local 登记后 → exit 0" 0 "$R_RC"
   # P1-3：sync 锚点（英文标题 + <!-- sync-body -->）
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   cat > "$T/.meta/constitution/constitution.md" <<'EOF'
 # Constitution
 
@@ -977,14 +977,14 @@ EOF
   grep -q 'Standing Orders' "$T/AGENTS.md" && ok "英文投影体生成" || bad "英文投影体未生成"
   G=$(sanitize_git)
   # P1-1：audit 内嵌验级（声明 L1 无决策 → exit 1）
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   # shellcheck disable=SC2046
   run_cli_env "$T" $G audit --level S
   assert_eq "audit 内嵌验级（L1 无决策）→ exit 1" 1 "$R_RC"
   assert_contains "audit 输出级自洽 FAIL" "$R_OUT" "级自洽验证：未通过"
   # P1-2：深度信号4 仅 .meta 不升 M 档
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   # shellcheck disable=SC2046
   run_cli_env "$T" $G audit
   assert_contains "仅 .meta 仍 S 档" "$R_OUT" "审计深度：S 档"
@@ -994,27 +994,27 @@ s22_hygiene_warn() {
   echo "--- 场景22：治理卫生 WARN（非 git / 游离计划 / 缺 .gitignore；exit 不变）"
   local T
   # 非 git 仓库 WARN + bootstrap 第 0 步与自证线
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   run_cli "$T" status
   assert_eq "非 git status 仍 exit 0" 0 "$R_RC"
   assert_contains "WARN 非 git 仓库" "$R_OUT" "不在 git 仓库"
   grep -q 'git init' "$T/AGENTS.md" && ok "bootstrap 含第 0 步 git init" || bad "bootstrap 缺 git init"
   grep -q '无 FAIL 且无 WARN' "$T/AGENTS.md" && ok "bootstrap 自证线含无 WARN" || bad "bootstrap 自证线未升级"
   # 游离计划文档 WARN（git 仓库内，与上一条 WARN 隔离）
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   ( cd "$T" && git init -q ) >/dev/null 2>&1
   printf '# plan\n' > "$T/IMPLEMENTATION_PLAN.md"
   run_cli "$T" status
   assert_eq "游离计划 status 仍 exit 0" 0 "$R_RC"
   assert_contains "WARN 游离计划文档" "$R_OUT" "游离计划文档"
   # git 仓库无 .gitignore WARN（init 已生成，删掉再测）
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   ( cd "$T" && git init -q ) >/dev/null 2>&1
   rm -f "$T/.gitignore"
   run_cli "$T" status
   assert_contains "WARN 缺 .gitignore" "$R_OUT" "无 .gitignore"
   # 干净场景无卫生 WARN
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   ( cd "$T" && git init -q ) >/dev/null 2>&1
   run_cli "$T" status
   assert_not_contains "干净场景无卫生 WARN" "$R_OUT" "WARN"
@@ -1023,7 +1023,7 @@ s22_hygiene_warn() {
 s23_verify_note() {
   echo "--- 场景23：write-adr/verify-note.sh 机械校验器正反例"
   local T; T=$(new_case)
-  run_cli "$T" init --yes
+  run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-x.md"
   write_proposal_decision "$T" "proposed/architecture/2026-01-02-y.md"
@@ -1043,7 +1043,7 @@ s24_gate_layers() {
   echo "--- 场景24：门禁分层报告（P7 时间经济性：pre-commit/pre-push/CI）"
   local T G; G=$(sanitize_git)
   # 零门禁：audit 应报三层全无 + 缺层引导
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   # shellcheck disable=SC2046
   run_cli_env "$T" $G audit --level S
   assert_contains "audit 含门禁分层参考" "$R_OUT" "门禁分层参考"
@@ -1052,7 +1052,7 @@ s24_gate_layers() {
   assert_contains "远端层 CI 无" "$R_OUT" "远端层 CI（分钟级）：无"
   assert_contains "缺本地层引导" "$R_OUT" "缺本地层"
   # 三层齐备：audit 应报三层全有、无缺层引导
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   ( cd "$T" && mkdir -p .githooks .github/workflows \
       && printf '#!/usr/bin/env bash\necho fmt\n' > .githooks/pre-commit \
       && printf '#!/usr/bin/env bash\necho typecheck\n' > .githooks/pre-push \
@@ -1074,7 +1074,7 @@ s25_doc_home_audit() {
   echo "--- 场景25：v2.0 文档有家——audit 对既有项目（旧项目接入）检测文档家缺失（0.5/1.9/2.5 双保证）"
   local T G; G=$(sanitize_git)
   # 旧项目接入：init 后声明 L1 但删掉 docs/AGENTS.md → audit exit 1 并报 0.5/1.9
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   ( cd "$T" && git init -q ) >/dev/null 2>&1
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/process/2026-01-02-adopt-governance.md"
@@ -1086,7 +1086,7 @@ s25_doc_home_audit() {
   assert_contains "audit 报 1.9" "$R_OUT" "1.9"
 
   # 文档家齐全（init 生成）→ audit exit 0
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   ( cd "$T" && git init -q ) >/dev/null 2>&1
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/process/2026-01-02-adopt-governance.md"
@@ -1099,7 +1099,7 @@ s26_warn_tier() {
   echo "--- 场景26：v2.1 提醒档——gates 模板 WARN 片段 + 卫生 WARN（新鲜度/未来日期，exit 不变）"
   local T G; G=$(sanitize_git)
   # gates/README 模板含 doc-freshness WARN 片段（排除 notes 计数）
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   grep -q 'doc-freshness WARN' "$T/.meta/gates/README.md" && ok "gates 模板含 WARN 片段" || bad "gates 模板缺 WARN 片段"
   grep -qF "grep -v '^\.agents/notes/'" "$T/.meta/gates/README.md" && ok "WARN 片段排除 notes 计数" || bad "WARN 片段未排除 notes"
   # 新鲜度 WARN：有提交历史，近 5 提交改代码而非-notes 文档零动 → WARN 但 exit 0
@@ -1113,7 +1113,7 @@ s26_warn_tier() {
   assert_eq "新鲜度 WARN 不改 exit 0" 0 "$R_RC"
   assert_contains "WARN 新鲜度启发式" "$R_OUT" "无（非-notes）文档更新"
   # 未来日期 WARN：决策文件名日期晚于今天 → WARN 但 exit 0
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   ( cd "$T" && git init -q && git add -A >/dev/null 2>&1 \
     && git -c user.email=t@t -c user.name=t commit -qm init ) >/dev/null 2>&1
   write_valid_decision "$T" "implemented/feature/2099-01-01-future.md"
@@ -1127,7 +1127,7 @@ s27_run_specs() {
   echo "--- 场景27：判据 2.3 执行侧 opt-in（--run-specs）+ 只读默认 + 护栏（递归/dry-run）"
   local T
   # ① 只读不变量：默认 status/audit 不执行仓库脚本（spec 会落一个 WITNESS 见证文件）
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
   printf '#!/usr/bin/env bash\ntouch "$(cd "$(dirname "$0")" && pwd)/WITNESS.txt"\nexit 0\n' \
@@ -1139,7 +1139,7 @@ s27_run_specs() {
   [ -f "$T/.meta/gates/WITNESS.txt" ] && bad "audit 默认执行了仓库脚本（违反只读不变量）" || ok "audit 默认未执行仓库脚本"
 
   # ①b level:2 分支同样不得执行门禁脚本（2.2 只做 bash -n，不得执行）
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
   printf '#!/usr/bin/env bash\ntouch "$(cd "$(dirname "$0")" && pwd)/GATE_WITNESS.txt"\nexit 0\n' \
@@ -1154,7 +1154,7 @@ s27_run_specs() {
   assert_contains "usage 披露 --run-specs" "$R_OUT" "--run-specs"
 
   # ② --run-specs 执行并断言 exit 0
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
   printf '#!/usr/bin/env bash\ntouch "$(cd "$(dirname "$0")" && pwd)/WITNESS.txt"\nexit 0\n' \
@@ -1165,7 +1165,7 @@ s27_run_specs() {
   [ -f "$T/.meta/gates/WITNESS.txt" ] && ok "--run-specs 确实执行了 spec" || bad "--run-specs 未执行 spec"
 
   # ②b 护栏变量必须真导出给子进程（删掉导出前缀则此断言红——护栏不得静默失效）
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
   printf '#!/usr/bin/env bash\n[ "${PONYGO_IN_SPEC:-0}" = "1" ] || { echo "missing guard env" >&2; exit 3; }\nexit 0\n' \
@@ -1191,7 +1191,7 @@ s27_run_specs() {
   [ -f "$T/.meta/gates/WITNESS.txt" ] && bad "--dry-run 仍执行了 spec" || ok "--dry-run 未执行 spec"
 
   # ⑤ 递归护栏：PONYGO_IN_SPEC=1 时 SKIPPED，且结论行必须限定"未验证"
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/z.spec.sh"
@@ -1201,7 +1201,7 @@ s27_run_specs() {
   assert_contains "结论行限定未验证" "$R_OUT" "2.3 执行判据 SKIPPED——本次未验证"
 
   # ⑥ 无 *.spec.sh → SKIPPED（不计入 PASS），非 FAIL
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
   printf 'x\n' > "$T/.meta/gates/format.spec.md"
@@ -1219,7 +1219,7 @@ s27_run_specs() {
 
 s28_l2_reachability() {
   echo "--- 场景28：L1→L2 可达性（骨架 + 手工挂载步骤可复跑；证明判据可被满足，非声称框架自身为 L2）"
-  local T; T=$(new_case); run_cli "$T" init --yes
+  local T; T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
   # L2 四件套：门禁脚本 + 负样本 spec + 本地钩子挂载 + 文档分层激活
@@ -1243,7 +1243,7 @@ s28_l2_reachability() {
   assert_contains "报 2.4" "$R_OUT" "2.4"
 
   # 作用域：L1 声明 docs-tier: on → 忽略（2.x 不在 L1 判据内，静默不告警，不校验 2.5）
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   printf 'docs-tier: on\n' >> "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
@@ -1288,7 +1288,7 @@ s31_upgrade_drift() {
   echo "--- 场景31：upgrade 漂移报告（宇宙=s14 十文件；--check 漂移非零；donot 三场景）"
   local T
   # ① 健康实例（已填 constitution + 模板态 docs-tier）upgrade exit 0 且无"drift:"行
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   write_constitution_filled "$T"
   run_cli "$T" upgrade
   assert_eq "健康实例 upgrade exit 0" 0 "$R_RC"
@@ -1309,23 +1309,23 @@ s31_upgrade_drift() {
   assert_eq "有代码但无 .meta → die" 1 "$R_RC"
   assert_contains "指引 init" "$R_OUT" "ponygo init"
   # ④ 非 git → WARN（exit 0）
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   # init 在 mktemp 目录内，天然非 git——WARN 但 exit 0
   run_cli "$T" upgrade
   assert_eq "非 git 场景 upgrade exit 0" 0 "$R_RC"
   assert_contains "非 git WARN" "$R_OUT" "WARN 不在 git 仓库"
   # ⑤ 缺 meta.yaml/缺 level 行 → 按 L0 处理（不崩）
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   rm -f "$T/.meta/meta.yaml"
   run_cli "$T" upgrade
   assert_eq "缺 meta.yaml upgrade exit 0（按 L0）" 0 "$R_RC"
   assert_contains "L0 处理" "$R_OUT" "L0"
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf 'docs-tier: off\n' > "$T/.meta/meta.yaml"  # 有 meta.yaml 但无 level 行
   run_cli "$T" upgrade
   assert_eq "缺 level 行 upgrade exit 0（按 L0）" 0 "$R_RC"
   # ⑥ usage/parser 联动：--check 非 upgrade 拒绝；--check 与 --dry-run 互斥
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   run_cli "$T" status --check
   assert_eq "status --check → exit 1（显式拒绝）" 1 "$R_RC"
   assert_contains "报仅适用于 upgrade" "$R_OUT" "仅适用于 'ponygo upgrade'"
@@ -1334,7 +1334,7 @@ s31_upgrade_drift() {
   assert_contains "报互斥" "$R_OUT" "互斥"
   # ⑦ 已激活 docs-tier 实例（P2-1）：docs-tier/README.md 不参与比对（s14 锁模板态）——
   #    upgrade exit 0 且不报该文件 drift；--check 仍 exit 0（不假红）
-  T=$(new_case); run_cli "$T" init --yes
+  T=$(new_case); run_cli "$T" init
   printf '## 已激活文档家清单\n\n| tier | 家 |\n|---|---|\n| 决策记录 | .agents/notes/ |\n' > "$T/.meta/docs-tier/README.md"
   run_cli "$T" upgrade
   assert_eq "已激活实例 upgrade exit 0" 0 "$R_RC"
@@ -1624,9 +1624,9 @@ s33_observe_stub() {
 
   # ④ A1：observe <sub> 之后的第二个子命令词不得劫持 CMD（曾实测真的执行 init 并写盘）
   T=$(new_case); SNAP0=$(snap "$T")
-  run_cli "$T" observe status init --yes
-  assert_eq "observe[A1] observe status init --yes → exit 1（不得执行 init）" 1 "$R_RC"
-  assert_same_tree "observe[A1] observe status init --yes 零写（文件树快照不变）" "$T" "$SNAP0"
+  run_cli "$T" observe status init
+  assert_eq "observe[A1] observe status init → exit 1（不得执行 init）" 1 "$R_RC"
+  assert_same_tree "observe[A1] observe status init 零写（文件树快照不变）" "$T" "$SNAP0"
   assert_eq "observe[A1] 未生成 .meta/meta.yaml" "no" "$([ -f "$T/.meta/meta.yaml" ] && echo yes || echo no)"
   assert_eq "observe[A1] 未生成 docs/observability.yaml" "no" \
     "$([ -f "$T/docs/observability.yaml" ] && echo yes || echo no)"
@@ -1685,7 +1685,7 @@ s34_observe_init() {
   assert_same_tree "observe init --dry-run --force 零写（快照不变）" "$T" "$SNAP0"
 
   # ② 真落盘：四维齐备 + 占位符（模板态）
-  run_cli "$T" observe init --kind cli --skill-dir "$SK" --yes
+  run_cli "$T" observe init --kind cli --skill-dir "$SK"
   assert_eq "observe init --kind cli exit 0" 0 "$R_RC"
   DECL=$(decl_file "$T") || DECL=""
   assert_eq "observe init 落盘 docs/observability.yaml" "yes" \
@@ -1719,23 +1719,23 @@ s34_observe_init() {
 
   # ⑤ 参数校验（§5：init 各类输入错误 → 2）
   T=$(new_case); SK=$(stage_skill "$T")
-  run_cli "$T" observe init --skill-dir "$SK" --yes
+  run_cli "$T" observe init --skill-dir "$SK"
   assert_eq "observe init 缺 --kind → exit 2" 2 "$R_RC"
-  run_cli "$T" observe init --kind bogus --skill-dir "$SK" --yes
+  run_cli "$T" observe init --kind bogus --skill-dir "$SK"
   assert_eq "observe init --kind bogus → exit 2" 2 "$R_RC"
-  run_cli "$T" observe init --kind cli --service 'a: b' --skill-dir "$SK" --yes
+  run_cli "$T" observe init --kind cli --service 'a: b' --skill-dir "$SK"
   assert_eq "observe init --service 'a: b'（YAML 注入形状）→ exit 2" 2 "$R_RC"
-  run_cli "$T" observe init --kind cli --service 'svc-a' --skill-dir "$SK" --yes
+  run_cli "$T" observe init --kind cli --service 'svc-a' --skill-dir "$SK"
   assert_eq "observe init 合法 service 名 exit 0" 0 "$R_RC"
-  run_cli "$T" observe init --kind cli --service 'svc-a' --skill-dir "$SK" --yes
+  run_cli "$T" observe init --kind cli --service 'svc-a' --skill-dir "$SK"
   assert_eq "observe init 声明已存在且无 --force → exit 2" 2 "$R_RC"
-  run_cli "$T" observe init --kind cli --service 'svc-a' --skill-dir "$SK" --force --yes
+  run_cli "$T" observe init --kind cli --service 'svc-a' --skill-dir "$SK" --force
   assert_eq "observe init --force 覆盖 → exit 0" 0 "$R_RC"
 
   # ⑥ 全参 init 一条命令达 ob0（--dims 内 applicable:true + anchor，外 false + reason）
   T=$(new_case); SK=$(stage_skill "$T"); mkdir -p "$T/src"
   : > "$T/src/tracing.txt"; : > "$T/src/issues.txt"
-  run_cli "$T" observe init --kind cli --skill-dir "$SK" --yes \
+  run_cli "$T" observe init --kind cli --skill-dir "$SK" \
     --dims tracing,issues --anchor-tracing src/tracing.txt --anchor-issues src/issues.txt \
     --reason-metrics "指标由 k8s 侧采集" --reason-logs "日志走集群采集"
   assert_eq "observe init 全参 exit 0" 0 "$R_RC"
@@ -1753,14 +1753,14 @@ s34_observe_init() {
 
   # ⑦ A8 版本门：<skill>/references/contract.json 是唯一版本源；低版本 init → 2
   T=$(new_case); SKL=$(stage_skill "$T" 0.9.9)
-  run_cli "$T" observe init --kind cli --skill-dir "$SKL" --yes
+  run_cli "$T" observe init --kind cli --skill-dir "$SKL"
   assert_eq "observe[A8] contract 0.9.9（低于 1.0.3）init → exit 2" 2 "$R_RC"
   assert_contains "observe[A8] 低版本提示 min 版本 1.0.3" "$R_OUT" "1.0.3"
   T=$(new_case); SK=$(stage_skill "$T")
-  run_cli_env "$T" PONYGO_SKILL_DIR="$SK" observe init --kind cli --yes
+  run_cli_env "$T" PONYGO_SKILL_DIR="$SK" observe init --kind cli
   assert_eq "observe[A8] PONYGO_SKILL_DIR 注入 init exit 0" 0 "$R_RC"
   T=$(new_case)
-  run_cli "$T" observe init --kind cli --skill-dir "$T/根本没有这个 skill" --yes
+  run_cli "$T" observe init --kind cli --skill-dir "$T/根本没有这个 skill"
   assert_eq "observe[A8] skill 目录缺失 init → exit 2" 2 "$R_RC"
   assert_contains "observe[A8] skill 缺失提示含 skill 字样" "$R_OUT" "skill"
 
@@ -1858,7 +1858,7 @@ s36_observe_json() {
 
   # ① status：current 恒 unknown；declaration_consistent / enforcement_mounted 恒 skip
   T=$(new_case); SK=$(stage_skill "$T")
-  run_cli "$T" observe init --kind cli --skill-dir "$SK" --yes
+  run_cli "$T" observe init --kind cli --skill-dir "$SK"
   run_cli_stdout "$T" observe status --skill-dir "$SK" --json
   EXP='{"schema":"ponygo.observe/1","command":"status","declared_kind":"cli","current":"unknown","target":"ob0","skill":{"present":true,"contract_version":"1.0.3","compatible":true},"judges":[{"id":"declaration_present","status":"pass"},{"id":"no_placeholder","status":"fail"},{"id":"declaration_consistent","status":"skip"},{"id":"enforcement_mounted","status":"skip"}],"gaps":["placeholder_present"]}'
   assert_eq "observe[A6] status --json 逐字（stdout 单行 JSON）" "$EXP" "$STD_OUT"
@@ -2017,13 +2017,13 @@ s37_observe_regress() {
 
   # ② F1：--reason-<dim> / --anchor-<dim> 的 YAML 标量注入（写盘前拦截，且绝不落盘）
   T=$(new_case); SK=$(stage_skill "$T"); SNAP0=$(snap "$T")
-  run_cli "$T" observe init --kind cli --skill-dir "$SK" --yes \
+  run_cli "$T" observe init --kind cli --skill-dir "$SK" \
     --dims metrics --reason-tracing $'x\n  metrics:\n    applicable: false'
   assert_eq "observe[F1] --reason-tracing 含换行（YAML 注入）→ exit 2" 2 "$R_RC"
   assert_same_tree "observe[F1] 注入被拒后不落盘（文件树快照不变）" "$T" "$SNAP0"
   assert_eq "observe[F1] 注入被拒后无声明文件" "no" \
     "$([ -f "$T/docs/observability.yaml" ] && echo yes || echo no)"
-  run_cli "$T" observe init --kind cli --skill-dir "$SK" --yes --anchor-metrics 'src/a: b.ts'
+  run_cli "$T" observe init --kind cli --skill-dir "$SK" --anchor-metrics 'src/a: b.ts'
   assert_eq "observe[F1] --anchor-metrics 含「: 」（会读成第二个键）→ exit 2" 2 "$R_RC"
   assert_same_tree "observe[F1] anchor 注入被拒后仍不落盘" "$T" "$SNAP0"
 
@@ -2090,14 +2090,14 @@ s38_observe_frontend_and_pipeline() {
 
   # 1. observe init --kind frontend 成功落地
   T=$(new_case); SK=$(stage_skill "$T")
-  run_cli "$T" observe init --kind frontend --skill-dir "$SK" --yes
+  run_cli "$T" observe init --kind frontend --skill-dir "$SK"
   assert_eq "observe init --kind frontend exit 0" 0 "$R_RC"
   TXT=$(cat "$T/docs/observability.yaml" 2>/dev/null || true)
   assert_contains "frontend 声明含 kind: frontend" "$TXT" "kind: frontend"
 
   # 2. observe init --kind pipeline 成功落地
   T=$(new_case); SK=$(stage_skill "$T")
-  run_cli "$T" observe init --kind pipeline --skill-dir "$SK" --yes
+  run_cli "$T" observe init --kind pipeline --skill-dir "$SK"
   assert_eq "observe init --kind pipeline exit 0" 0 "$R_RC"
   TXT=$(cat "$T/docs/observability.yaml" 2>/dev/null || true)
   assert_contains "pipeline 声明含 kind: pipeline" "$TXT" "kind: pipeline"
@@ -2113,7 +2113,7 @@ s39_observe_feedback_upgrades() {
 
   # 1. 已有声明时，--dry-run（无 --force）不应 exit 2，必须 exit 0 且零写
   T=$(new_case); SK=$(stage_skill "$T")
-  run_cli "$T" observe init --kind cli --skill-dir "$SK" --yes
+  run_cli "$T" observe init --kind cli --skill-dir "$SK"
   assert_eq "observe init 首次落地 exit 0" 0 "$R_RC"
   local SNAP_BEFORE
   SNAP_BEFORE=$(snap "$T")
@@ -2135,7 +2135,7 @@ s39_observe_feedback_upgrades() {
 
   # 3. status 透出收口点状态 (enforcement_points)
   T=$(new_case); SK=$(stage_skill "$T")
-  run_cli "$T" observe init --kind cli --skill-dir "$SK" --yes
+  run_cli "$T" observe init --kind cli --skill-dir "$SK"
   run_cli "$T" observe status --skill-dir "$SK"
   assert_contains "status 提示收口点未配置" "$R_OUT" "收口点"
 }
@@ -2146,7 +2146,7 @@ s40_observe_audit_clarity() {
 
   # 1. status 提示收口点未配置时包含标准推荐项提示
   T=$(new_case); SK=$(stage_skill "$T")
-  run_cli "$T" observe init --kind cli --skill-dir "$SK" --yes
+  run_cli "$T" observe init --kind cli --skill-dir "$SK"
   run_cli "$T" observe status --skill-dir "$SK"
   assert_contains "status 包含收口点推荐项 http_client" "$R_OUT" "http_client"
   assert_contains "status 包含收口点推荐项 error_boundary" "$R_OUT" "error_boundary"
@@ -2172,14 +2172,14 @@ s41_observe_smart_inheritance_and_examples() {
   # 2. observe init --force 智能继承原声明中的非占位内容
   SK=$(stage_skill "$T")
   mkdir -p "$T/src" && touch "$T/src/trace.ts" "$T/src/err.ts"
-  run_cli "$T" observe init --kind desktop --service my-app --skill-dir "$SK" --yes \
+  run_cli "$T" observe init --kind desktop --service my-app --skill-dir "$SK" \
     --dims tracing,issues --anchor-tracing src/trace.ts --anchor-issues src/err.ts \
     --reason-metrics "桌面端无端口" --reason-logs "本地单行日志"
   TXT=$(cat "$T/docs/observability.yaml" 2>/dev/null || true)
   assert_contains "初始声明含真实 reason-metrics" "$TXT" "桌面端无端口"
 
   # 二次运行 init --force，只改 service，不传 reason-metrics，原有的结构性理由必须被继承，不得被抹为 __REPLACE_ME__
-  run_cli "$T" observe init --kind desktop --service new-app --dims tracing,issues --skill-dir "$SK" --force --yes
+  run_cli "$T" observe init --kind desktop --service new-app --dims tracing,issues --skill-dir "$SK" --force
   TXT=$(cat "$T/docs/observability.yaml" 2>/dev/null || true)
   assert_contains "二次 force 后 service 更新" "$TXT" "service: new-app"
   assert_contains "二次 force 智能继承了原有的 reason-metrics" "$TXT" "桌面端无端口"
@@ -2203,7 +2203,7 @@ s42_observe_monorepo_subcomponents() {
 
   T=$(new_case); SK=$(stage_skill "$T")
   # 根目录初始化为 k8s-service
-  run_cli "$T" observe init --kind k8s-service --service api-svc --skill-dir "$SK" --yes
+  run_cli "$T" observe init --kind k8s-service --service api-svc --skill-dir "$SK"
   assert_eq "根目录 init k8s-service exit 0" 0 "$R_RC"
 
   # 创建未纳管的前端子目录 front_end
@@ -2235,7 +2235,7 @@ s43_observe_pipeline_awareness() {
 
   T=$(new_case); SK=$(stage_skill "$T")
   # 根目录初始化为 k8s-service
-  run_cli "$T" observe init --kind k8s-service --service my-svc --skill-dir "$SK" --yes
+  run_cli "$T" observe init --kind k8s-service --service my-svc --skill-dir "$SK"
   assert_eq "根目录 init k8s-service exit 0" 0 "$R_RC"
 
   # 创建 CI/CD 流水线资产文件
@@ -2437,11 +2437,11 @@ sentinel_noncomment() { # <hook 文件>
 }
 
 s46_init_gate_wiring() {
-  echo "--- 场景46：init --yes 在 git 仓内装配本地层（hooksPath/pre-commit/marker/执行位/A1·A2·A4）"
+  echo "--- 场景46：init 在 git 仓内装配本地层（hooksPath/pre-commit/marker/执行位/A1·A2·A4）"
   local T; T=$(new_case)
   git_seed_repo "$T"
-  run_cli "$T" init --yes
-  assert_eq "init --yes（git 仓内）exit 0" 0 "$R_RC"
+  run_cli "$T" init
+  assert_eq "init（git 仓内）exit 0" 0 "$R_RC"
   assert_eq "core.hooksPath 设为 .githooks" ".githooks" "$(hookspath_of "$T")"
   assert_exists "生成 .githooks/pre-commit" "$T/.githooks/pre-commit"
   assert_exec ".githooks/pre-commit 可执行（R3：非可执行钩子被 git 静默忽略）" "$T/.githooks/pre-commit"
@@ -2455,7 +2455,7 @@ s46_init_gate_wiring() {
   assert_exists "A4 .meta/gates/ci-verify.sh 恒生成（§6.3）" "$T/.meta/gates/ci-verify.sh"
   # 非 git 目录（R14）：不设 hooksPath、不静默、仍 exit 0
   T=$(new_case)
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_eq "非 git 目录 init 仍 exit 0（R14）" 0 "$R_RC"
   assert_eq "非 git 目录不设 core.hooksPath（R14）" "" "$(hookspath_of "$T")"
   assert_contains "非 git 目录打印 git init 指引（R14 不静默）" "$R_OUT" "git init"
@@ -2465,7 +2465,7 @@ s47_adr_verify_semantics() {
   echo "--- 场景47：A1 语义（合法放行 / 1.6·1.7·1.8 违例拒绝 / 无 ADR 变更放行）+ A2 自检"
   local T; T=$(new_case)
   git_seed_repo "$T"
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_exists "A1 已由 init 生成" "$T/.meta/gates/adr-verify.sh"
 
   # ① 无 ADR 变更（只暂存非-notes 文件）→ exit 0
@@ -2577,7 +2577,7 @@ EOF
 s48_adr_verify_toctou() {
   echo "--- 场景48：A1 TOCTOU（index 内非法、工作区已改回合法 → 必须非零，R6）"
   local T P; T=$(new_case); P=".agents/notes/implemented/feature/2026-01-05-toctou.md"
-  git_seed_repo "$T"; run_cli "$T" init --yes
+  git_seed_repo "$T"; run_cli "$T" init
   mkdir -p "$T/$(dirname "$P")"
   cat > "$T/$P" <<'EOF'
 # Agent Note: staged is invalid
@@ -2623,7 +2623,7 @@ EOF
 s49_adr_verify_rename() {
   echo "--- 场景49：rename 逃逸（git mv 非法 ADR 进 notes → 非零；合法 ADR 同路径 → 放行）"
   local T V; T=$(new_case)
-  git_seed_repo "$T"; run_cli "$T" init --yes
+  git_seed_repo "$T"; run_cli "$T" init
   mkdir -p "$T/inbox"
   cat > "$T/inbox/2026-01-06-renamed-invalid.md" <<'EOF'
 # Agent Note: renamed with status mismatch
@@ -2651,7 +2651,7 @@ EOF
   assert_nonzero "A1 git mv 进 notes 的非法 ADR → 非零（--diff-filter=ACMR）" "$S_RC"
 
   # 正向控制：合法 ADR 被 mv 进 notes → 放行（证明不是「见 R 就拒」）
-  V=$(new_case); git_seed_repo "$V"; run_cli "$V" init --yes
+  V=$(new_case); git_seed_repo "$V"; run_cli "$V" init
   mkdir -p "$V/inbox"
   cat > "$V/inbox/2026-01-07-renamed-valid.md" <<'EOF'
 # Agent Note: renamed valid
@@ -2688,7 +2688,7 @@ s50_preexisting_hook_preserved() {
       && printf '#!/usr/bin/env bash\necho CUSTOM-GATE\nexit 0\n' > .githooks/pre-commit \
       && chmod +x .githooks/pre-commit ) >/dev/null 2>&1
   orig="$SBASE/hook.custom.orig"; cp "$T/.githooks/pre-commit" "$orig"
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_eq "既有自定义钩子场景 init exit 0" 0 "$R_RC"
   assert_file_has "原自定义行仍在" "$T/.githooks/pre-commit" "echo CUSTOM-GATE"
   # 零篡改（F1 契约演进后的正确形式）：删掉哨兵区间（含边界行）后，剩余文本必须与原文件
@@ -2731,7 +2731,7 @@ s51_husky_foreign_hookspath() {
   ( cd "$T" && git config core.hooksPath .husky && mkdir -p .husky \
       && printf '#!/usr/bin/env bash\necho HUSKY-COMMIT\n' > .husky/pre-commit \
       && chmod +x .husky/pre-commit ) >/dev/null 2>&1
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_eq "husky 场景 init exit 0" 0 "$R_RC"
   assert_eq "外来 core.hooksPath 未被改动（§6.1 防停用 husky）" ".husky" "$(hookspath_of "$T")"
   assert_file_has "原 husky 内容保留" "$T/.husky/pre-commit" "echo HUSKY-COMMIT"
@@ -2749,10 +2749,10 @@ s51_husky_foreign_hookspath() {
 }
 
 s52_init_idempotent() {
-  echo "--- 场景52：已接线幂等（连续两次 init --yes，钩子与 A1 的 md5 不变、哨兵块不重复）"
+  echo "--- 场景52：已接线幂等（连续两次 init，钩子与 A1 的 md5 不变、哨兵块不重复）"
   local T h1 h2 g1 g2; T=$(new_case)
   git_seed_repo "$T"
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_eq "首次 init exit 0" 0 "$R_RC"
   h1=$(md5_of "$T/.githooks/pre-commit"); g1=$(md5_of "$T/.meta/gates/adr-verify.sh")
   if [ "$h1" = "MISSING" ] || [ "$g1" = "MISSING" ]; then
@@ -2760,7 +2760,7 @@ s52_init_idempotent() {
   else
     ok "前提取证：首次 init 已生成钩子与 A1"
   fi
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_eq "二次 init exit 0（has_meta 分支仍补装配，§6.2）" 0 "$R_RC"
   h2=$(md5_of "$T/.githooks/pre-commit"); g2=$(md5_of "$T/.meta/gates/adr-verify.sh")
   assert_eq "钩子文件 md5 不变（未重复追加）" "$h1" "$h2"
@@ -2773,47 +2773,51 @@ s53_init_dry_run() {
   echo "--- 场景53：--dry-run 不落盘、不改 core.hooksPath（§4 矩阵）"
   local T; T=$(new_case)
   git_seed_repo "$T"
-  run_cli "$T" init --yes --dry-run
+  run_cli "$T" init --dry-run
   assert_eq "git 仓内 init --dry-run exit 0" 0 "$R_RC"
   assert_missing "dry-run 未落盘（.meta 不存在）" "$T/.meta"
   assert_missing "dry-run 未生成 .githooks/pre-commit" "$T/.githooks/pre-commit"
   assert_eq "dry-run 未改 core.hooksPath" "" "$(hookspath_of "$T")"
   # 正向控制：同一目录真跑 init 必须落装配（证明上面「未落盘」不是空断言）
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_exists "真跑 init 生成钩子（正向控制）" "$T/.githooks/pre-commit"
   assert_eq "真跑 init 设 hooksPath（正向控制）" ".githooks" "$(hookspath_of "$T")"
   # 已存在 .meta 但未接线 → --dry-run 仍只打印（R1 的 dry-run 语义）
   T=$(new_case); git_seed_repo "$T"
-  run_cli "$T" init --yes
+  run_cli "$T" init
   git_local "$T" config --unset core.hooksPath >/dev/null 2>&1
   rm -f "$T/.githooks/pre-commit"
-  run_cli "$T" init --yes --dry-run
+  run_cli "$T" init --dry-run
   assert_eq "已初始化实例 --dry-run exit 0" 0 "$R_RC"
   assert_eq "已初始化实例 --dry-run 不改 hooksPath" "" "$(hookspath_of "$T")"
   assert_missing "已初始化实例 --dry-run 不生成钩子" "$T/.githooks/pre-commit"
   # 正向控制：去掉 --dry-run → has_meta 分支必须补齐（R1/§6.2）
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_exists "has_meta 分支真跑 init 补齐钩子（R1）" "$T/.githooks/pre-commit"
   assert_eq "has_meta 分支真跑 init 设 hooksPath（R1）" ".githooks" "$(hookspath_of "$T")"
 }
 
-s54_init_non_tty_requires_yes() {
-  echo "--- 场景54：非 TTY 且未给 --yes → 非零退出（R15，不得静默 no-op）"
+s54_init_non_tty_no_confirmation() {
+  # wave-5 契约演进：R15（非 TTY 必须显式 --yes）随 --yes 整体删除。
+  # 旧断言「非 TTY 不给 --yes → 非零 + 文案指引 --yes」与新契约互斥，故改写为正向控制：
+  # 非 TTY（printf '' 关 stdin）下 init 必须一次做成，不得再问确认。
+  echo "--- 场景54：非 TTY 无旗标 → init 直接落地（无交互确认，R15 已随 --yes 删除）"
   local T; T=$(new_case)
   R_OUT=$( cd "$T" && printf '' | bash "$ROOT/ponygo" init 2>&1 ); R_RC=$?
-  assert_nonzero "printf '' | ponygo init → 非零（R15）" "$R_RC"
-  assert_contains "文案给出 --yes 指引" "$R_OUT" "--yes"
-  assert_missing "非 TTY 未确认 → 不落盘" "$T/.meta"
-  # 正向控制：同一目录加 --yes → exit 0（证明非零来自 TTY 判据，不是目录问题）
-  run_cli "$T" init --yes
-  assert_eq "同目录 init --yes → exit 0（正向控制）" 0 "$R_RC"
-  assert_exists "确认后骨架已落盘（正向控制）" "$T/.meta/meta.yaml"
+  assert_eq "printf '' | ponygo init → exit 0（无需确认）" 0 "$R_RC"
+  assert_exists "非 TTY 也落盘 meta.yaml" "$T/.meta/meta.yaml"
+  assert_not_contains "不再提示回车确认" "$R_OUT" "回车继续"
+  assert_not_contains "不再出现已取消" "$R_OUT" "已取消"
+  assert_not_contains "不再指引 --yes" "$R_OUT" "--yes"
+  # 幂等正向控制：同目录二次 init 仍 exit 0（has_meta 分支）
+  run_cli "$T" init
+  assert_eq "同目录二次 init → exit 0（幂等）" 0 "$R_RC"
 }
 
 s55_ladder_24_strong() {
   echo "--- 场景55：2.4 强判据反证（一行注释骗不过；哨兵块内调用被注释也骗不过）"
   local T G; G=$(sanitize_git); T=$(new_case)
-  git_seed_repo "$T"; run_cli "$T" init --yes
+  git_seed_repo "$T"; run_cli "$T" init
   printf 'level: 2\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
   # 2.1–2.3 隔离：保证 FAIL 只能归因到 2.4（否则「报 2.4」断言会被别的原因顶掉）
@@ -2872,7 +2876,7 @@ s56_dual_write_parity() {
   echo "--- 场景56：双写一致性（init 生成的 A1/A2/A4 与仓库模板 eol 归一后逐字节一致）"
   local T a; T=$(new_case)
   git_seed_repo "$T"
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_eq "init exit 0" 0 "$R_RC"
   for a in adr-verify.sh adr-verify.spec.sh ci-verify.sh; do
     assert_exists "生成 .meta/gates/$a" "$T/.meta/gates/$a"
@@ -2887,7 +2891,7 @@ s57_ci_conditional_generation() {
   # ① git remote 含 github → 生成 A5（薄壳），A4 可执行且自检 exit 0
   T=$(new_case); git_seed_repo "$T"
   git_local "$T" remote add origin https://github.com/example/demo.git >/dev/null 2>&1
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_eq "github remote 场景 init exit 0" 0 "$R_RC"
   assert_exists "github 证据 → 生成 ponygo-governance.yml" "$T/.github/workflows/ponygo-governance.yml"
   assert_file_has "A5 是薄壳：只调 ci-verify.sh" "$T/.github/workflows/ponygo-governance.yml" "ci-verify.sh"
@@ -2897,11 +2901,11 @@ s57_ci_conditional_generation() {
   assert_eq "A4 ci-verify.sh 在本仓实跑 exit 0" 0 "$S_RC"
   # ② 预置 .github/ 同样视为 github 证据
   T=$(new_case); git_seed_repo "$T"; mkdir -p "$T/.github/workflows"
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_exists "预置 .github/ → 生成 A5" "$T/.github/workflows/ponygo-governance.yml"
   # ③ 无任何 provider → 不生成 A5，A4 仍生成，status 报「远端层」缺口
   T=$(new_case); git_seed_repo "$T"
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_missing "无 provider → 不生成 A5" "$T/.github/workflows/ponygo-governance.yml"
   assert_exists "无 provider 时 A4 仍生成（门禁本体恒在）" "$T/.meta/gates/ci-verify.sh"
   # shellcheck disable=SC2046
@@ -2909,7 +2913,7 @@ s57_ci_conditional_generation() {
   assert_contains "status 报「远端层」缺口行" "$R_OUT" "远端层"
   # ④ 非 GitHub 但检出其它 provider（gitlab）→ 不生成 A5，status 给可执行指引
   T=$(new_case); git_seed_repo "$T"; printf 'stages: [test]\n' > "$T/.gitlab-ci.yml"
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_missing "gitlab 项目 → 不生成 A5" "$T/.github/workflows/ponygo-governance.yml"
   # shellcheck disable=SC2046
   run_cli_env "$T" $G status
@@ -2956,7 +2960,7 @@ assert_block_canonical() { # <描述> <hook 文件> <规范块文件>
 }
 make_canonical_block() { # → 打印规范块文件路径（由一次性 ref 仓的 init 产物提取）
   local r b
-  r=$(new_case); git_seed_repo "$r"; run_cli "$r" init --yes
+  r=$(new_case); git_seed_repo "$r"; run_cli "$r" init
   b="$SBASE/canon.block"; sentinel_block "$r/.githooks/pre-commit" > "$b"
   printf '%s' "$b"
 }
@@ -2996,14 +3000,14 @@ run_git_commit() { # <dir> <message>：真跑 git commit（钩子会执行），
 s58_f1_block_before_exit() {
   echo "--- 场景58：F1 哨兵块必须前置到 shebang 之后（exit 0 / exec 钩子下末尾追加=永不执行）"
   local T H bs es CANON
-  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init --yes
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init
   CANON="$SBASE/canon58.block"; sentinel_block "$T/.githooks/pre-commit" > "$CANON"
 
   # ① 既有钩子以 exit 0 结尾（极常见形态）
   T=$(new_case); git_seed_repo "$T"
   ( cd "$T" && mkdir -p .githooks && printf '#!/usr/bin/env bash\nexit 0\n' > .githooks/pre-commit \
       && chmod +x .githooks/pre-commit ) >/dev/null 2>&1
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_eq "exit 0 钩子场景 init exit 0" 0 "$R_RC"
   H="$T/.githooks/pre-commit"
   bs=$(block_begin_line "$H"); es=$(first_exit_line "$H")
@@ -3022,7 +3026,7 @@ s58_f1_block_before_exit() {
   T=$(new_case); git_seed_repo "$T"
   ( cd "$T" && mkdir -p .githooks && printf '#!/usr/bin/env bash\nexec /bin/true\n' > .githooks/pre-commit \
       && chmod +x .githooks/pre-commit ) >/dev/null 2>&1
-  run_cli "$T" init --yes
+  run_cli "$T" init
   H="$T/.githooks/pre-commit"
   bs=$(block_begin_line "$H"); es=$(first_exit_line "$H")
   assert_eq "exec 钩子：哨兵块紧接 shebang（第 2 行，F1 前置）" 2 "${bs:-缺失}"
@@ -3036,7 +3040,7 @@ s58_f1_block_before_exit() {
   assert_nonzero "exec 钩子下非法 ADR 提交必须 rc≠0" "$C_RC"
 
   # ③ 正向控制：手工摆成 F1 合规位置（块在 shebang 后、exit 前）→ 同一非法 ADR 必被拒
-  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init --yes
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init
   H="$T/.githooks/pre-commit"
   { printf '#!/usr/bin/env bash\n'; cat "$CANON"; printf 'exit 0\n'; } > "$H.tmp" && mv -f "$H.tmp" "$H"
   chmod +x "$H"
@@ -3058,7 +3062,7 @@ s59_f2_concurrent_atomicity() {
     # 起跑栅栏（flag 文件自旋）：让 10 个进程尽量同时进「读-判-写」窗口，
     # 否则仅靠 & 的启动抖动会把竞态掩成偶然绿——这是**加强**同一契约，不换判据。
     for i in 1 2 3 4 5 6 7 8 9 10; do
-      ( cd "$T" && while [ ! -f go ]; do :; done; exec bash "$ROOT/ponygo" init --yes >/dev/null 2>&1 ) &
+      ( cd "$T" && while [ ! -f go ]; do :; done; exec bash "$ROOT/ponygo" init >/dev/null 2>&1 ) &
     done
     sleep 0.5
     : > "$T/go"
@@ -3079,7 +3083,7 @@ s59_f2_concurrent_atomicity() {
   T=$(new_case); git_seed_repo "$T"
   ( cd "$T" && mkdir -p .githooks && printf '#!/usr/bin/env bash\necho custom-gate\n' > .githooks/pre-commit \
       && chmod +x .githooks/pre-commit && git config core.hooksPath .githooks ) >/dev/null 2>&1
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_eq "正向控制：顺序 init 后哨兵尾行恰好 1" 1 \
     "$(grep -cF "$GATE_MARKER_END" "$T/.githooks/pre-commit" 2>/dev/null || printf 0)"
 
@@ -3092,7 +3096,7 @@ s59_f2_concurrent_atomicity() {
 if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
 EOF
   chmod +x "$T/.githooks/pre-commit"
-  run_cli "$T" init --yes
+  run_cli "$T" init
   bash -n "$T/.githooks/pre-commit" 2>/dev/null
   assert_eq "半截块自愈后 bash -n rc=0（不得留下未闭合 if）" 0 "$?"
   assert_eq "半截块自愈后哨兵尾行恰好 1" 1 \
@@ -3129,13 +3133,13 @@ fi
 # <<< ponygo-gate: adr-verify v1 <<<' ;;
     esac
     printf '%s\n' "$TPL" > "$T/.githooks/pre-commit"; chmod +x "$T/.githooks/pre-commit"
-    run_cli "$T" init --yes
+    run_cli "$T" init
     set_level2 "$T"
     # shellcheck disable=SC2046
     run_cli_env "$T" $(sanitize_git) status
     assert_eq "变体 $V：status exit 1（非规范块=未接线，F3）" 1 "$R_RC"
     assert_contains "变体 $V：报 2.4" "$R_OUT" "2.4"
-    run_cli "$T" init --yes
+    run_cli "$T" init
     assert_block_canonical "变体 $V：init 重写为规范块（F3 gate_hook_wired 语义）" \
       "$T/.githooks/pre-commit" "$CANON"
     assert_eq "变体 $V：重写后哨兵尾行恰好 1" 1 \
@@ -3155,13 +3159,13 @@ s61_f4_write_failure_loud() {
     rm -f "$T/.githooks/.wprobe"; chmod 755 "$T/.githooks"
     ok "本环境目录写拒绝不生效（MSYS/root）→ F4 写失败场景降级跳过（由 Linux CI 复现）"
   else
-    run_cli "$T" init --yes
+    run_cli "$T" init
     assert_nonzero "钩子写入失败 → init rc≠0（F4：禁止 Permission denied + exit 0）" "$R_RC"
     assert_contains "输出点名失败目标 .githooks/pre-commit" "$R_OUT" ".githooks/pre-commit"
     assert_contains "输出含 WARN（F4 要求 WARN + 失败清单）" "$R_OUT" "WARN"
     assert_matches "输出给出可执行补救（非裸 Permission denied）" "$R_OUT" '补救|写入失败|不可写|修复失败'
     chmod 755 "$T/.githooks"
-    run_cli "$T" init --yes
+    run_cli "$T" init
     assert_eq "恢复权限后 init rc=0（正向控制）" 0 "$R_RC"
     assert_exists "恢复权限后钩子已生成（正向控制）" "$T/.githooks/pre-commit"
   fi
@@ -3173,7 +3177,7 @@ s62_f5_remedy_by_cause() {
   local T G; G=$(sanitize_git)
 
   # ① 非 git → 补救 = git init
-  T=$(new_case); run_cli "$T" init --yes; set_level2 "$T"
+  T=$(new_case); run_cli "$T" init; set_level2 "$T"
   # shellcheck disable=SC2046
   run_cli_env "$T" $G status
   assert_eq "非 git 分支：status exit 1" 1 "$R_RC"
@@ -3182,7 +3186,7 @@ s62_f5_remedy_by_cause() {
   assert_not_contains "非 git 分支：不得给统一 bash ponygo init 文案（F5）" "$R_OUT" "bash ponygo init"
 
   # ② hooksPath 指向不可达 → 补救 = git config core.hooksPath
-  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init --yes; set_level2 "$T"
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init; set_level2 "$T"
   rm -rf "$T/.githooks"
   # shellcheck disable=SC2046
   run_cli_env "$T" $G status
@@ -3192,7 +3196,7 @@ s62_f5_remedy_by_cause() {
   assert_not_contains "不可达分支：不得给统一 bash ponygo init 文案（F5）" "$R_OUT" "bash ponygo init"
 
   # ③ 钩子不可执行 → 补救 = chmod +x；且 init 不得替它激活（§6.1 沉睡钩子是人的决定）
-  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init --yes; set_level2 "$T"
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init; set_level2 "$T"
   chmod -x "$T/.githooks/pre-commit" 2>/dev/null
   if [ -x "$T/.githooks/pre-commit" ]; then
     ok "本环境 chmod -x 不生效（MSYS）→ 钩子不可执行分支降级跳过（由 Linux CI 复现）"
@@ -3203,7 +3207,7 @@ s62_f5_remedy_by_cause() {
     assert_contains "钩子不可执行分支：报 2.4" "$R_OUT" "2.4"
     assert_matches "不可执行分支：补救含 chmod +x（F5）" "$R_OUT" 'chmod \+x'
     assert_not_contains "不可执行分支：不得给统一 bash ponygo init 文案（F5）" "$R_OUT" "bash ponygo init"
-    run_cli "$T" init --yes
+    run_cli "$T" init
     assert_eq "init 不替沉睡钩子 chmod（§6.1）" "no" \
       "$([ -x "$T/.githooks/pre-commit" ] && echo yes || echo no)"
   fi
@@ -3212,7 +3216,7 @@ s62_f5_remedy_by_cause() {
 s63_f6_tilde_expansion() {
   echo "--- 场景63：F6 hooksPath 的 ~ 展开（~/hk → \$HOME/hk，level:2 status 必须 rc=0）"
   local T G; G=$(sanitize_git); T=$(new_case)
-  git_seed_repo "$T"; run_cli "$T" init --yes; set_level2 "$T"
+  git_seed_repo "$T"; run_cli "$T" init; set_level2 "$T"
   mkdir -p "$T/home/hk"
   cp "$T/.githooks/pre-commit" "$T/home/hk/pre-commit"
   chmod +x "$T/home/hk/pre-commit"
@@ -3228,24 +3232,24 @@ s64_f8_f11_dry_run_provider() {
   echo "--- 场景64：F8 dry-run 豁免非 TTY（含装配预览）+ F11 provider 收紧 + A5 timeout-minutes"
   local T G; G=$(sanitize_git)
 
-  # ① F8：--yes --dry-run 在非 TTY（</dev/null）下 rc=0、零落盘、且打印装配预览
+  # ① F8：--dry-run 在非 TTY（</dev/null）下 rc=0、零落盘、且打印装配预览
   T=$(new_case); git_seed_repo "$T"
-  R_OUT=$( cd "$T" && bash "$ROOT/ponygo" init --yes --dry-run </dev/null 2>&1 ); R_RC=$?
-  assert_eq "F8：init --yes --dry-run（</dev/null）rc=0" 0 "$R_RC"
+  R_OUT=$( cd "$T" && bash "$ROOT/ponygo" init --dry-run </dev/null 2>&1 ); R_RC=$?
+  assert_eq "F8：init --dry-run（</dev/null）rc=0" 0 "$R_RC"
   assert_missing "F8：dry-run 零落盘（.meta 不存在）" "$T/.meta"
   assert_eq "F8：dry-run 不改 core.hooksPath" "" "$(hookspath_of "$T")"
   assert_contains "F8：dry-run 打印装配预览（含 .githooks 计划）" "$R_OUT" ".githooks"
-  # ② F8 核心：--dry-run 且无 --yes、stdin 非 TTY → 不得触发 R15 的 die
+  # ② F8 核心：--dry-run 且 stdin 非 TTY → 不得被交互确认判据 die 挡住
   T=$(new_case)
   R_OUT=$( cd "$T" && bash "$ROOT/ponygo" init --dry-run </dev/null 2>&1 ); R_RC=$?
-  assert_eq "F8：init --dry-run（无 --yes、非 TTY）rc=0（DRY_RUN 豁免 R15）" 0 "$R_RC"
-  assert_missing "F8：无 --yes 的 dry-run 同样零落盘" "$T/.meta"
+  assert_eq "F8：init --dry-run（非 TTY）rc=0（dry-run 无需确认）" 0 "$R_RC"
+  assert_missing "F8：dry-run 零落盘" "$T/.meta"
 
   # ③ F11：仅 .github/ISSUE_TEMPLATE/（无 workflows）+ remote 非 github → 不生成 A5
   T=$(new_case); git_seed_repo "$T"
   mkdir -p "$T/.github/ISSUE_TEMPLATE"; printf 'x\n' > "$T/.github/ISSUE_TEMPLATE/bug.md"
   git_local "$T" remote add origin https://gitlab.com/example/demo.git >/dev/null 2>&1
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_missing "F11：仅 .github/ISSUE_TEMPLATE 不算 github → 不生成 A5" \
     "$T/.github/workflows/ponygo-governance.yml"
   assert_exists "F11：A4 门禁本体仍生成" "$T/.meta/gates/ci-verify.sh"
@@ -3256,7 +3260,7 @@ s64_f8_f11_dry_run_provider() {
 
   # ④ F11：真 GitHub 证据（.github/workflows/）→ 生成 A5，且含 timeout-minutes: 10（B9）
   T=$(new_case); git_seed_repo "$T"; mkdir -p "$T/.github/workflows"
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_exists "F11：.github/workflows/ 存在 → 生成 A5" "$T/.github/workflows/ponygo-governance.yml"
   assert_file_has "F11：A5 含 timeout-minutes: 10（B9）" \
     "$T/.github/workflows/ponygo-governance.yml" "timeout-minutes: 10"
@@ -3265,7 +3269,7 @@ s64_f8_f11_dry_run_provider() {
 s65_f9_f10_symlink_and_selfheal() {
   echo "--- 场景65：F9 符号链接 ADR 必须拒绝 + F10 资产自愈（半截 A1 → init 恢复规范内容）"
   local T; T=$(new_case)
-  git_seed_repo "$T"; run_cli "$T" init --yes
+  git_seed_repo "$T"; run_cli "$T" init
   write_valid_decision "$T" "implemented/feature/2026-01-08-target.md"
   ( cd "$T/.agents/notes/implemented/feature" && ln -sf 2026-01-08-target.md 2026-01-08-link.md ) 2>/dev/null
   if [ ! -L "$T/.agents/notes/implemented/feature/2026-01-08-link.md" ]; then
@@ -3288,7 +3292,7 @@ s65_f9_f10_symlink_and_selfheal() {
 
   # ② F10：A1 被改成半截内容 → init 自愈为规范内容（与仓库模板 eol 归一逐字节一致）
   printf 'echo x\n' > "$T/.meta/gates/adr-verify.sh"
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_same_as_template "F10：init 自愈 A1 为仓库模板内容" \
     "$T/.meta/gates/adr-verify.sh" "$ROOT/.meta/gates/adr-verify.sh"
   bash -n "$T/.meta/gates/adr-verify.sh" 2>/dev/null
@@ -3329,7 +3333,7 @@ s66_f1_bare_exit_position() {
       semi)   EXITLINE='exit;' ;;
       dollar) EXITLINE='exit $?' ;;
     esac
-    T=$(new_case); git_seed_repo "$T"; run_cli "$T" init --yes; set_level2 "$T"
+    T=$(new_case); git_seed_repo "$T"; run_cli "$T" init; set_level2 "$T"
     # 模拟旧版「末尾追加」留下的 legacy 钩子：块在 exit 之后
     { printf '#!/usr/bin/env bash\n'; printf 'echo custom\n'; printf '%s\n' "$EXITLINE"; gate_block_lines; } \
       > "$T/.githooks/pre-commit"
@@ -3338,7 +3342,7 @@ s66_f1_bare_exit_position() {
     run_cli_env "$T" $G status
     assert_eq "变体 $V（$EXITLINE）：legacy 假接线 → status exit 1" 1 "$R_RC"
     assert_contains "变体 $V：legacy 报 2.4" "$R_OUT" "2.4"
-    run_cli "$T" init --yes
+    run_cli "$T" init
     bs=$(block_begin_line "$T/.githooks/pre-commit"); es=$(first_exit_line_v2 "$T/.githooks/pre-commit")
     if [ -n "$bs" ] && [ -n "$es" ] && [ "$bs" -lt "$es" ]; then
       ok "变体 $V：init 后哨兵块前置到 exit 之前（块 $bs 行 < exit $es 行）"
@@ -3352,7 +3356,7 @@ s66_f1_bare_exit_position() {
   done
 
   # 正向控制：块正确前置在裸 exit 之前 → status 0 且非法 ADR 必被拒（证明判据可满足）
-  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init --yes; set_level2 "$T"
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init; set_level2 "$T"
   { printf '#!/usr/bin/env bash\n'; gate_block_lines; printf 'echo custom\nexit\n'; } \
     > "$T/.githooks/pre-commit"
   chmod +x "$T/.githooks/pre-commit"
@@ -3379,7 +3383,7 @@ echo user-line-2
 echo user-line-3
 EOF
   chmod +x "$T/.githooks/pre-commit"
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_nonzero "含外来内容的未闭合哨兵块 → init 必须非零退出（不得静默截断）" "$R_RC"
   assert_contains "输出含 WARN" "$R_OUT" "WARN"
   assert_matches "WARN 说明哨兵块未闭合" "$R_OUT" '未闭合'
@@ -3389,14 +3393,14 @@ EOF
   assert_file_has "外来行 echo user-line-3 必须保留" "$T/.githooks/pre-commit" "echo user-line-3"
 
   # 正向对照：纯半截块（区域内只有规范行、无外来行）仍必须自愈为单块 + 语法合法
-  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init --yes; set_level2 "$T"
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init; set_level2 "$T"
   cat > "$T/.githooks/pre-commit" <<'EOF'
 #!/usr/bin/env bash
 # >>> ponygo-gate: adr-verify v1 >>>
 if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
 EOF
   chmod +x "$T/.githooks/pre-commit"
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_eq "正向对照：纯半截块自愈 init exit 0" 0 "$R_RC"
   assert_eq "正向对照：自愈后哨兵尾行恰好 1" 1 \
     "$(grep -cF "$GATE_MARKER_END" "$T/.githooks/pre-commit" 2>/dev/null || printf 0)"
@@ -3413,7 +3417,7 @@ s68_f_hookspath_escape() {
   T=$(new_case); git_seed_repo "$T"; parent=$(dirname "$T")
   ( cd "$T" && git config core.hooksPath .. ) >/dev/null 2>&1
   rm -f "$parent/pre-commit"
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_nonzero "hooksPath=.. → init 必须非零拒绝（不得写到仓库外）" "$R_RC"
   assert_contains "输出含 WARN" "$R_OUT" "WARN"
   assert_matches "WARN 说明越界/仓库外" "$R_OUT" '仓库外|仓外|越界'
@@ -3422,7 +3426,7 @@ s68_f_hookspath_escape() {
 
   # 正向控制：hooksPath 未设 → init 正常装配（拒绝只针对越界，不是把正常路径也拒了）
   T=$(new_case); git_seed_repo "$T"
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_eq "正向控制：hooksPath 未设 → init exit 0" 0 "$R_RC"
   assert_exists "正向控制：生成 .githooks/pre-commit" "$T/.githooks/pre-commit"
 }
@@ -3444,7 +3448,7 @@ s69_f_trailing_sentinel_no_user_loss() {
     printf '# >>> ponygo-gate: adr-verify v1 >>>\necho USER-KEEP-ME\n'; } \
     > "$T/.githooks/pre-commit"
   chmod +x "$T/.githooks/pre-commit"
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_eq "① 用户行零删除（grep -c USER-KEEP-ME = 1）" 1 \
     "$(grep -c 'USER-KEEP-ME' "$T/.githooks/pre-commit" 2>/dev/null || printf 0)"
   assert_nonzero "② 尾随哨兵块残留 → init 必须非零（需人工清理，不得静默）" "$R_RC"
@@ -3452,15 +3456,15 @@ s69_f_trailing_sentinel_no_user_loss() {
   assert_matches "③ WARN 点名哨兵块" "$R_OUT" '哨兵'
   assert_matches "③ WARN 说明残留/未闭合/需人工清理" "$R_OUT" '残留|未闭合|人工|外来'
   # 幂等守卫：再跑一次 init，用户行仍必须恰好 1（重复装配不得累积删除/重复插入）
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_eq "①b 二次 init 后用户行仍恰好 1" 1 \
     "$(grep -c 'USER-KEEP-ME' "$T/.githooks/pre-commit" 2>/dev/null || printf 0)"
 
   # ④ 正向对照：两个**纯规范**块（无外来行）→ 去重为一个块、语法合法、rc=0
-  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init --yes; set_level2 "$T"
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init; set_level2 "$T"
   { printf '#!/usr/bin/env bash\n'; gate_block_lines; gate_block_lines; } > "$T/.githooks/pre-commit"
   chmod +x "$T/.githooks/pre-commit"
-  run_cli "$T" init --yes
+  run_cli "$T" init
   assert_eq "④ 纯规范重复块 → init exit 0" 0 "$R_RC"
   assert_eq "④ 去重后哨兵尾行恰好 1" 1 \
     "$(grep -cF "$GATE_MARKER_END" "$T/.githooks/pre-commit" 2>/dev/null || printf 0)"
@@ -3472,7 +3476,7 @@ s70_f_function_body_exit_not_early_exit() {
   echo "--- 场景70：函数体内 exit 不算顶层早退（否则 2.4 假红）；顶层裸 exit 仍必须红"
   local T G; G=$(sanitize_git)
   # ① 正向：cleanup() { exit 1; } 在规范块之前 —— 函数体内 exit 不是顶层早退，块照常执行
-  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init --yes; set_level2 "$T"
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init; set_level2 "$T"
   { printf '#!/usr/bin/env bash\ncleanup() { exit 1; }\n'; gate_block_lines; } > "$T/.githooks/pre-commit"
   chmod +x "$T/.githooks/pre-commit"
   # shellcheck disable=SC2046
@@ -3480,13 +3484,167 @@ s70_f_function_body_exit_not_early_exit() {
   assert_eq "① 函数体内 exit 不算早退 → status exit 0（不得假红）" 0 "$R_RC"
   assert_contains "① 结论行 L0-L2（2.4 判 PASS）" "$R_OUT" "L0-L2"
   # ② 反向对照：顶层裸 exit + 规范块 → 必须红并报 2.4（位置判据不得被放宽掉）
-  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init --yes; set_level2 "$T"
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init; set_level2 "$T"
   { printf '#!/usr/bin/env bash\nexit\n'; gate_block_lines; } > "$T/.githooks/pre-commit"
   chmod +x "$T/.githooks/pre-commit"
   # shellcheck disable=SC2046
   run_cli_env "$T" $G status
   assert_eq "② 顶层裸 exit 之后的块 → status exit 1" 1 "$R_RC"
   assert_contains "② 报 2.4" "$R_OUT" "2.4"
+}
+
+# ============================================================
+# wave-5 红相（s71–s74）：契约三项改造的验收（对改造前 HEAD 必须真红）
+#   ① --yes 彻底移除（含 observe init 同一全局解析）
+#   ② 检出替代治理形态 → 适配任务书（不阻断 init；登记 decision 后 WARN 消失）
+#   ③ docs-tier: off 的「建议录一条 decision」假提示修（已登记 → 静默）
+#   ④ retire 非 TTY 无交互确认（rc=0 且 level 真的变）
+# ============================================================
+
+# init 的适配摘要行数：首行「检出替代治理形态 … 适配任务书：<路径>」+ 每项一行 + 收尾提示行。
+# 只数摘要块本身（`- ` / `+ ` 项行 / 「未登记适配决策」收尾），不把后续 init 普通进度行算进去。
+adapt_summary_lines() { # <输出文本> → 行数
+  printf '%s\n' "$1" | awk '
+    /检出替代治理形态/ && /适配任务书/ { inside=1; n=1; next }
+    inside && /^ponygo: *(- |\+ |未登记适配决策)/ { n++; next }
+    inside { inside=0 }
+    END { printf "%s\n", n+0 }'
+}
+
+s71_yes_flag_rejected() {
+  echo "--- 场景71：--yes 已彻底移除（传入即未知选项报错；无旗标即可执行）"
+  local T SK
+  # ① 负相：init --yes 必须被拒（不得静默接受半途落盘）
+  T=$(new_case)
+  run_cli "$T" init --yes
+  assert_nonzero "①.1 ponygo init --yes → rc≠0" "$R_RC"
+  assert_contains "①.2 报错点名被拒旗标 --yes" "$R_OUT" "--yes"
+  case "$R_OUT" in
+    *未知选项*|*未知参数*) ok "①.3 诊断为未知选项/未知参数" ;;
+    *) bad "①.3 诊断为未知选项/未知参数（实得：$R_OUT）" ;;
+  esac
+  assert_contains "①.4 替代指引含「ponygo init」" "$R_OUT" "ponygo init"
+  assert_contains "①.5 替代指引含「--dry-run」" "$R_OUT" "--dry-run"
+  assert_missing "①.6 未知选项 → 零落盘（.meta 不应存在）" "$T/.meta"
+  # ② 正向对照：同目录无旗标 init → rc=0 且骨架落盘（证明 ① 的 rc≠0 不是目录问题）
+  run_cli "$T" init
+  assert_eq "②.1 同目录 ponygo init（无旗标）→ rc=0" 0 "$R_RC"
+  assert_exists "②.2 骨架已生成 .meta/meta.yaml" "$T/.meta/meta.yaml"
+  # ③ observe init 走同一全局旗标解析：--yes 同样被拒，去掉后必须能执行
+  T=$(new_case); SK=$(stage_skill "$T")
+  run_cli "$T" observe init --kind frontend --dims tracing --skill-dir "$SK" --yes
+  assert_nonzero "③.1 observe init … --yes → rc≠0（同一全局解析）" "$R_RC"
+  assert_missing "③.2 observe init --yes → 零落盘（无 docs/observability.yaml）" "$T/docs/observability.yaml"
+  run_cli "$T" observe init --kind frontend --dims tracing --skill-dir "$SK"
+  assert_eq "③.3 observe init（去掉 --yes）→ rc=0（正向对照）" 0 "$R_RC"
+  assert_exists "③.4 observe init 声明已落盘（正向对照）" "$T/docs/observability.yaml"
+}
+
+s72_adaptation_book() {
+  echo "--- 场景72：检出替代治理形态 → 适配任务书（不阻断 init；登记 decision 后 WARN 消失）"
+  local T BOOK md1 md2 n
+  T=$(new_case); git_seed_repo "$T"
+  # 既有仓四类替代物各一：决策载体 / 本地钩子 / 远端流水线 / 协作契约
+  mkdir -p "$T/docs/adr" "$T/.husky" "$T/.github/workflows"
+  printf '# ADR x\n\n既有决策目录里的历史 ADR。\n' > "$T/docs/adr/x.md"
+  printf '#!/usr/bin/env bash\necho HUSKY-CUSTOM\n' > "$T/.husky/pre-commit"
+  chmod +x "$T/.husky/pre-commit"
+  printf 'name: ci\non: [push]\njobs:\n  t:\n    runs-on: ubuntu-latest\n    steps: []\n' \
+    > "$T/.github/workflows/ci.yml"
+  printf '# CONTRIBUTING\n\n既有贡献流程。\n' > "$T/CONTRIBUTING.md"
+  BOOK="$T/.meta/adaptation/alt-governance.md"
+
+  run_cli "$T" init
+  assert_eq "① 检出既有治理形态仍 init exit 0（不阻断）" 0 "$R_RC"
+  assert_exists "② 适配任务书已生成" "$BOOK"
+  # ③ 四项逐项断言（缺哪项就报哪项，不合并成一个大断言）
+  assert_file_has "③.1 任务书含 docs/adr（决策载体）" "$BOOK" "docs/adr"
+  assert_file_has "③.2 任务书含 .husky（本地钩子）" "$BOOK" ".husky"
+  assert_file_has "③.3 任务书含 .github/workflows（远端流水线）" "$BOOK" ".github/workflows"
+  assert_file_has "③.4 任务书含 CONTRIBUTING.md（协作契约）" "$BOOK" "CONTRIBUTING.md"
+  # ④ 终端摘要：3–6 行，含「适配任务书」与任务书路径
+  assert_contains "④.1 摘要点名「适配任务书」" "$R_OUT" "适配任务书"
+  assert_contains "④.2 摘要给出任务书路径" "$R_OUT" ".meta/adaptation/alt-governance.md"
+  n=$(adapt_summary_lines "$R_OUT")
+  if [ "${n:-0}" -ge 3 ] && [ "${n:-0}" -le 6 ]; then
+    ok "④.3 摘要行数 3–6（实得 $n）"
+  else
+    bad "④.3 摘要行数 3–6（实得 [${n:-?}] 行；摘要块原文：$(printf '%s' "$R_OUT" | grep -E '适配任务书|^ponygo: *(- |\+ )' | head -8 | tr '\n' '/')）"
+  fi
+  # ⑤ 既有钩子一字不动（只在 .githooks 侧装配，不重写 .husky 内容）
+  assert_file_has "⑤ 既有 .husky/pre-commit 内容仍在（HUSKY-CUSTOM 未被改写）" \
+    "$T/.husky/pre-commit" "HUSKY-CUSTOM"
+  # ⑥ 未登记适配决策 → status 持续 WARN，但不改退出码（L1 下 rc=0）
+  printf 'level: 1\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/process/2026-01-01-bootstrap.md"
+  run_cli "$T" status
+  assert_eq "⑥.1 status(L1) rc=0（WARN 不改退出码）" 0 "$R_RC"
+  assert_contains "⑥.2 status 报「适配决策未登记」" "$R_OUT" "适配决策未登记"
+  # ⑦ 落一条合法适配决策 → 该 WARN 消失
+  write_valid_decision "$T" "implemented/process/2026-01-02-alt-governance-x.md"
+  run_cli "$T" status
+  assert_eq "⑦.1 登记适配 decision 后 status rc=0（仍）" 0 "$R_RC"
+  assert_not_contains "⑦.2 登记后「适配决策未登记」WARN 消失" "$R_OUT" "适配决策未登记"
+  # ⑧ 幂等：再跑 init，任务书 md5 不变（纯函数重写，不追加）
+  md1=$(md5_of "$BOOK")
+  run_cli "$T" init
+  assert_eq "⑧.1 二次 init exit 0" 0 "$R_RC"
+  md2=$(md5_of "$BOOK")
+  assert_eq "⑧.2 二次 init 后任务书 md5 不变（幂等）" "$md1" "$md2"
+}
+
+s73_docs_tier_hint_silent() {
+  # 该提示挂在 2.5 判据（L2 才评估），故 fixture 必须 level: 2，否则测的是「根本没走到」。
+  echo "--- 场景73：docs-tier: off「建议录一条 decision」假提示（已登记 → 静默）"
+  local T DEC
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init
+  DEC=".agents/notes/implemented/process/2026-01-01-docs-tier-optout.md"
+  write_valid_decision "$T" "implemented/process/2026-01-01-bootstrap.md"
+  printf 'level: 2\ndocs-tier: off\n' > "$T/.meta/meta.yaml"
+  # 负相：删掉 docs-tier decision → 提示必须重现（先验「提示本身存在」，否则下面的静默是空断言）
+  run_cli "$T" status
+  assert_contains "① 无 docs-tier decision 时 status 提示「建议录一条 decision」" "$R_OUT" "建议录一条 decision"
+  run_cli "$T" audit
+  assert_contains "② 无 docs-tier decision 时 audit 同样提示" "$R_OUT" "建议录一条 decision"
+  # 正相：登记合法 docs-tier decision（文件名含 docs-tier）→ 提示消失
+  write_valid_decision "$T" "implemented/process/2026-01-01-docs-tier-optout.md"
+  assert_exists "③ 前置取证：decision 已落 ${DEC}" "$T/$DEC"
+  run_cli "$T" status
+  assert_not_contains "④ 已登记 → status 静默（不催录 decision）" "$R_OUT" "建议录一条 decision"
+  run_cli "$T" audit
+  assert_not_contains "⑤ 已登记 → audit 静默" "$R_OUT" "建议录一条 decision"
+  # 反向对照：再删掉 → 提示必须回来（证明④⑤的静默来自「已登记」而非提示被整体删掉）
+  rm -f "$T/$DEC"
+  run_cli "$T" status
+  assert_contains "⑥ 删除 decision 后 status 提示重现（反向对照）" "$R_OUT" "建议录一条 decision"
+  run_cli "$T" audit
+  assert_contains "⑦ 删除 decision 后 audit 提示重现（反向对照）" "$R_OUT" "建议录一条 decision"
+}
+
+s74_retire_no_confirmation() {
+  echo "--- 场景74：retire 非 TTY 无交互确认（rc=0 且 level 真的变）"
+  local T lv
+  T=$(new_case); run_cli "$T" init
+  printf 'level: 2\n' > "$T/.meta/meta.yaml"
+  # 前置取证：retire 前 level 确为 2（否则下面「level 变 1」可能空断言）
+  assert_eq "⓪ 前置取证：retire 前 level 为 2" "level: 2" \
+    "$(grep -m1 '^level' "$T/.meta/meta.yaml" 2>/dev/null)"
+  # 非 TTY：显式关 stdin（printf ''），与真实 CI / 管道一致
+  R_OUT=$( cd "$T" && printf '' | bash "$ROOT/ponygo" retire --level 1 2>&1 ); R_RC=$?
+  assert_eq "① 非 TTY retire --level 1 → rc=0" 0 "$R_RC"
+  assert_not_contains "② 输出无「回车继续」（不再等确认）" "$R_OUT" "回车继续"
+  assert_not_contains "③ 输出无「已取消」（不得静默 no-op）" "$R_OUT" "已取消"
+  lv=$(grep -m1 '^level' "$T/.meta/meta.yaml" 2>/dev/null)
+  if [ "$lv" = "level: 1" ]; then
+    ok "④ meta.yaml 的 level 真的变 1"
+  else
+    bad "④ meta.yaml 的 level 真的变 1（期望 [level: 1] 实得 [$lv]）"
+  fi
+  # 反向控制：无确认 ≠ 无校验——非法目标仍须 die 且不改写 level
+  R_OUT=$( cd "$T" && printf '' | bash "$ROOT/ponygo" retire --level 9 2>&1 ); R_RC=$?
+  assert_eq "⑤ 非法目标仍 rc=1（校验未被放宽）" 1 "$R_RC"
+  lv=$(grep -m1 '^level' "$T/.meta/meta.yaml" 2>/dev/null)
+  assert_eq "⑥ 非法目标后 level 未被改写" "level: 1" "$lv"
 }
 
 s42_observe_monorepo_subcomponents
@@ -3501,7 +3659,7 @@ s50_preexisting_hook_preserved
 s51_husky_foreign_hookspath
 s52_init_idempotent
 s53_init_dry_run
-s54_init_non_tty_requires_yes
+s54_init_non_tty_no_confirmation
 s55_ladder_24_strong
 s56_dual_write_parity
 s57_ci_conditional_generation
@@ -3518,6 +3676,10 @@ s67_f2_foreign_lines_not_truncated
 s68_f_hookspath_escape
 s69_f_trailing_sentinel_no_user_loss
 s70_f_function_body_exit_not_early_exit
+s71_yes_flag_rejected
+s72_adaptation_book
+s73_docs_tier_hint_silent
+s74_retire_no_confirmation
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
 [ "$FAIL" -eq 0 ] || exit 1

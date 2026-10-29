@@ -74,7 +74,9 @@ desktop  k8s-service  cli  batch  library  frontend  pipeline
 | `--reason-<dim> <text>` | `applicable: false` 的结构性理由（部署形态 / 进程模型 / 数据归属导致的必然不适用，不是排期理由） |
 | `--force` | 覆盖已存在声明（唯一写命令的覆盖开关） |
 | `--dry-run` | 只打印将写入的内容，不落盘 |
-| `--yes` | 破坏性动作前不再确认 |
+
+> **无交互确认**：`observe init` 是唯一写命令，覆盖只能由 `--force` 显式表达——幂等写入 + 显式覆盖开关，
+> 不用确认提示兜底（`--yes` 已移除，传入即按未知选项报错）。预览一律用 `--dry-run`。
 
 ---
 

@@ -67,19 +67,18 @@ ponygo 的 L1 判据已能把 ADR 形状机械化（1.1–1.9，真源
 已初始化实例（ponyfun / job_copilot / ponyllm / pony-sentry 等）**不需要重建治理根**，
 升级只有一步：
 
-1. **升级第一步永远是 `bash ponygo init --yes`**（幂等）：`.meta` 已存在时**不重铺骨架**，
+1. **升级第一步永远是 `bash ponygo init`**（幂等、无交互确认）：`.meta` 已存在时**不重铺骨架**，
    但仍执行 `ensure_gate_wiring` —— 补齐 A1/A2/A4、把哨兵块插进 `pre-commit` 的 shebang 之后、
    `core.hooksPath` 未设时设为 `.githooks` 并回读校验、给生成的钩子/脚本 `chmod +x`。
    重复跑无副作用（第二次跑应当零改动），可安全放在 `upgrade` 之后。
-2. **非交互 / CI 环境必须显式带 `--yes`**：非 TTY 且无 `--yes` 时 `init` 直接 `die`
-   「非交互环境请显式 --yes」（R15）。这是有意的——`printf '' | ponygo init` 静默 no-op
-   会让 CI 里"成功"却什么都没做。
-3. **`--dry-run` 现在允许非 TTY**（F8）：`DRY_RUN=1` 时不触发上面的 `die`，只打印装配计划
-   （不落盘、不动 `git config`），因此可以在 CI 里先预览再执行。注意 `--dry-run` **不会**验证接线结果，
-   校验仍是 `ponygo status`。
+2. **非交互 / CI 环境不加任何旗标**：`init` 不读 stdin、不弹确认，脚本与终端行为一字不差
+   （`printf '' | ponygo init` 与直接跑等价）。原 R15 的「非 TTY 且无 `--yes` → die」已随 `--yes`
+   整体移除而作废——见下方「v2 迁移补充」。
+3. **`--dry-run` 是唯一预览手段**：只打印装配计划（不落盘、不动 `git config`），终端与 CI 同一语义。
+   注意 `--dry-run` **不会**验证接线结果，校验仍是 `ponygo status`。
 4. **升级后 `status` 可能由 0 变 1**：这是判据加强**暴露了旧的假 PASS**（旧 2.4 只查
    `core.hooksPath` 字符串非空，不查钩子是否真调用门禁），不是回归。补救按因分支：
-   未接线/块不合规 → 跑一次 `bash ponygo init --yes` 即自愈；钩子**不可执行** →
+   未接线/块不合规 → 跑一次 `bash ponygo init` 即自愈；钩子**不可执行** →
    `init` **不会**替你激活沉睡钩子（激活属破坏性副作用），须 `chmod +x <hook>`；非 git 目录 →
    先 `git init` 再重跑；`hooksPath` 指向不可达目录 → `git config core.hooksPath .githooks`。
 5. **husky 实例**：`core.hooksPath` **不被改动**（改它会静默停用 husky v9 的 `.husky/_` 链），
@@ -89,8 +88,9 @@ ponygo 的 L1 判据已能把 ADR 形状机械化（1.1–1.9，真源
 
 ## Consequences
 
-- **正常装配路径不再返回非零**（唯一非零 = 非 TTY 且无 `--yes`，R15）；C2「不得静默缺席」由
-  "恒定装配"满足，而非由"失败报错"满足；
+- **正常装配路径不再返回非零**（原「唯一非零 = 非 TTY 且无 `--yes`」已作废——`--yes` 与交互确认整体
+  移除后，装配路径没有非零分支；见「v2 迁移补充」）；C2「不得静默缺席」由"恒定装配"满足，
+  而非由"失败报错"满足；
 - **既有 L2 实例可能由绿变红**：旧 2.4 只看 `hooksPath` 字符串，新判据要求真接线——ponyfun /
   job_copilot / ponyllm / pony-sentry 的 `status`/`audit` 退出码快照需重录（预期 L2 未接线实例
   0 → 1，可解释且补救 = 重跑 `ponygo init`）。这是判据加强的**正确**结果，不是回归；
@@ -115,7 +115,31 @@ ponygo 的 L1 判据已能把 ADR 形状机械化（1.1–1.9，真源
 3. `bash .meta/gates/adr-verify.spec.sh` → 0（拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件拒绝）
 4. `bash .meta/gates/ci-verify.sh` → 0（= 真源整树 + 门自检；与本地层**互补而不等价**）
 5. `bash tests/run.sh` → `fail=0`（基线 587 pass 之上新增装配/追加/不可执行分支用例）
-6. 真实 git 行为（非模拟）：临时仓 `ponygo init --yes` → `git commit` 触发钩子；非法 ADR 提交
+6. 真实 git 行为（非模拟）：临时仓 `ponygo init` → `git commit` 触发钩子；非法 ADR 提交
    被真实拒绝（rc≠0）、合法 ADR 提交放行；`git add` 后再改文件 → 以「ADR 有未暂存改动」拒绝
 7. 本仓 dogfood：`git config core.hooksPath .githooks` 后一次真实提交走 A3 → A1 → `verify-note.sh`；
    本仓 `bash ponygo status` 仍 0（L1，2.x 不在判据内，判据加强不抬等级）
+
+## v2 迁移补充（2026-10-29 第二轮：`--yes` 移除 + 替代治理任务书）
+
+本文件原 Migration 的 R15 口径（"非 TTY 且无 `--yes` → die"）**已作废**，替换如下。判据 2.4 /
+资产 A1–A5 / 装配语义（`ensure_gate_wiring`）**均不变**，变的只是命令行前门：
+
+1. **`--yes` 整体移除 = breaking**：任何脚本/别名/CI 里写着 `ponygo init --yes`（或
+   `ponygo observe init … --yes`）现在会**按未知选项报错**（非零退出），须删掉该旗标；
+   升级时先 `grep -rn '\-\-yes' .github/ scripts/ Makefile 2>/dev/null` 清一遍调用点。
+2. **交互确认整体移除**：`init` / `observe init` 不再读 stdin、不再问 y/N——写入路径本就是
+   幂等/只增不改（`init` 缺什么补什么、`observe init` 覆盖需显式 `--force`），确认既不防误操作，
+   又制造两条逃逸路径（非 TTY 直接失败 / 交互读失败静默取消）。**`--dry-run` 是唯一预览手段**
+   （只打印、不落盘、不动 `git config`），终端与 CI 同一语义。
+3. **替代治理形态改为任务书**：`init` 检出 `docs/adr/`、CONTRIBUTING.md、CODEOWNERS、
+   pre-commit/lefthook、CI 配置等既有治理资产时，生成 `.meta/adaptation/alt-governance.md`
+   （逐项：检出项 / 语义映射 / 唯一动作 / 完成判据）+ 终端 ≤ 6 行摘要，**不阻断 `init`**
+   （骨架照常注入）。任务书是生成物（幂等重写、勿手编，无命中即删）。`status` / `audit` 对此打 WARN；
+   **落一条 `.agents/notes/**/process/*alt-governance*.md` 写明各项处置后 WARN 消失**。
+   原"提示先 `audit` 再决定迁移"的一行提示被任务书取代。
+
+## 验收（v2 补充）
+
+8. `grep -rn '\-\-yes' README.md checklists/ revisions/ .agents/notes/ .meta/` 只剩历史/被否决备选性质的提及，
+   无"用法"层残留；`bash ponygo init --yes` 真实报未知选项（rc≠0）、`bash ponygo init` rc=0

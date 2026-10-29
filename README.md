@@ -96,6 +96,11 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
 `ponygo` 是单文件 CLI（shell、零依赖）。核心命令面固定为上述六条；`observe` 是独立的一组子命令
 （四级判据、skill 定位与 CI 用法见 §4.4）。
 
+**写命令零确认**：所有写路径一律幂等/只增不改（`init` 缺什么补什么、重复跑零改动且不改写业务文件；
+`observe init` 是唯一写命令，已存在声明需显式 `--force`），故 CLI **不弹确认、不读 stdin**——
+交互终端、脚本与 CI 行为一字不差。唯一预览手段是 `--dry-run`（只打印将做的动作，不落盘、不动
+`git config`）。`--yes` 已整体移除：**传入即按未知选项报错**（breaking，旧脚本须删掉该旗标）。
+
 ---
 
 ## 4. 它如何工作
@@ -123,12 +128,15 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
 │   └── constitution.md        #    模板态（槽位未填）时 sync 投影初始引导 bootstrap：AI agent 进场即有指引，
 │                              #    由 agent 完成填槽/重投影/首篇 ADR；填槽后重跑 sync，引导自动被常载命约替换
 ├── gates/                     # 门禁：把承诺转成非零退出命令（每门配负样本 spec）
-└── docs-tier/                 # 文档分层：按 tier 分类法给每个事实安一个家
+├── docs-tier/                 # 文档分层：按 tier 分类法给每个事实安一个家
+└── adaptation/                # 替代治理适配任务书：init 检出既有治理形态时生成 alt-governance.md（不阻断注入）
 ```
 
 **关键约定**（其它文件据此派生命令名与路径）：
 
 - `meta.yaml` 仅 `level` / `ai-surface` / `docs-tier` 三个合法键 + 注释（其它键是规格违例）；`docs-tier: on|off` 是 L2 判据 2.5 的**启用声明**（未声明=SKIP+WARN；`off`=显式 opt-out；目录存在不等于已激活，故不是冗余副本）；**版本由 git 派生，组件清单由 `.meta/` + `.agents/` 目录存在性充当**——不冗余声明能被机械推导的东西。
+  - `off` 时 `status` 会提示"录一条 decision 说明为何不上文档分层"；一旦 `.agents/notes/**` 下**已有文件名含 `docs-tier` 的 decision**，该提示**静默**（已回应，不再重复催）。
+- `.meta/adaptation/` 只在 `init` 检出**替代治理形态**（`docs/adr/` 等既有决策目录、CONTRIBUTING.md、CODEOWNERS、pre-commit/lefthook、CI 配置等）时生成 `alt-governance.md` 任务书：逐项「检出项 / 语义映射 / 唯一动作 / 完成判据」，终端同打 ≤ 6 行摘要。任务书是**生成物**（幂等重写、勿手编）。**任务书不阻断 `init`**（骨架照常注入，你是裁"值不值"的人）；`status` / `audit` 会 WARN，直到落一条 `.agents/notes/**/process/*alt-governance*.md` 写明各项处置。
 - 决策文件路径：`.agents/notes/{lifecycle}/{class}/yyyy-mm-dd-topic-title.md`，其中
   - `lifecycle ∈ {proposed, implemented, rejected, archived}`
   - `class ∈ {feature, bug-fix, simplification, architecture, process, testing}`（领域扩展：`notes/classes.local` 每行追加一个 class，见 `.agents/notes/README.md`）
@@ -179,7 +187,7 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
 ```
   ponygo observe status                           静态报告（不判定）：声明在场/占位残留/skill 在场与版本；只读，exit 0
   ponygo observe init   --kind <k> [--service <s>] [--dims a,b] [--anchor-<dim> <path>]
-                        [--reason-<dim> <text>] [--force] [--dry-run] [--yes]
+                        [--reason-<dim> <text>] [--force] [--dry-run]
                                                   落地四维归属声明（唯一写命令；已存在声明需 --force）
   ponygo observe audit  [--level ob0|ob1|ob2] [--base <rev>] [--strict] [--json]
                                                   判定是否达到目标级（缺口仅作 backlog；--strict 时任一缺口非零）
@@ -219,7 +227,11 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
 | 已有治理 | 已有 `.meta/` | `ponygo status` / `ponygo upgrade` |
 
 CLI 从不假设项目是空仓；它对"已有治理"与"零治理但历史厚重"两种情况都只做**增量**，不要求推倒重来。
-对第二种场景，`init` 也会先探测既有治理形态（`docs/adr/`、CONTRIBUTING.md、CODEOWNERS、pre-commit/lefthook、CI 配置等）并提示"先 `audit` 再决定迁移"——探测只是提示，不是拦截；确认后仍可注入（你是裁"值不值"的人，机器只裁"有没有"）。
+对第二种场景，`init` 会先探测既有治理形态（`docs/adr/`、CONTRIBUTING.md、CODEOWNERS、pre-commit/lefthook、CI 配置等），
+检出即生成 `.meta/adaptation/alt-governance.md` **适配任务书**（逐项：检出项 / 语义映射 / 唯一动作 / 完成判据），
+并在终端打 ≤ 6 行摘要——**探测与任务书都不拦截注入**：`init` 照常铺骨架，任务书把"旧治理资产怎么映射进
+ponygo 的双根"变成可逐项勾掉的清单，而不是一句"先 audit 再决定"。看与不看由你裁（机器只裁"有没有"），
+未处置时 `status` / `audit` 持续 WARN，落一条 `.agents/notes/**/process/*alt-governance*.md` 后即消失。
 
 ---
 
@@ -257,7 +269,7 @@ CLI 从不假设项目是空仓；它对"已有治理"与"零治理但历史厚�
 | `.github/workflows/ci.yml` | 回归门禁挂载：ubuntu + windows Git Bash 双平台跑 tests/run.sh + 聚合门 | 维护者；分支保护依赖 |
 | `.github/workflows/release.yml` | 发布校验和链：tag-push 触发，生成并发布 ponygo.sha256（裸哈希 + CRLF 断言 + 最小权限） | 维护者；发布动作 |
 | `docs/methodology.md` | 原理层：方法论设计依据（源自 deepseek-harness） | 想懂"为什么"的人；机制层的理论源头 |
-| `.meta/` + `.agents/` | 治理根骨架（双根）：.meta/ = constitution / gates / docs-tier / meta.yaml；.agents/ = notes / skills | 实例化产物；由 `ponygo init` 生成进用户项目 |
+| `.meta/` + `.agents/` | 治理根骨架（双根）：.meta/ = constitution / gates / docs-tier / adaptation（检出替代治理时）/ meta.yaml；.agents/ = notes / skills | 实例化产物；由 `ponygo init` 生成进用户项目 |
 | `maturity-ladder.md` | 成熟度阶梯定义（L0–L5 逐档判据） | `ponygo status` 与 review 的判定来源 |
 | `audit/` | 四问记分卡 + 分层细目库 + 自适应深度选择器 | `ponygo audit` 的执行依据 |
 | `audit/checklist.md` | 分层细目（骨架 / 机制 / 精微三层条目） | 审计打分时的逐项参照 |
