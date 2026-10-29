@@ -1,32 +1,32 @@
 # docs-tier/ —— 文档分层契约（按 tier 分类法给每个事实安一个家）
 
-**当前状态：模板态（L2 未激活）。** v2.0 起文档治理前置：`docs/AGENTS.md` 是文档标准的家
-（agent 自动加载），已在 L0 播种；本文件是 **tier 分层的契约**——升到 L2 时把它推进为
-「已激活文档家清单」（判据 2.5 机械检查），填写下方每个 tier 在本项目的家。
+## 已激活文档家清单
 
-**如何激活（升 L2 时）**：把本文件顶部的『模板态』一词所在标题改为「已激活文档家清单」，
-并把下方表格「本项目家」列的 `【TODO】` 填成真实路径（已由骨架生成的标 `✓`）。
+**已激活（2026-10-29 起；判据 2.5 机械检查本标题与下方家清单）。**
+本仓同时是框架模板源与一个已激活实例：`ponygo init` 生成的副本仍是**模板态**（含待填占位），
+本文件是**本仓自己的激活版**——这也是 `ponygo upgrade` 对本文件豁免漂移比对的原因
+（见 `ponygo` 的 `cmd_upgrade` 中 `dt_skip` 分支）。
 
-> **「原理」引用的出处**：本文的 methodology 引用指向 ponygo 框架仓库的
-> `docs/methodology.md`：<https://github.com/lanhui100/ponygo/blob/main/docs/methodology.md>。
-> 原理层唯一真相源在框架仓库，实例不复制——复制即漂移。
+> 原理出处：本文的 methodology 引用指向框架仓库的 `docs/methodology.md`
+> <https://github.com/lanhui100/ponygo/blob/main/docs/methodology.md>。原理层唯一真相源在框架仓库，
+> 实例不复制——复制即漂移。
 
-## tier 分类法（激活时填写；原理：methodology §5.1）
+## tier 分类法（本仓已填；原理：methodology §5.1）
 
 每一 tier 的「该承载什么 / 不该承载什么」必须写死——只写"放什么文档"的 tier 表会漂移。
 家载体分工：**AGENTS.md**（agent 自动加载的治理规则）与 **README**（人读契约）不混用。
 
-| tier | Job（该承载） | 不承载 | 本项目家（待填 / 骨架已生成标 ✓） |
+| tier | Job（该承载） | 不承载 | 本项目家 |
 |---|---|---|---|
-| 常载命约 | 每次会话必载的 standing orders，1-3 行每条，链到 home | 故事/示例/复述 | `AGENTS.md` ✓（sync 投影） |
-| 文档标准 | tier 分类 / 写作规则 / slop checklist | 具体文档正文 | `docs/AGENTS.md` ✓（init 播种） |
-| 架构地图 | 组合、核心模块、接缝、扩展点（有序地图） | 类型细节/决策理由/状态标注 | 【TODO】 |
-| 决策记录 | 活动决策（当前态现在时） | 迁移计划/验收清单 | `.agents/notes/` ✓ |
-| 事故复盘 | 事故年表、证据、因果链、预防 | 教学叙事 | 【TODO，如 docs/postmortem/】 |
-| how-to | 带编号验证步的操作指引 | 设计理由（→ 决策记录） | 【TODO，如 docs/cookbook/】 |
-| 用户文档 | 产品面向指南 | 贡献流程/决策史 | 【TODO】 |
-| 包/模块契约 | 单模块配置/语义/限制/扩展点 | 逐行注释复述 | 各包 README（L1 判据 1.9 督促补齐） |
-| 生成参考 | 从源码再生成的参考 + 新鲜度门禁 | 手编生成源 | 【TODO】 |
+| 常载命约 | 每次会话必载的 standing orders，1-3 行每条，链到 home | 故事/示例/复述 | `AGENTS.md`（`ponygo sync` 投影）+ 真源 `.meta/constitution/constitution.md` |
+| 文档标准 | tier 分类 / 写作规则 / slop checklist | 具体文档正文 | `docs/AGENTS.md` |
+| 架构地图 | 组合、核心模块、接缝、扩展点（有序地图） | 类型细节/决策理由/状态标注 | `docs/methodology.md`（原理与分层）+ `README.md` 的目录结构（骨架地图） |
+| 决策记录 | 活动决策（当前态现在时） | 迁移计划/验收清单 | `.agents/notes/`（实例决策）+ `revisions/`（框架自身演进：笔记记"为什么"，revision 记"框架怎么变"） |
+| 事故复盘 | 事故年表、证据、因果链、预防 | 教学叙事 | `.agents/notes/implemented/bug-fix/`（不设独立 postmortem 目录：单维护者场景下"事故即一次决策"，两条轨道会互相漂移，理由见 `2026-10-29-activate-docs-tier.md`） |
+| how-to | 带编号验证步的操作指引 | 设计理由（→ 决策记录） | `checklists/`（`init.md` / `audit.md` / `observe-init.md` / `observe-audit.md`） |
+| 用户文档 | 产品面向指南 | 贡献流程/决策史 | `README.md`（人读契约：安装、命令、升级路径） |
+| 包/模块契约 | 单模块配置/语义/限制/扩展点 | 逐行注释复述 | 不适用——单文件 CLI（`ponygo`），无包目录；接口由 `ponygo --help` 自述 |
+| 生成参考 | 从源码再生成的参考 + 新鲜度门禁 | 手编生成源 | `ponygo --help`（CLI 自身产出，无手编副本；`audit/` 与 `checklists/` 是人读判据，不是生成物） |
 
 **放置速查**：bug→事故复盘；理由→决策记录；过程→how-to；契约→模块 README；
 standing orders→常载命约 + 理由链。
@@ -43,3 +43,4 @@ standing orders→常载命约 + 理由链。
 
 standing-doc 设上限，超限按 **relocate → condense → raise** 顺序处理；
 上限是护栏不是压减目标，目标线下保留至少 5% 余量。
+本仓暂不设数值上限（单维护者、doc-sync 门未启用）；启用时把数值写在本节，不留占位。

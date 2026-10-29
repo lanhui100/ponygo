@@ -733,9 +733,21 @@ s13_meta_violations() {
   assert_contains "docs-tier 非法值告警" "$R_OUT" "非法键"
 }
 
+# wave-7：模板仓自身可切到「已激活」态（docs-tier 激活）。`ponygo init` 的生成物**恒为模板态**，
+# 故「生成物 == 仓库文件」只在仓库处于模板态时成立；已激活时按 `ponygo upgrade --check` 的
+# `dt_skip` 同口径豁免该比对，改用更强的「生成物仍为模板态」断言（激活版不得被当模板发出去）。
+# 锚定 h2 标题匹配，不用裸子串：模板态正文（激活指引那几行）里本就写着「已激活文档家清单」。
+docs_tier_generated_is_template() { # <生成物路径>：模板态 ⇔ 无激活锚点标题 且 含模板态标记
+  local f="$1"
+  [ -f "$f" ] || return 1
+  grep -qE '^##[[:space:]]+已激活文档家清单' "$f" && return 1
+  grep -qF '模板态' "$f" || grep -qF '【TODO' "$f" || return 1
+  return 0
+}
+
 s14_decisions_readme() {
   echo "--- 场景14：生成 decisions/ skills/ README 与模板 eol 归一逐字节一致（F3 + skills 契约）"
-  local T; T=$(new_case)
+  local T MUT; T=$(new_case)
   run_cli "$T" init
   if diff <(tr -d '\r' < "$T/.agents/notes/README.md") \
           <(tr -d '\r' < "$ROOT/.agents/notes/README.md") >/dev/null 2>&1; then
@@ -750,11 +762,32 @@ s14_decisions_readme() {
     bad "生成 skills/README 与模板不一致"
   fi
   grep -q '五要素' "$T/.agents/skills/README.md" && ok "skills 契约含五要素" || bad "skills 契约缺五要素"
-  if diff <(tr -d '\r' < "$T/.meta/docs-tier/README.md") \
-          <(tr -d '\r' < "$ROOT/.meta/docs-tier/README.md") >/dev/null 2>&1; then
-    ok "生成 docs-tier/README 与模板 eol 归一后一致（含 tier 模板）"
+  # docs-tier/README.md：按本仓激活状态分支（wave-7）
+  #  - 本仓模板态 → 原「逐字节一致」比对（不变）
+  #  - 本仓已激活 → 生成物仍是模板态（比逐字节更强：直接证明激活版没被当成模板发出去）
+  if grep -qE '^##[[:space:]]+已激活文档家清单' "$ROOT/.meta/docs-tier/README.md" 2>/dev/null; then
+    ok "本仓 docs-tier 已激活 → 跳过「生成物 == 仓库文件」比对（upgrade --check 的 dt_skip 同口径豁免）"
+    # 显式断言（只比对标题行集合，避免正文激活指引里的同名字样造成假红）
+    assert_not_contains "生成 docs-tier/README 无「## 已激活文档家清单」标题（激活版未泄漏为模板）" \
+      "$(grep -E '^#+ ' "$T/.meta/docs-tier/README.md" 2>/dev/null | tr '\n' '|')" "已激活文档家清单"
+    assert_contains "生成 docs-tier/README 含模板态标记（【TODO】或「模板态」）" \
+      "$(cat "$T/.meta/docs-tier/README.md" 2>/dev/null)" "模板态"
+    # 正向控制：把生成物改成激活态 → 同一判定必须变红（证明它能抓「模板被污染」）
+    MUT="$SBASE/docs-tier.activated.md"
+    cp "$T/.meta/docs-tier/README.md" "$MUT" 2>/dev/null
+    sed -i 's/^# .*/## 已激活文档家清单/' "$MUT"
+    if docs_tier_generated_is_template "$MUT"; then
+      bad "正向控制失效：生成物被改成激活态却仍判为模板态（断言抓不住污染）"
+    else
+      ok "正向控制：生成物改成激活态 → 判定变红（确能抓「模板被污染」）"
+    fi
   else
-    bad "生成 docs-tier/README 与模板不一致"
+    if diff <(tr -d '\r' < "$T/.meta/docs-tier/README.md") \
+            <(tr -d '\r' < "$ROOT/.meta/docs-tier/README.md") >/dev/null 2>&1; then
+      ok "生成 docs-tier/README 与模板 eol 归一后一致（含 tier 模板）"
+    else
+      bad "生成 docs-tier/README 与模板不一致"
+    fi
   fi
   if diff <(tr -d '\r' < "$T/.agents/skills/write-adr/SKILL.md") \
           <(tr -d '\r' < "$ROOT/.agents/skills/write-adr/SKILL.md") >/dev/null 2>&1; then

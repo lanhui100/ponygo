@@ -20,3 +20,7 @@
 # 各档的定义与判据见 maturity-ladder.md——本文件不复述（复述即第二份副本，必漂移）。
 
 level: 2
+
+# 文档分层启用声明（判据 2.5）：on = 启用并校验「已激活文档家清单」；
+# 本仓自 2026-10-29 起启用（决策见 .agents/notes/implemented/process/2026-10-29-activate-docs-tier.md）。
+docs-tier: on

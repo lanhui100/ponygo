@@ -3415,7 +3415,9 @@ cmd_status() {
 # 语义：漂移是**观察**不是承诺（status 管骨架缺口 exit 1，upgrade 管"与模板差多少"）；默认 exit 0，
 # --check 漂移非零供 CI。宇宙外文件（根 README / meta.yaml / 已填 constitution / 根 AGENTS.md /
 # CLAUDE.md / classes.local / docs-tier/exemptions 等）不判漂移——"无基线"不判定，报告头一句话声明盲区。
-# 已激活 docs-tier 实例**不支持**漂移报告（s14 契约锁模板态，激活即破 s14——不发明新激活机制）。
+# 已激活 docs-tier 实例：`.meta/docs-tier/README.md` 不参与漂移比对（激活必改写该文件，比对即恒漂移、
+# --check 恒红）。实例侧口径：生成物仍是模板态（由 write_skeleton 的 heredoc 提供）；s14 用同一判据分支，
+# 不再假定"仓库文件 = 模板"——模板仓自身也可以是一个已激活实例。
 # 教训归因（假漂移历史）真源：TASK-002 双审，见 docs/dev-team/reviews/——不塞进用户可见输出。
 # 门禁资产只登记**不可变**的 A1/A2/A4（§6.3/R8）：A3（.githooks/pre-commit）与 A5（workflow）
 # 是实例可编辑文件（有人会追加自己的钩子逻辑、改 CI 触发），进表 = 三仓永久 drift 红。
@@ -3455,12 +3457,13 @@ cmd_upgrade() {
   esac
   # 报告头：盲区声明（升级纪律已在函数头打印）
   echo "漂移报告：本报告只覆盖 s14 宇宙内十三文件（十文件骨架 + 门禁资产 A1/A2/A4）；宇宙外文件无基线，不判定。漂移=观察，非承诺违例（status 管承诺）。"
-  # 已激活 docs-tier 实例：诚实声明不支持（s14 契约锁模板态）——本文件不参与比对，
-  # 其余九文件照常比对（P2-1：激活必改写该文件，比对即恒漂移、--check 恒红，违反"漂移=观察"与"不支持"双重语义）
+  # 已激活 docs-tier 实例：本文件不参与漂移比对（激活必改写该文件，比对即恒漂移、--check 恒红）。
+  # 实例侧口径：生成物仍是模板态（由 write_skeleton 的 heredoc 提供）；s14 用同一判据分支，
+  # 不再假定"仓库文件 = 模板"——模板仓自身也可以是一个已激活实例。
   local dt_skip=0
   if [ -f "$META_DIR/docs-tier/README.md" ] && grep -q '## 已激活文档家清单' "$META_DIR/docs-tier/README.md"; then
     dt_skip=1
-    echo "注：docs-tier 已激活实例——.meta/docs-tier/README.md 不参与漂移比对（s14 契约锁模板态，激活即破 s14，按 P0-1(a) 诚实声明不支持）；其余九文件照常比对。"
+    echo "注：docs-tier 已激活实例——.meta/docs-tier/README.md 不参与漂移比对（本仓该文件是激活版，模板基准仍是 heredoc 提供的模板态）；其余九文件照常比对。"
   fi
   # 生成模板基准（临时目录，用 write_skeleton 同源 heredoc；eol 归一后逐字节比对）。
   # write_skeleton 是当前进程内的函数（相对路径常量），在子 shell cd 后调用即生成一套模板骨架。
@@ -3469,7 +3472,7 @@ cmd_upgrade() {
   trap 'rm -rf "${tmp:-}" 2>/dev/null || true; trap - EXIT INT TERM' EXIT INT TERM
   ( cd "$tmp" && write_skeleton 0 ) >/dev/null 2>&1 || { rm -rf "$tmp"; trap - EXIT INT TERM; die "无法生成模板基准"; }
   for f in $UPGRADE_UNIVERSE; do
-    # P2-1：docs-tier 已激活实例跳过该文件比对（s14 锁模板态）
+    # P2-1：docs-tier 已激活实例跳过该文件比对（激活必改写该文件，比对恒漂移）
     [ "$dt_skip" = "1" ] && [ "$f" = ".meta/docs-tier/README.md" ] && continue
     if [ ! -f "$f" ]; then
       # 缺骨架文件（实例侧缺失）：gates/README 是"仅空目录时生成"的条件写入口——
