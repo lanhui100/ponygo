@@ -209,6 +209,26 @@ how verified
 what could go wrong
 EOF
 }
+# 1.10 反例夹具（2026-10-29 起 `## Alternatives considered` 是硬判据）：
+# 合法骨架但**故意缺**备选节——只供「1.10 应拒绝」类用例使用。
+# 严禁拿它当"应通过 verify-note"的样本（否则新判据落地后合法变红）；要合规请用
+# write_valid_decision / write_proposal_decision（两者已含该节）。
+write_no_alt_decision() { # $1=case目录 $2=相对 notes 的子路径（含文件名）
+  local dir
+  dir="$1/.agents/notes/$(dirname "$2")"
+  mkdir -p "$dir"
+  cat > "$dir/$(basename "$2")" <<'EOF'
+# Agent Note: test decision without alternatives
+
+Status: implemented
+
+## Problem
+why
+
+## Decision
+what
+EOF
+}
 
 # ============================================================
 s01_help() {
@@ -2424,9 +2444,10 @@ s45_observe_diff_timeout_budget() {
 #       §4（cmd_init 行为矩阵）/§6.1–6.5（非破坏性追加、CI 条件生成、钩子调用形态）。
 # 铁律：每条断言必须是 rc / 输出子串 / 文件内容 / 文件模式（-x）之一；
 #       禁「跑通即 pass」——每个反例都配正向控制，防「空==空」假绿。
-# 注（Lead 终裁 T1）：判定真源是 .agents/skills/write-adr/verify-note.sh（1.1–1.9），
-#       `## Alternatives considered` **不在**真源判据内，故此处不作断言；违例一律用真源
-#       真判的 1.6（文件名/日期）、1.7（Status 与目录）、1.8（骨架标题）三条。
+# 注（Lead 终裁 T1 + wave-6 判据扩展）：判定真源是 .agents/skills/write-adr/verify-note.sh
+#       （1.1–1.10）。s46~s57 的违例样本仍一律用 1.6（文件名/日期）、1.7（Status 与目录）、
+#       1.8（骨架标题）三条——保持样本「只错一处」的纯粹性；其"应通过"样本已含
+#       `## Alternatives considered`（1.10 自 2026-10-29 起为硬判据，见 s75–s77）。
 # ============================================================
 
 # 2.4 ④ 锚定口径（与 maturity-ladder §2.4 锚定命令逐字同款）：
@@ -2936,6 +2957,30 @@ assert_matches() { # <描述> <整体> <ERE>
     ok "$1"
   else
     bad "$1（未匹配 /$3/；实得尾部：$(printf '%s' "$2" | tail -n 2 | tr '\n' ' '))"
+  fi
+}
+# 放行路径的反向断言用：输出里不得出现**针对某判据号**的 FAIL 行。
+# 不能直接用 assert_not_contains "1.10"——成功横幅 "机械影子 1.1–1.10" 也含该串（假红）。
+# 匹配串与 assert_fail_of 共用同一 ERE（见下），两侧同源，避免"收窄匹配串后真违例被放过"。
+FAIL_LINE_OF_RE='^FAIL[[:space:]]+%s([^0-9]|$)'
+assert_no_fail_of() { # <描述> <整体输出> <判据号>
+  local hits
+  hits=$(printf '%s\n' "$2" | grep -E "$(printf "$FAIL_LINE_OF_RE" "$3")" || true)
+  if [ -n "$hits" ]; then
+    bad "$1（不应出现 $3 违例；实得：$(printf '%s' "$hits" | head -2 | tr '\n' ' ')）"
+  else
+    ok "$1"
+  fi
+}
+# assert_no_fail_of 的**正向控制**：同一匹配串必须能命中真实违例行
+# （否则"不报 1.10"可能只是匹配写错而恒真——判定被削弱却看不出来）。
+assert_fail_of() { # <描述> <整体输出> <判据号>
+  local hits
+  hits=$(printf '%s\n' "$2" | grep -E "$(printf "$FAIL_LINE_OF_RE" "$3")" || true)
+  if [ -n "$hits" ]; then
+    ok "$1"
+  else
+    bad "$1（匹配串未命中 $3 违例行；实得尾部：$(printf '%s' "$2" | tail -n 2 | tr '\n' ' ')）"
   fi
 }
 sentinel_block() { # <hook 文件> → 输出哨兵区间（含 BEGIN/END 两行）
@@ -3647,6 +3692,108 @@ s74_retire_no_confirmation() {
   assert_eq "⑥ 非法目标后 level 未被改写" "level: 1" "$lv"
 }
 
+s75_alternatives_110_reject() {
+  echo "--- 场景75：判据 1.10——缺 ## Alternatives considered 必拒（带参 + 整树）且补齐即放行"
+  local T F
+  T=$(new_case); run_cli "$T" init
+  F=".agents/notes/implemented/feature/2026-01-02-no-alt.md"
+  write_no_alt_decision "$T" "implemented/feature/2026-01-02-no-alt.md"
+  # ⓪ 前置取证：样本除缺 1.10 那节外骨架合法（否则下面的拒绝可能来自 1.6/1.7/1.8，测不到 1.10）
+  if grep -qE '^## Alternatives considered' "$T/$F"; then
+    bad "⓪ 前置取证：反例样本不应含 ## Alternatives considered"
+  else
+    ok "⓪ 前置取证：样本确无 ## Alternatives considered（其余骨架合法：Status/## Decision 齐）"
+  fi
+  # ① 带参模式：单文件校验 → 非零 + 点名 1.10
+  run_script "$T" .agents/skills/write-adr/verify-note.sh "$F"
+  assert_nonzero "① 缺备选节（带参）→ verify-note 非零" "$S_RC"
+  assert_contains "② 拒绝输出点名判据号 1.10" "$S_OUT" "1.10"
+  # ②b 正向控制：同一匹配串（与 assert_no_fail_of 同源 ERE）必须命中这条真违例行——
+  #     证明下面/别处的"不报 1.10"不是把匹配串写窄到恒真。
+  assert_fail_of "②b 正向控制：同一匹配串命中真实 1.10 FAIL 行" "$S_OUT" "1.10"
+  # ③ 整树模式：同一违例同样红（1.10 不是带参专属）
+  run_script "$T" .agents/skills/write-adr/verify-note.sh
+  assert_nonzero "③ 整树模式同样拒绝（1.10 非带参专属）" "$S_RC"
+  assert_contains "④ 整树模式报出 1.10" "$S_OUT" "1.10"
+  # ⑤ 正向对照：同一文件补上该节（位于 ## Decision 之后）→ 0，且不再报 1.10
+  printf '\n## Alternatives considered\nother\n' >> "$T/$F"
+  run_script "$T" .agents/skills/write-adr/verify-note.sh "$F"
+  assert_eq "⑤ 补齐备选节（带参）→ exit 0（证明①③非「一律拒绝」）" 0 "$S_RC"
+  assert_no_fail_of "⑥ 补齐后不再报 1.10" "$S_OUT" "1.10"
+  run_script "$T" .agents/skills/write-adr/verify-note.sh
+  assert_eq "⑦ 补齐后整树同样 exit 0" 0 "$S_RC"
+}
+
+s76_alternatives_exemptions() {
+  echo "--- 场景76：1.10 豁免面（archived/ 冻结、README/AGENTS 非决策记录、深层合规文件整树 rc=0）"
+  local T F
+  # ① archived/ 冻结豁免：与反例逐字节同构的内容放进 archived/ → 仍通过
+  T=$(new_case); run_cli "$T" init
+  F=".agents/notes/archived/testing/2026-01-02-old.md"
+  write_no_alt_decision "$T" "archived/testing/2026-01-02-old.md"
+  run_script "$T" .agents/skills/write-adr/verify-note.sh "$F"
+  assert_eq "① archived/ 下缺备选节 → 仍通过（1.10 冻结豁免）" 0 "$S_RC"
+  assert_no_fail_of "② archived/ 放行时不报 1.10" "$S_OUT" "1.10"
+  # ③ 反向对照：同一份内容换个 lifecycle → 必须红（证明①的放行来自位置豁免，不是 1.10 歇着）
+  T=$(new_case); run_cli "$T" init
+  F=".agents/notes/implemented/testing/2026-01-02-old.md"
+  write_no_alt_decision "$T" "implemented/testing/2026-01-02-old.md"
+  run_script "$T" .agents/skills/write-adr/verify-note.sh "$F"
+  assert_nonzero "③ 对照：同内容移到 implemented/ → 非零" "$S_RC"
+  assert_contains "④ 对照：报出 1.10（差异确由豁免位置造成）" "$S_OUT" "1.10"
+  assert_fail_of "④b 正向控制：匹配串命中该 1.10 FAIL 行（① 的静默非同串写窄所致）" "$S_OUT" "1.10"
+  # ⑤ README.md / AGENTS.md：非决策记录，缺该节不影响结果
+  T=$(new_case); run_cli "$T" init
+  if grep -qE '^## Alternatives considered' "$T/.agents/notes/README.md" 2>/dev/null \
+     || grep -qE '^## Alternatives considered' "$T/.agents/notes/AGENTS.md" 2>/dev/null; then
+    bad "⑤ 前置取证：README.md / AGENTS.md 本不该含备选节（夹具与契约漂移，豁免面没被测到）"
+  else
+    ok "⑤ 前置取证：README.md / AGENTS.md 均无备选节（正是被测豁免面）"
+  fi
+  run_script "$T" .agents/skills/write-adr/verify-note.sh
+  assert_eq "⑥ README/AGENTS 缺该节不影响整树结果（rc=0）" 0 "$S_RC"
+  assert_no_fail_of "⑦ 且不报 1.10" "$S_OUT" "1.10"
+  # ⑧ 子目录深层的合规文件不受影响：豁免面 + 多个深层合规样本混合，整树 rc=0
+  T=$(new_case); run_cli "$T" init
+  write_no_alt_decision "$T" "archived/testing/2026-01-02-old.md"           # 豁免面
+  write_valid_decision "$T" "implemented/architecture/2026-01-02-deep.md"   # 深层合规（确定态）
+  write_proposal_decision "$T" "proposed/architecture/2026-01-03-deep.md"   # 深层合规（提案态）
+  run_script "$T" .agents/skills/write-adr/verify-note.sh
+  assert_eq "⑧ 整树：豁免面 + 深层合规样本混合 → exit 0" 0 "$S_RC"
+  assert_no_fail_of "⑨ 混合树不得误报 1.10" "$S_OUT" "1.10"
+  # ⑩ 反向对照：同样的深层路径放不合规样本 → 整树必红（证明 find 扫描确实到得了深层）
+  write_no_alt_decision "$T" "implemented/process/2026-01-04-deep-bad.md"
+  run_script "$T" .agents/skills/write-adr/verify-note.sh
+  assert_nonzero "⑩ 深层不合规样本 → 整树非零（扫描未漏判）" "$S_RC"
+  assert_contains "⑪ 且点名 1.10" "$S_OUT" "1.10"
+}
+
+s77_gate_chain_alternatives() {
+  echo "--- 场景77：门禁链路联动（A1 非零含 1.10 / pre-commit 拒提交 / 补齐后放行）"
+  local T F
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init
+  F=".agents/notes/implemented/process/2026-01-02-alt-gate.md"
+  write_no_alt_decision "$T" "implemented/process/2026-01-02-alt-gate.md"
+  git_local "$T" add "$F" >/dev/null 2>&1
+  # ⓪ 前置取证：该 ADR 确已进暂存区（否则 A1 会走「无暂存 ADR 变更」跳过 → 空断言）
+  assert_contains "⓪ 前置取证：ADR 已暂存" "$(git_local "$T" diff --cached --name-only)" "$F"
+  # ① A1 门：暂存区校验 → 非零，并透传真源判据号 1.10
+  run_script "$T" .meta/gates/adr-verify.sh
+  assert_nonzero "① 缺备选节暂存 → adr-verify.sh 非零" "$S_RC"
+  assert_contains "② A1 输出含真源判据号 1.10（可定位补救）" "$S_OUT" "1.10"
+  # ③ 链路末段：真跑 git commit（pre-commit 钩子执行 A1）→ 被拒 rc≠0 且输出含 1.10
+  run_git_commit "$T" "must be rejected"
+  assert_nonzero "③ 缺备选节 → git commit 被拒（rc≠0）" "$C_RC"
+  assert_contains "④ 提交被拒输出含 1.10（门真的跑到了）" "$C_OUT" "1.10"
+  # ⑤ 正向对照：补齐该节并重新暂存 → A1 exit 0，且同一提交成功（证明③④非「一律拒绝」）
+  printf '\n## Alternatives considered\nother\n' >> "$T/$F"
+  git_local "$T" add "$F" >/dev/null 2>&1
+  run_script "$T" .meta/gates/adr-verify.sh
+  assert_eq "⑤ 补齐备选节并重新暂存 → adr-verify.sh exit 0" 0 "$S_RC"
+  run_git_commit "$T" "legal adr"
+  assert_eq "⑥ 补齐后同一 ADR 提交成功（正向控制）" 0 "$C_RC"
+}
+
 s42_observe_monorepo_subcomponents
 s43_observe_pipeline_awareness
 s44_observe_subcomponent_blocking
@@ -3680,6 +3827,9 @@ s71_yes_flag_rejected
 s72_adaptation_book
 s73_docs_tier_hint_silent
 s74_retire_no_confirmation
+s75_alternatives_110_reject
+s76_alternatives_exemptions
+s77_gate_chain_alternatives
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
 [ "$FAIL" -eq 0 ] || exit 1

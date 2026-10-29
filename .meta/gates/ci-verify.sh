@@ -10,7 +10,7 @@
 # 平台适配器是薄壳（A5 不进宇宙表），门禁本体在这里（A4 恒生成、进宇宙表）。
 #
 # 两道：
-#   1) 全树 ADR 格式（判定真源 verify-note.sh 无参模式：1.1–1.9 + 1.9 文档有家）
+#   1) 全树 ADR 格式（判定真源 verify-note.sh 无参模式：1.1–1.10，含 1.9 文档有家与 1.10 备选节）
 #   2) 暂存区门的负样本 spec（证明 A1 会拒绝非法样本——门禁自证，非产品检查）
 #
 # 约定：本目录脚本一律 `chmod +x`（非可执行钩子会被 git 静默忽略，判据会假达标）。
@@ -26,7 +26,7 @@ cd "$ROOT" || exit 1
 
 fail=0
 
-echo "== [1/2] 全树 ADR 格式（verify-note.sh，1.1–1.9）=="
+echo "== [1/2] 全树 ADR 格式（verify-note.sh，1.1–1.10）=="
 if ! bash .agents/skills/write-adr/verify-note.sh; then
   echo "ci-verify: FAIL 全树 ADR 格式门未通过 → 逐项修 FAIL 后重跑" >&2
   fail=1

@@ -61,7 +61,7 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 4. **选 class**：`feature`（新能力）/ `bug-fix`（修缺陷）/ `simplification`（减复杂度）/ `architecture`（交付源码的结构）/ `process`（代码周围的工具与流程）/ `testing`（测试策略）。都不够 → 考虑在 `notes/classes.local` 登记领域扩展（扩展即一次治理决策，须评审）。
 5. **建文件**：`.agents/notes/{lifecycle}/{class}/$(date +%F)-<topic-title>.md`，topic 用 kebab-case。
 6. **头部**：第一行 `# Agent Note: <title>`，空行，`Status: <与所在目录一致>`（rejected 可带一行理由：`rejected — <理由>`）。
-7. **正文**：`## Problem` 开头（先写动机，脱离方案也成立），随后**按 lifecycle 选骨架**（判据 1.8 机械校验，选错即 FAIL）：
+7. **正文**：`## Problem` 开头（先写动机，脱离方案也成立），随后**按 lifecycle 选骨架**（判据 1.8 机械校验标题是否与 lifecycle 匹配，选错即 FAIL；判据 1.10 机械校验 `## Alternatives considered` 必须在场）：
 
    | lifecycle | 骨架 |
    |---|---|
@@ -79,12 +79,13 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 - 反例（豁免）：格式化重排、重命名局部变量 → 无行为/契约/结构/流程变化，不写。
 - 边界（靠 review）：重构归哪个 class？判别器是"可观察行为是否改变"——改变 → feature/bug-fix；只为减复杂度 → simplification（`refactor` 刻意缺席，与之重叠）。
 - 反例（时态错位，判据 1.8）：proposed/ 下用现在时 `## Decision` → 未批准的提案伪装成已落地的决定；proposed 必须用 `## Proposal`，迁移到 implemented 时再改写为现在时。
+- 反例（缺备选节，判据 1.10，硬判据）：只写 `## Problem` + `## Decision` 就收尾、整条没有 `## Alternatives considered` → 决策史只剩结论没有权衡，读者无法判断"为什么不选另一条"，ADR 退化成事后记录；`verify-note.sh` 直接 FAIL（`1.10 <path>：缺 ## Alternatives considered`）。补法：把当时真正比较过的 2–3 个备选各写一行 + 各自落选理由（"没考虑过备选"本身不是备选——说明该决定还不该落条）。
 - 反例（混合 ADR）：把"治理已采纳"（implemented/process）与"架构尚在设计中、零代码"（proposed/architecture）写进同一条 implemented note → 状态轴失真（未实施伪装成已落地）+ class 污染；**多类拆条**（notes/README 触发规则）：已落地的记 implemented，未实施的记 proposed。
 - 反例（文不对题，判据管不到、靠 review）：TUI 定价表单功能（11 个 `.rs` 含大文件重写）携带一篇多协议声明 proposed note——标题与代码无关，ADR 成了"有记录无对应"的伪证据；正确做法是为 TUI 定价单独立条，把多协议提案放到它自己的分支/commit。
 - 正例（对应性）：ADR 的 Problem/Decision 引用它治理的代码路径（`crates/…/src/….rs`）或提交 sha；多阶段提案部分落地时，落地部分拆条或在原文链入 implemented（勿让 proposed 整条失准，如 error-observability 四层中已落地的 `AttemptObserver` 构造器）。
 
 ## 验证与报告
 
-- 跑 **`bash .agents/skills/write-adr/verify-note.sh`**（无参 = 整树；或跟单个相对路径）——机械影子 1.1–1.8（路径两轴/文件名/日期/Status/骨架标题）+ 整树 1.9（文档有家：docs/AGENTS.md 存在）全部通过，exit 0 才算完成；FAIL 项逐条修复重跑。
+- 跑 **`bash .agents/skills/write-adr/verify-note.sh`**（无参 = 整树；或跟单个相对路径）——机械影子 1.1–1.10（1.1–1.8：路径两轴/文件名/日期/Status/骨架标题；1.9：整树文档有家 docs/AGENTS.md 存在；1.10：必含 `## Alternatives considered`）全部通过，exit 0 才算完成；FAIL 项逐条修复重跑。
 - 再跑 `ponygo status`：决策数 +1、L1 判据全绿、无卫生 WARN。
 - 报告格式：新记录路径 + lifecycle/class + 一句话 Problem + verify-note.sh 的通过输出。

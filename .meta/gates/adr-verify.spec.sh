@@ -278,11 +278,13 @@ else
   printf 'PASS  符号链接 ADR 已拒绝（exit %d）；WARN: 文案未指向"必须是普通文件"（F9 文案待补）\n' "$RC"
 fi
 
-# ---------- 8. 缺 ## Alternatives considered —— 覆盖探针 ----------
-# 诚实条款：`## Alternatives considered` 是 notes/README 的强制契约，但判定真源
-# verify-note.sh 的 1.1–1.9 里**没有**这一项（它只锁路径/文件名/Status/骨架标题）。
-# 本 case 因此做成探针：真源将来覆盖该节则断言拒绝；未覆盖则 WARN 保留缺口，
-# **不**由本 spec 私设第二真值（同一判据两份实现必然漂移，P9）。
+# ---------- 8. 缺 ## Alternatives considered → 硬断言拒绝（判据 1.10，2026-10-29 起为硬判据） ----------
+# 历史：本 case 原为"覆盖探针"——`## Alternatives considered` 是 notes/README 的强制契约，但判定真源
+# verify-note.sh 的 1.1–1.9 里没有这一项，故只在真源覆盖时才断言拒绝，否则打 WARN 且不计入 PASS。
+# 2026-10-29 起真源新增 1.10（revisions/accepted/2026-10-29-alternatives-criterion-1-10.md），
+# 缺口闭合 → 本 case 从**探针升级为硬断言**：非法样本（只有 ## Problem + ## Decision）必须被拒，
+# 且文案须含判据号 `1.10`（补救可执行 = 能定位真源条目）。仍不私设第二真值：断言的是"门会响"，
+# 判据实现只有 verify-note.sh 一处。
 R=$(new_repo missing-alternatives)
 write_adr "$R" .agents/notes/implemented/process/2026-10-29-missing-alt.md '# Agent Note: 缺备选节
 
@@ -296,12 +298,7 @@ Status: implemented
 
 样本。'
 git -C "$R" add -A >/dev/null 2>&1
-OUT=$(run_gate "$R") && RC=0 || RC=$?
-if [ "$RC" -ne 0 ]; then
-  printf 'PASS  缺 ## Alternatives considered 被真源拒绝（exit %d）\n' "$RC"
-else
-  printf 'WARN  缺 ## Alternatives considered 未被拒绝：判定真源 1.1–1.9 不含该节 → 本 case 不计入 PASS（缺口见 ADR Consequences）\n'
-fi
+expect_reject_with "缺 ## Alternatives considered 拒绝（1.10 硬判据，文案带判据号）" "$R" '1\.10'
 
 # ---------- 9. 空场景一律放行：无暂存 ADR 变更 ----------
 R=$(new_repo no-change)
@@ -321,5 +318,5 @@ if [ "$FAIL" -ne 0 ]; then
   printf '[%s] 未通过：门禁的拒绝/放行语义与预期不符（见上方 FAIL）\n' "$SPEC" >&2
   exit 1
 fi
-printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件均已证明（exit 0）\n' "$SPEC"
+printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节均已证明（exit 0）\n' "$SPEC"
 exit 0

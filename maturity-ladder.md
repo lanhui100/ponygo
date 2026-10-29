@@ -123,6 +123,7 @@ L0–L2 的每条退出标准，落到**布尔检查项 + 锚定命令**。这�
 | 1.7 | 每条决策含 `Status:` 行且与所在 lifecycle 一致 | `grep -Rl '^Status:' .agents/notes/proposed` / `…/implemented` 等，交叉验证 | 无不一致 |
 | 1.8 | 正文骨架与 lifecycle 匹配：proposed/rejected 含 `## Proposal` 且无现在时 `## Decision`；implemented 无提案时代标题 | `grep -rE '^## (Proposal\|Plan\|Migration plan\|Acceptance criteria)([[:space:]]\|$)' .agents/notes/implemented` 应为空；`grep -rLE '^## Proposal([[:space:]]\|$)' .agents/notes/proposed .agents/notes/rejected` 应为空 | 无错位 |
 | 1.9 | 文档有家：`docs/AGENTS.md` 存在（文档标准的家，agent 自动加载）+ 根 `AGENTS.md` 含 `docs/AGENTS.md` 索引链 + 包文档覆盖或豁免 | `test -f docs/AGENTS.md`；`grep -q 'docs/AGENTS.md' AGENTS.md`；`find packages crates src -mindepth 1 -maxdepth 1 -type d` 下每子目录有 `AGENTS.md` 或 `README.md`，或列入 `.meta/docs-tier/exemptions` | 全 PASS |
+| 1.10 | 每条决策必含备选节 `## Alternatives considered`（被否决的备选 + 落选理由） | `grep -rLE '^## Alternatives considered([[:space:]]\|$)' --include='*.md' --exclude='*.zh.md' --exclude='README.md' --exclude='AGENTS.md' .agents/notes/proposed .agents/notes/implemented .agents/notes/rejected`（`archived/` 冻结豁免，故不列入扫描面） | 输出为空 |
 
 > 1.5 的机械化实现为"每个决策 `.md` **恰好**位于 `{lifecycle}/{class}/` 两级之内"——depth 1-2 的裸文件与 depth ≥4 的过深层均违例；`README.md` / `AGENTS.md`（治理契约载体，非决策记录）豁免。
 > 1.6 的 `grep -vE` 命令豁免 `README.md` / `AGENTS.md`（占位说明与工作指引不算决策记录）；文件名中的日期必须真为 `yyyy-mm-dd` 而非占位符。1.6 的 `grep -vE` 只查格式；日期**合法性**可再机械判一条：
@@ -132,6 +133,8 @@ L0–L2 的每条退出标准，落到**布尔检查项 + 锚定命令**。这�
 > 1.8 的豁免规则：`archived/` 冻结豁免（保持归档时原貌）；`README.md` / `AGENTS.md` 豁免。原理：时态与状态一致——提案用现在时 `## Decision` 等于未批准的方案伪装成已落地的决定，状态轴在正文层失真；proposed → implemented 迁移时必须把 `## Proposal` 改写为现在时（Acceptance criteria / Risks 折叠进 `## Consequences`）。该判据源自 ponyllm 实例的实证漂移（proposed ADR 误用 `## Decision`，1.1–1.7 全 PASS——路径/文件名/Status 三重影子锁不到正文骨架）。
 > 1.7 的 `archived/` 豁免规则：archived/ 下决策的 `Status:` ∈ {`implemented`, `archived`} 均判一致（冻结归档保留原 implemented 态）；`README.md` / `AGENTS.md` 豁免。`*.zh.md`（双语配对）**不在豁免之列**——须独立满足头部契约。CLI 实现对带引号（`level: "2"`）与 CRLF 行尾比上方锚定命令更宽容（归一后判定），复判时以 `ponygo status` 输出为准。
 > 1.9 的"文档有家"三连判据由 `ponygo init` 骨架播种（0.5 已覆盖 docs/AGENTS.md 存在）；根 AGENTS.md 索引链在 `ponygo sync` 投影的常载命约中（v2.0 起）；包文档覆盖的豁免清单放 `.meta/docs-tier/exemptions`（每行一个免检包名，`#` 起注释）。
+> **1.10 为何是硬判据（2026-10-29 起）**：Alternatives 是**非平凡决策的实质内容**，不是格式装饰——只写 `## Decision` 的 ADR 退化为"事后记录"（记录了选了什么，答不出为什么不选另一条），重开争执时无法复原当时的权衡，决策史只剩结论而无理由。契约本就写在 `.agents/notes/README.md`（每条决策必含备选与落选原因），此前只是没有机械看守（覆盖缺口见 `implemented/process/2026-10-29-forced-adr-gate-wiring.md`）——补 1.10 即把"已声明但无人守"的承诺转成判定真源里的一条硬判据，不留 WARN 软档（WARN 不计入 PASS 等于默认放过）。**豁免口径**：`archived/` 冻结豁免（与 1.8 同口径，保持归档时原貌）；`README.md` / `AGENTS.md` 豁免（治理契约载体，非决策记录）；`*.zh.md`（双语配对）豁免——译文随母语版同批补齐，不独立判。**判不到的部分**：备选的**质量**（是否真的权衡过、落选理由是否成立）与"多类是否该拆条"仍是语义判断，靠 review 与 write-adr 校准样例。
+> 1.10 的实现归属：只由判定真源 `verify-note.sh` 判定（P9：一份判据一份实现，两份必然漂移），CLI 的 `verify_ladder` **不复刻** 1.10——其 L1 段仍覆盖 1.1–1.9，并在 `status` 输出与代码注释里明文声明该范围；1.10 的看守面由本地门 A1（pre-commit）与远端门 A4（CI）承担，两者都经真源。因此 `ponygo status` 不报 1.10 是**设计选择，不是滞后缺口**；`upgrade --check` 对真源/SKILL/spec 的漂移信号见 `revisions/accepted/2026-10-29-alternatives-criterion-1-10.md`。
 
 ### L2 本身的退出标准（升到 L3+ 前，L2 必须自洽）
 

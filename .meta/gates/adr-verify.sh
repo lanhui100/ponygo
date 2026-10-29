@@ -9,7 +9,7 @@
 # 退出码：0 = 放行；非零 = 拒绝（pre-commit 会把非零翻译成"提交被拒"）。
 #
 # 语义边界（P6 诚实条款）：本门**不自己判** ADR 格式——判定真源是
-# `.agents/skills/write-adr/verify-note.sh`（maturity-ladder §5 的 1.1–1.9 机械影子）。
+# `.agents/skills/write-adr/verify-note.sh`（maturity-ladder §5 的 1.1–1.10 机械影子）。
 # 本门只多做三件它做不到的事：
 #   1) R6 TOCTOU：verify-note 读**工作区**，而 pre-commit 的输入是**暂存区文件名**。
 #      两者不一致时（staged 后又在工作区改过），校验的就不是将要提交的那份字节。
@@ -18,7 +18,7 @@
 #      并豁免 README.md / AGENTS.md（治理契约载体，非决策记录）。
 #   3) F9 非普通文件：symlink（120000）/ gitlink（160000）ADR 一律拒绝——否则"被校验的字节"
 #      可以指向工作区外内容，判定面被换掉。此检查必须排在 EOL 归一兜底之前（见 §4a 注释）。
-# 为什么不在本门里重写 1.1–1.9：一份判据两份实现必然漂移（P9），
+# 为什么不在本门里重写 1.1–1.10：一份判据两份实现必然漂移（P9），
 # 且 `ponygo gate adr` 子命令已按同一理由被否决（见 ADR 的 Alternatives R-新子命令）。
 #
 # 只读纪律：本脚本**不写仓库任何文件**。临时文件一律 `mktemp -d`，`trap` 清理。
@@ -145,7 +145,7 @@ if [ "$bad_mode" -ne 0 ] || [ "$drift" -ne 0 ]; then
   exit 1
 fi
 
-# 5) 交给判定真源（唯一真值，不在本门复刻 1.1–1.9）
+# 5) 交给判定真源（唯一真值，不在本门复刻 1.1–1.10）
 bash "$VERIFY" ${PATHS[@]+"${PATHS[@]}"} || exit 1
 
 printf '[%s] 通过：%d 条 ADR 经 %s 校验（暂存区与工作区一致）\n' "$PROG" "${#PATHS[@]}" "$VERIFY"

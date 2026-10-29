@@ -391,7 +391,7 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 | 落了 ADR 就必须过机械格式门（暂存区） | `bash .meta/gates/adr-verify.sh` | 1.5–1.8 |
 | 暂存字节 = 校验字节（不许"暂存后偷改"） | 同上（内建 R6 比对） | R6 TOCTOU |
 | 重命名 ADR 不绕过门 | 同上（`--diff-filter=ACMR`） | R7 |
-| 全树 ADR 格式常绿 | `bash .agents/skills/write-adr/verify-note.sh` | 1.1–1.9 |
+| 全树 ADR 格式常绿 | `bash .agents/skills/write-adr/verify-note.sh` | 1.1–1.10 |
 | 门自己会拒绝非法样本 | `bash .meta/gates/adr-verify.spec.sh` | A2 |
 | 远端层全树兜底 | `bash .meta/gates/ci-verify.sh` | A4（= `verify-note.sh` 整树 + A2） |
 
@@ -402,7 +402,7 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 | | 本地层 `adr-verify.sh`（A3 → A1） | 远端层 `ci-verify.sh`（A4 → A5） |
 |---|---|---|
 | 输入面 | 暂存区**改动的 ADR 子集**（`--diff-filter=ACMR -- .agents/notes/*.md`） | `verify-note.sh` **整树**（`find .agents/notes -type f -name '*.md'`） |
-| 判据范围 | 1.5–1.8（逐文件）+ R6 字节比对 + R7 覆盖面 | 1.1–1.9（整树），**含 1.9「文档有家」等只在整树模式判的项** |
+| 判据范围 | 1.5–1.8 + 1.10（逐文件）+ R6 字节比对 + R7 覆盖面 | 1.1–1.10（整树），**含 1.9「文档有家」等只在整树模式判的项** |
 | 定位 | 提交**前**拦截"这次改动" | 全仓**兜底**，抓历史债与整树不变量 |
 | 通过时能推什么 | 只说明"本次改动的 ADR 是合法的" | 只说明"整树此刻合法"，不校验暂存态 |
 
@@ -413,7 +413,7 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 
 **判定真源唯一**：格式判据只存在于 `.agents/skills/write-adr/verify-note.sh`；
 A1 只做它做不到的三件事——TOCTOU 字节比对、`ACMR` 覆盖面、非普通文件（symlink/gitlink）拒绝——
-不在此目录复刻 1.1–1.9（复刻必然漂移，故 `ponygo gate adr` 子命令被否决）。
+不在此目录复刻 1.1–1.10（复刻必然漂移，故 `ponygo gate adr` 子命令被否决）。
 A4 不是"再实现一遍"，它只是**编排**：真源整树 + 本目录的负样本 spec。
 
 ### 挂载方式（非破坏性）
@@ -455,9 +455,10 @@ staged 后又在工作区改动（两个方向：暂存合法→工作区改、�
 → 断言 A1 非零**且**文案含「ADR 有未暂存改动，请先 git add」；
 无暂存 ADR / 无 `.agents/notes` → 断言放行。
 
-诚实条款：`## Alternatives considered` 是 notes/README 的强制契约，但判定真源 1.1–1.9
-**不含**这一项，故该 case 是**探针**（真源覆盖则断言拒绝，未覆盖则打 `WARN` 并声明不计入 PASS）；
-本目录不私设第二真值。执行判据只证明"门会响"，抽样无偏靠 review。
+`## Alternatives considered` 曾是 notes/README 的强制契约而判定真源 1.1–1.9 不判（覆盖缺口），
+该 case 当时做成**探针**；**2026-10-29 起 1.10 落地为硬判据**，探针随之翻转为**硬断言**：
+只有 `## Problem` + `## Decision` 的非法样本必须被拒，且文案须含判据号 `1.10`（补救可执行）。
+本目录仍不私设第二真值（判据实现只在 verify-note.sh 一处）。执行判据只证明"门会响"，抽样无偏靠 review。
 
 运行时机：`bash .meta/gates/ci-verify.sh`（CI/本地全树）、`ponygo audit --run-specs`（opt-in，
 届时本 spec 因 `PONYGO_IN_SPEC=1` 报 SKIPPED、不计入 PASS）、pre-commit 不跑它（秒级预算）。
@@ -682,7 +683,7 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 4. **选 class**：`feature`（新能力）/ `bug-fix`（修缺陷）/ `simplification`（减复杂度）/ `architecture`（交付源码的结构）/ `process`（代码周围的工具与流程）/ `testing`（测试策略）。都不够 → 考虑在 `notes/classes.local` 登记领域扩展（扩展即一次治理决策，须评审）。
 5. **建文件**：`.agents/notes/{lifecycle}/{class}/$(date +%F)-<topic-title>.md`，topic 用 kebab-case。
 6. **头部**：第一行 `# Agent Note: <title>`，空行，`Status: <与所在目录一致>`（rejected 可带一行理由：`rejected — <理由>`）。
-7. **正文**：`## Problem` 开头（先写动机，脱离方案也成立），随后**按 lifecycle 选骨架**（判据 1.8 机械校验，选错即 FAIL）：
+7. **正文**：`## Problem` 开头（先写动机，脱离方案也成立），随后**按 lifecycle 选骨架**（判据 1.8 机械校验标题是否与 lifecycle 匹配，选错即 FAIL；判据 1.10 机械校验 `## Alternatives considered` 必须在场）：
 
    | lifecycle | 骨架 |
    |---|---|
@@ -700,20 +701,23 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 - 反例（豁免）：格式化重排、重命名局部变量 → 无行为/契约/结构/流程变化，不写。
 - 边界（靠 review）：重构归哪个 class？判别器是"可观察行为是否改变"——改变 → feature/bug-fix；只为减复杂度 → simplification（`refactor` 刻意缺席，与之重叠）。
 - 反例（时态错位，判据 1.8）：proposed/ 下用现在时 `## Decision` → 未批准的提案伪装成已落地的决定；proposed 必须用 `## Proposal`，迁移到 implemented 时再改写为现在时。
+- 反例（缺备选节，判据 1.10，硬判据）：只写 `## Problem` + `## Decision` 就收尾、整条没有 `## Alternatives considered` → 决策史只剩结论没有权衡，读者无法判断"为什么不选另一条"，ADR 退化成事后记录；`verify-note.sh` 直接 FAIL（`1.10 <path>：缺 ## Alternatives considered`）。补法：把当时真正比较过的 2–3 个备选各写一行 + 各自落选理由（"没考虑过备选"本身不是备选——说明该决定还不该落条）。
 - 反例（混合 ADR）：把"治理已采纳"（implemented/process）与"架构尚在设计中、零代码"（proposed/architecture）写进同一条 implemented note → 状态轴失真（未实施伪装成已落地）+ class 污染；**多类拆条**（notes/README 触发规则）：已落地的记 implemented，未实施的记 proposed。
 - 反例（文不对题，判据管不到、靠 review）：TUI 定价表单功能（11 个 `.rs` 含大文件重写）携带一篇多协议声明 proposed note——标题与代码无关，ADR 成了"有记录无对应"的伪证据；正确做法是为 TUI 定价单独立条，把多协议提案放到它自己的分支/commit。
 - 正例（对应性）：ADR 的 Problem/Decision 引用它治理的代码路径（`crates/…/src/….rs`）或提交 sha；多阶段提案部分落地时，落地部分拆条或在原文链入 implemented（勿让 proposed 整条失准，如 error-observability 四层中已落地的 `AttemptObserver` 构造器）。
 
 ## 验证与报告
 
-- 跑 **`bash .agents/skills/write-adr/verify-note.sh`**（无参 = 整树；或跟单个相对路径）——机械影子 1.1–1.8（路径两轴/文件名/日期/Status/骨架标题）+ 整树 1.9（文档有家：docs/AGENTS.md 存在）全部通过，exit 0 才算完成；FAIL 项逐条修复重跑。
+- 跑 **`bash .agents/skills/write-adr/verify-note.sh`**（无参 = 整树；或跟单个相对路径）——机械影子 1.1–1.10（1.1–1.8：路径两轴/文件名/日期/Status/骨架标题；1.9：整树文档有家 docs/AGENTS.md 存在；1.10：必含 `## Alternatives considered`）全部通过，exit 0 才算完成；FAIL 项逐条修复重跑。
 - 再跑 `ponygo status`：决策数 +1、L1 判据全绿、无卫生 WARN。
 - 报告格式：新记录路径 + lifecycle/class + 一句话 Problem + verify-note.sh 的通过输出。
 PONYGO_EOF
   fi
 
-  # skills/write-adr/verify-note.sh：write-adr 的机械验证器（对应 verify_ladder 1.1–1.9；
-  # 影子来自 DSH verify-agent-note-format/classification）。缺失时生成与模板仓库逐字节一致版本。
+  # skills/write-adr/verify-note.sh：write-adr 的机械验证器（判据 1.1–1.10；影子来自 DSH
+  # verify-agent-note-format/classification）。1.1–1.9 与 CLI 的 verify_ladder 逐项对齐；
+  # 1.10（必含 ## Alternatives considered）只由本脚本判定，CLI 不重复实现（P9 一份判据一份实现）。
+  # 缺失时生成与模板仓库逐字节一致版本。
   if [ ! -f "$SKILLS_DIR/write-adr/verify-note.sh" ]; then
     cat > "$SKILLS_DIR/write-adr/verify-note.sh" <<'PONYGO_EOF'
 #!/usr/bin/env bash
@@ -725,8 +729,13 @@ PONYGO_EOF
 #   带路径   = 只校验给定文件（如 .agents/notes/proposed/architecture/xxx.md）
 #
 # 退出码：全部通过 exit 0；任一违例 exit 1（逐项打印 FAIL）。
-# 对应判据：ponygo verify_ladder 1.1–1.9（maturity-ladder §5），
+# 对应判据：maturity-ladder §5 的 L1 判据 1.1–1.10，
 # 影子来自 DSH verify-agent-note-format / verify-agent-note-classification。
+# 1.1–1.9 与 ponygo verify_ladder 逐项对齐；1.10（必含 ## Alternatives considered）
+# 于 2026-10-29 新增为硬判据，**只由本脚本判定**——CLI 不重复实现（P9：一份判据一份实现，
+# 两份必然漂移），故 `ponygo status` 的 L1 段仍报 1.1–1.9 并明文声明该范围；
+# 1.10 的看守面由 A1 暂存区门与 A4 全树门承担（两者都经本脚本）。
+# 见 revisions/accepted/2026-10-29-alternatives-criterion-1-10.md。
 #
 # 设计快照（为何是 bash、为何一个脚本）：
 # - 语言：bash 与 ponygo CLI 同源（单文件、零依赖铁律，见 notes/
@@ -740,12 +749,12 @@ PONYGO_EOF
 #   未来实例升 L2 建门禁矩阵时再拆分，YAGNI。
 #
 # 语义边界（P6 诚实条款）：本脚本只锁**机械可查的影子**——路径两轴、文件名、
-# 日期合法性、Status 与目录一致、骨架标题与 lifecycle 匹配。
+# 日期合法性、Status 与目录一致、骨架标题与 lifecycle 匹配、必含备选节（1.10）。
 # 不判"implemented 内容是否真的已落地"（真实性）与"多类是否该拆条"
 # （分类）——这两者是语义判断，靠 review + write-adr 校准样例。
 #
-# 对齐契约：本脚本与 CLI 的 verify_ladder 1.1–1.9 逐项对齐；若发现行为不一致，
-# 以 maturity-ladder §5 判据真源为准并回改两者。
+# 对齐契约：本脚本的 1.1–1.9 与 CLI 的 verify_ladder 逐项对齐；若发现行为不一致，
+# 以 maturity-ladder §5 判据真源为准并回改两者。1.10 只在本脚本实现（CLI 不复刻，P9）。
 # ============================================================
 set -u
 
@@ -817,6 +826,21 @@ check_one() { # $1 = 决策文件路径
       grep -qE '^## Proposal([[:space:]]|$)' "$f" || fail "1.8 $f：$lc 缺 ## Proposal"
       grep -qE '^## Decision([[:space:]]|$)' "$f" && fail "1.8 $f：$lc 含现在时 ## Decision（提案伪装成决定）" ;;
   esac
+  # 1.10 必含 ## Alternatives considered（2026-10-29 起为硬判据，不是 WARN）
+  # 为何是硬判据：备选与落选理由是"非平凡决策"的实质内容——只写 Decision 的 ADR 会退化为
+  # 事后记录，重新面对同一岔路时答不出"为什么不选另一条"；契约本就在 .agents/notes/README.md
+  # 里，只是此前没有机械看守（覆盖缺口见 implemented/process/2026-10-29-forced-adr-gate-wiring.md）。
+  # 豁免口径：archived/ 冻结豁免（与 1.8 同口径，保持归档时原貌）；README.md / AGENTS.md 在
+  # 函数入口早退；*.zh.md（双语配对）豁免——译文随母语版同批补齐，不独立判。
+  case "$b" in
+    *.zh.md) ;;
+    *)
+      if [ "$lc" != "archived" ]; then
+        grep -qE '^## Alternatives considered([[:space:]]|$)' "$f" \
+          || fail "1.10 $f：缺 ## Alternatives considered（非平凡决策必须写明被否决的备选与理由）"
+      fi
+      ;;
+  esac
   return 0
 }
 
@@ -831,7 +855,7 @@ else
 fi
 
 if [ "$FAIL" = "0" ]; then
-  echo "verify-note: 全部通过（机械影子 1.1–1.9；真实性/分类靠 review）"
+  echo "verify-note: 全部通过（机械影子 1.1–1.10；真实性/分类/备选质量靠 review）"
   exit 0
 fi
 echo "verify-note: 未通过（见上方 FAIL 项；逐项修复后重跑）" >&2
@@ -1308,6 +1332,8 @@ verify_ladder() {
   if [ "$validated" = "1" ]; then
 
     # ---- L1（1.1-1.9，声明级 ≥1 时验；决策计数排除集 {README.md, AGENTS.md, *.zh.md}）----
+    # 判据范围诚实条款：本命令的机械影子覆盖 1.1–1.9；1.10（必含 ## Alternatives considered）
+    # 由判定真源 .agents/skills/write-adr/verify-note.sh 判定，本命令不重复实现（P9）。
     if [ "$lv" -ge 1 ]; then
       verified_range="L0-L1"
       [ -d "$DECISIONS_DIR" ] || vl_fail "1.1 .agents/notes/ 缺失 → 建 notes/ 与四态子目录"
@@ -1644,7 +1670,7 @@ write_gate_assets() {
 # 退出码：0 = 放行；非零 = 拒绝（pre-commit 会把非零翻译成"提交被拒"）。
 #
 # 语义边界（P6 诚实条款）：本门**不自己判** ADR 格式——判定真源是
-# `.agents/skills/write-adr/verify-note.sh`（maturity-ladder §5 的 1.1–1.9 机械影子）。
+# `.agents/skills/write-adr/verify-note.sh`（maturity-ladder §5 的 1.1–1.10 机械影子）。
 # 本门只多做三件它做不到的事：
 #   1) R6 TOCTOU：verify-note 读**工作区**，而 pre-commit 的输入是**暂存区文件名**。
 #      两者不一致时（staged 后又在工作区改过），校验的就不是将要提交的那份字节。
@@ -1653,7 +1679,7 @@ write_gate_assets() {
 #      并豁免 README.md / AGENTS.md（治理契约载体，非决策记录）。
 #   3) F9 非普通文件：symlink（120000）/ gitlink（160000）ADR 一律拒绝——否则"被校验的字节"
 #      可以指向工作区外内容，判定面被换掉。此检查必须排在 EOL 归一兜底之前（见 §4a 注释）。
-# 为什么不在本门里重写 1.1–1.9：一份判据两份实现必然漂移（P9），
+# 为什么不在本门里重写 1.1–1.10：一份判据两份实现必然漂移（P9），
 # 且 `ponygo gate adr` 子命令已按同一理由被否决（见 ADR 的 Alternatives R-新子命令）。
 #
 # 只读纪律：本脚本**不写仓库任何文件**。临时文件一律 `mktemp -d`，`trap` 清理。
@@ -1780,7 +1806,7 @@ if [ "$bad_mode" -ne 0 ] || [ "$drift" -ne 0 ]; then
   exit 1
 fi
 
-# 5) 交给判定真源（唯一真值，不在本门复刻 1.1–1.9）
+# 5) 交给判定真源（唯一真值，不在本门复刻 1.1–1.10）
 bash "$VERIFY" ${PATHS[@]+"${PATHS[@]}"} || exit 1
 
 printf '[%s] 通过：%d 条 ADR 经 %s 校验（暂存区与工作区一致）\n' "$PROG" "${#PATHS[@]}" "$VERIFY"
@@ -2069,11 +2095,13 @@ else
   printf 'PASS  符号链接 ADR 已拒绝（exit %d）；WARN: 文案未指向"必须是普通文件"（F9 文案待补）\n' "$RC"
 fi
 
-# ---------- 8. 缺 ## Alternatives considered —— 覆盖探针 ----------
-# 诚实条款：`## Alternatives considered` 是 notes/README 的强制契约，但判定真源
-# verify-note.sh 的 1.1–1.9 里**没有**这一项（它只锁路径/文件名/Status/骨架标题）。
-# 本 case 因此做成探针：真源将来覆盖该节则断言拒绝；未覆盖则 WARN 保留缺口，
-# **不**由本 spec 私设第二真值（同一判据两份实现必然漂移，P9）。
+# ---------- 8. 缺 ## Alternatives considered → 硬断言拒绝（判据 1.10，2026-10-29 起为硬判据） ----------
+# 历史：本 case 原为"覆盖探针"——`## Alternatives considered` 是 notes/README 的强制契约，但判定真源
+# verify-note.sh 的 1.1–1.9 里没有这一项，故只在真源覆盖时才断言拒绝，否则打 WARN 且不计入 PASS。
+# 2026-10-29 起真源新增 1.10（revisions/accepted/2026-10-29-alternatives-criterion-1-10.md），
+# 缺口闭合 → 本 case 从**探针升级为硬断言**：非法样本（只有 ## Problem + ## Decision）必须被拒，
+# 且文案须含判据号 `1.10`（补救可执行 = 能定位真源条目）。仍不私设第二真值：断言的是"门会响"，
+# 判据实现只有 verify-note.sh 一处。
 R=$(new_repo missing-alternatives)
 write_adr "$R" .agents/notes/implemented/process/2026-10-29-missing-alt.md '# Agent Note: 缺备选节
 
@@ -2087,12 +2115,7 @@ Status: implemented
 
 样本。'
 git -C "$R" add -A >/dev/null 2>&1
-OUT=$(run_gate "$R") && RC=0 || RC=$?
-if [ "$RC" -ne 0 ]; then
-  printf 'PASS  缺 ## Alternatives considered 被真源拒绝（exit %d）\n' "$RC"
-else
-  printf 'WARN  缺 ## Alternatives considered 未被拒绝：判定真源 1.1–1.9 不含该节 → 本 case 不计入 PASS（缺口见 ADR Consequences）\n'
-fi
+expect_reject_with "缺 ## Alternatives considered 拒绝（1.10 硬判据，文案带判据号）" "$R" '1\.10'
 
 # ---------- 9. 空场景一律放行：无暂存 ADR 变更 ----------
 R=$(new_repo no-change)
@@ -2112,7 +2135,7 @@ if [ "$FAIL" -ne 0 ]; then
   printf '[%s] 未通过：门禁的拒绝/放行语义与预期不符（见上方 FAIL）\n' "$SPEC" >&2
   exit 1
 fi
-printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件均已证明（exit 0）\n' "$SPEC"
+printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节均已证明（exit 0）\n' "$SPEC"
 exit 0
 PONYGO_EOF
   # 已有但丢执行位（如经 Windows/zip 转手）→ 补回；A1/A2/A4 是框架不可变资产，改权限不改字节
@@ -2130,7 +2153,7 @@ PONYGO_EOF
 # 平台适配器是薄壳（A5 不进宇宙表），门禁本体在这里（A4 恒生成、进宇宙表）。
 #
 # 两道：
-#   1) 全树 ADR 格式（判定真源 verify-note.sh 无参模式：1.1–1.9 + 1.9 文档有家）
+#   1) 全树 ADR 格式（判定真源 verify-note.sh 无参模式：1.1–1.10，含 1.9 文档有家与 1.10 备选节）
 #   2) 暂存区门的负样本 spec（证明 A1 会拒绝非法样本——门禁自证，非产品检查）
 #
 # 约定：本目录脚本一律 `chmod +x`（非可执行钩子会被 git 静默忽略，判据会假达标）。
@@ -2146,7 +2169,7 @@ cd "$ROOT" || exit 1
 
 fail=0
 
-echo "== [1/2] 全树 ADR 格式（verify-note.sh，1.1–1.9）=="
+echo "== [1/2] 全树 ADR 格式（verify-note.sh，1.1–1.10）=="
 if ! bash .agents/skills/write-adr/verify-note.sh; then
   echo "ci-verify: FAIL 全树 ADR 格式门未通过 → 逐项修 FAIL 后重跑" >&2
   fail=1
