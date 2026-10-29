@@ -10,12 +10,14 @@
 #
 # 语义边界（P6 诚实条款）：本门**不自己判** ADR 格式——判定真源是
 # `.agents/skills/write-adr/verify-note.sh`（maturity-ladder §5 的 1.1–1.9 机械影子）。
-# 本门只多做两件它做不到的事：
+# 本门只多做三件它做不到的事：
 #   1) R6 TOCTOU：verify-note 读**工作区**，而 pre-commit 的输入是**暂存区文件名**。
 #      两者不一致时（staged 后又在工作区改过），校验的就不是将要提交的那份字节。
 #      故先做「暂存区 blob vs 工作区」比对，不一致 → 直接拒绝，要求先 git add。
 #   2) R7 覆盖面：用 `--diff-filter=ACMR`（含 R 重命名，`git mv` 不能绕过），
 #      并豁免 README.md / AGENTS.md（治理契约载体，非决策记录）。
+#   3) F9 非普通文件：symlink（120000）/ gitlink（160000）ADR 一律拒绝——否则"被校验的字节"
+#      可以指向工作区外内容，判定面被换掉。此检查必须排在 EOL 归一兜底之前（见 §4a 注释）。
 # 为什么不在本门里重写 1.1–1.9：一份判据两份实现必然漂移（P9），
 # 且 `ponygo gate adr` 子命令已按同一理由被否决（见 ADR 的 Alternatives R-新子命令）。
 #
@@ -97,6 +99,7 @@ TMP=$(mktemp -d) || die "mktemp -d 失败"
 trap 'rm -rf "$TMP"' EXIT
 
 drift=0
+bad_mode=0
 for p in ${PATHS[@]+"${PATHS[@]}"}; do
   if ! git cat-file -e ":$p" 2>/dev/null; then
     printf '[%s] %s：%s（暂存区无该文件；只自查未暂存的新 ADR 请直接跑 bash %s）\n' \
@@ -105,6 +108,19 @@ for p in ${PATHS[@]+"${PATHS[@]}"}; do
     continue
   fi
   git show ":$p" >"$TMP/staged" 2>/dev/null || die "读取暂存区内容失败：$p"
+  # 4a) F9：ADR 必须是普通文件（symlink 120000 / gitlink 160000 一律拒绝）。
+  # 位置是判据本身的部分：必须早于 cmp 与下面的 EOL 归一兜底——
+  # symlink 暂存时 blob = 链接文本、cmp 读工作区 = 目标内容，两者必然不同，
+  # 而 `git diff --quiet` 对 symlink 只说"链接自身没改"（无差异）→ 会被兜底当假阳性放过。
+  # 实测根因即此，故模式检查排在兜底之前。
+  mode=$(git ls-files -s -- "$p" 2>/dev/null | awk '{print $1}' | head -1)
+  case "$mode" in
+    120000 | 160000)
+      printf '[%s] 拒绝：%s 不是普通文件（mode=%s；ADR 必须是普通文件）\n' "$PROG" "$p" "$mode" >&2
+      bad_mode=1
+      continue
+      ;;
+  esac
   if cmp -s "$TMP/staged" "$p"; then
     continue
   fi
@@ -118,8 +134,14 @@ for p in ${PATHS[@]+"${PATHS[@]}"}; do
   drift=1
 done
 
-if [ "$drift" -ne 0 ]; then
-  printf '[%s] 拒绝：暂存区与工作区不一致（verify-note 读工作区，会校验错字节）→ 先 git add 再提交\n' "$PROG" >&2
+if [ "$bad_mode" -ne 0 ] || [ "$drift" -ne 0 ]; then
+  # 按因给补救（不给一条万能命令）：两类成因的修法完全不同。
+  if [ "$bad_mode" -ne 0 ]; then
+    printf '[%s] 拒绝：ADR 必须是普通文件（符号链接/gitlink 会让被校验的字节指向工作区外）→ 用普通文件重写该 ADR 后 git add\n' "$PROG" >&2
+  fi
+  if [ "$drift" -ne 0 ]; then
+    printf '[%s] 拒绝：暂存区与工作区不一致（verify-note 读工作区，会校验错字节）→ 先 git add 再提交\n' "$PROG" >&2
+  fi
   exit 1
 fi
 

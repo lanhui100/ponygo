@@ -105,6 +105,22 @@ expect_reject() { # $1=用例名 $2=仓 [extra args]
   printf 'PASS  %s（exit %d）\n' "$name" "$rc"
 }
 
+expect_reject_with() { # $1=用例名 $2=仓 $3=拒绝文案正则（补救必须可执行）
+  local name="$1" d="$2" pat="$3" out rc
+  out=$(run_gate "$d") && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    fail "$name：门应拒绝，实得 exit 0"
+    printf '%s\n' "$out" | tail -n 3 | sed 's/^/      /' >&2
+    return
+  fi
+  if ! printf '%s' "$out" | grep -qE "$pat"; then
+    fail "$name：拒绝文案不含 /$pat/ → 补救不可执行"
+    printf '%s\n' "$out" | tail -n 3 | sed 's/^/      /' >&2
+    return
+  fi
+  printf 'PASS  %s（exit %d）\n' "$name" "$rc"
+}
+
 LEGAL_BODY='# Agent Note: 合法样本
 
 Status: implemented
@@ -207,7 +223,62 @@ else
   printf 'PASS  TOCTOU 拒绝且文案可执行（exit %d）\n' "$RC"
 fi
 
-# ---------- 6. 缺 ## Alternatives considered —— 覆盖探针 ----------
+# ---------- 6. R6 TOCTOU 反向：暂存非法 + 工作区改好但未 git add → 仍拒绝 ----------
+# 这个方向才是 R6 真正保护的对象：将要提交的字节是**非法**的，工作区看起来已修好。
+# 若门读工作区（TOCTOU 未防），非法 ADR 会带着"已修好"的工作区一起进主干。
+R=$(new_repo toctou-reverse)
+write_adr "$R" .agents/notes/proposed/process/2026-10-29-rev.md '# Agent Note: 暂存非法
+
+Status: proposed
+
+## Problem
+
+样本：暂存区里是非法版本（时态错位）。
+
+## Decision
+
+不该出现在 proposed。'
+git -C "$R" add -A >/dev/null 2>&1
+write_adr "$R" .agents/notes/proposed/process/2026-10-29-rev.md '# Agent Note: 工作区已修好
+
+Status: proposed
+
+## Problem
+
+样本：工作区合法，但没 git add。
+
+## Proposal
+
+将来时。
+
+## Alternatives considered
+
+- 样本。'
+expect_reject_with "TOCTOU 反向（暂存非法/工作区合法）拒绝且文案可执行" "$R" \
+  'ADR 有未暂存改动，请先 git add'
+
+# ---------- 7. F9：符号链接 ADR（index 模式 120000）→ 拒绝 ----------
+# ADR 必须是普通文件：符号链接让"被校验的字节"可指向工作区外内容（判定面可被换掉）。
+# 断言强度说明：拒绝是**硬断言**（红相 driver）。实测（Wave-2）当前 A1 会放过
+# symlink ADR：暂存 blob 是链接文本、`cmp` 读工作区解引用后是目标内容，两者必然不同，
+# 但 A1 的 EOL 归一兜底（`git diff --quiet` 说"无差异"）把它当假阳性放行了。
+# F9（A1 先查 `git ls-files -s` 模式 120000/160000）由 Executor 落地，落地前本 case 必然 FAIL。
+R=$(new_repo symlink-adr)
+write_adr "$R" legal-target.md "$LEGAL_BODY"
+ln -s ../../../../legal-target.md \
+  "$R/.agents/notes/implemented/process/2026-10-29-link.md"
+git -C "$R" add -A >/dev/null 2>&1
+OUT=$(run_gate "$R") && RC=0 || RC=$?
+if [ "$RC" -eq 0 ]; then
+  fail "符号链接 ADR 应拒绝，实得 exit 0（F9 未落地：ADR 必须是普通文件）"
+  printf '%s\n' "$OUT" | tail -n 3 | sed 's/^/      /' >&2
+elif printf '%s' "$OUT" | grep -qE '普通文件|符号链接|120000'; then
+  printf 'PASS  符号链接 ADR 拒绝且文案指向"必须是普通文件"（exit %d）\n' "$RC"
+else
+  printf 'PASS  符号链接 ADR 已拒绝（exit %d）；WARN: 文案未指向"必须是普通文件"（F9 文案待补）\n' "$RC"
+fi
+
+# ---------- 8. 缺 ## Alternatives considered —— 覆盖探针 ----------
 # 诚实条款：`## Alternatives considered` 是 notes/README 的强制契约，但判定真源
 # verify-note.sh 的 1.1–1.9 里**没有**这一项（它只锁路径/文件名/Status/骨架标题）。
 # 本 case 因此做成探针：真源将来覆盖该节则断言拒绝；未覆盖则 WARN 保留缺口，
@@ -232,14 +303,14 @@ else
   printf 'WARN  缺 ## Alternatives considered 未被拒绝：判定真源 1.1–1.9 不含该节 → 本 case 不计入 PASS（缺口见 ADR Consequences）\n'
 fi
 
-# ---------- 7. 空场景一律放行：无暂存 ADR 变更 ----------
+# ---------- 9. 空场景一律放行：无暂存 ADR 变更 ----------
 R=$(new_repo no-change)
 write_adr "$R" .agents/notes/implemented/process/2026-10-29-legal-sample.md "$LEGAL_BODY"
 git -C "$R" add -A >/dev/null 2>&1
 git -C "$R" commit -q -m init >/dev/null 2>&1
 expect_accept "无暂存 ADR 变更放行" "$R"
 
-# ---------- 8. 空场景一律放行：无 .agents/notes ----------
+# ---------- 10. 空场景一律放行：无 .agents/notes ----------
 R="$TMP/no-notes"
 mkdir -p "$R/.meta/gates"
 cp "$GATE" "$R/.meta/gates/adr-verify.sh"
@@ -250,5 +321,5 @@ if [ "$FAIL" -ne 0 ]; then
   printf '[%s] 未通过：门禁的拒绝/放行语义与预期不符（见上方 FAIL）\n' "$SPEC" >&2
   exit 1
 fi
-printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 文案均已证明（exit 0）\n' "$SPEC"
+printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件均已证明（exit 0）\n' "$SPEC"
 exit 0

@@ -90,18 +90,31 @@ assert_same_as_template() { # <描述> <生成文件> <模板文件>
 GATE_MARKER='# >>> ponygo-gate: adr-verify v1 >>>'
 GATE_MARKER_END='# <<< ponygo-gate: adr-verify v1 <<<'
 
-# 追加哨兵块（§6.5 逐字形态）：原有字节零改动，只 append；随后补执行位。
-append_gate_block() { # <hook-file>
-  local f="$1"
+# 前置哨兵块（F1 口径，plan-freeze §7 F1 / 与 ponygo 生成器一致）：
+# 插在 `#!` 首行之后（无 shebang 则文件最前），既有字节的顺序与内容**零改动**；
+# 已含哨兵尾行则视为已接线、不重复插（幂等）。随后补执行位。
+# 为什么不再末尾追加：既有钩子以 `exit 0`/`exec` 结尾时末尾块永不执行 = 假接线（B1 BLOCKING），
+# 新 2.4 判据要求块可执行，故夹具必须与真生成器同构，否则测的是「永不运行的块」。
+prepend_gate_block() { # <hook-file>
+  local f="$1" block tmp
   [ -d "$(dirname "$f")" ] || mkdir -p "$(dirname "$f")"
   [ -f "$f" ] || printf '#!/usr/bin/env bash\n' > "$f"
+  grep -qxF "$GATE_MARKER_END" "$f" 2>/dev/null && { chmod +x "$f"; return 0; }
+  block="$SBASE/gate.block"
   {
-    printf '\n%s\n' "$GATE_MARKER"
+    printf '%s\n' "$GATE_MARKER"
     printf 'if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then\n'
     printf '  bash "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" || exit 1\n'
     printf 'fi\n'
     printf '%s\n' "$GATE_MARKER_END"
-  } >> "$f"
+  } > "$block"
+  tmp="$f.ponygo-tmp"
+  if head -n1 "$f" 2>/dev/null | grep -q '^#!'; then
+    { head -n1 "$f"; cat "$block"; tail -n +2 "$f"; } > "$tmp"
+  else
+    { cat "$block"; cat "$f"; } > "$tmp"
+  fi
+  mv -f "$tmp" "$f"
   chmod +x "$f"
 }
 
@@ -113,11 +126,11 @@ ensure_gate_asset() { # <case-dir>
   chmod +x "$f"
 }
 
-# 正例夹具装配：手工钩子升级为「已接线」形态
+# 正例夹具装配：手工钩子升级为「已接线」形态（F1 口径：块前置 shebang 之后）
 wire_gate_fixture() { # <case-dir> [hook 相对路径]
   local T="$1" rel="${2:-.githooks/pre-commit}"
   ensure_gate_asset "$T"
-  append_gate_block "$T/$rel"
+  prepend_gate_block "$T/$rel"
 }
 
 # ---- git 夹具（一律消毒：不读机器全局配置，跨机同结论）----
@@ -2667,22 +2680,35 @@ EOF
 }
 
 s50_preexisting_hook_preserved() {
-  echo "--- 场景50：既有自定义 pre-commit 不被覆盖（§6.1 非破坏性追加，原字节零改动）"
-  local T orig osz; T=$(new_case)
+  echo "--- 场景50：既有自定义 pre-commit 不被篡改（§6.1 零改写 + F1 块前置 shebang 之后）"
+  local T orig bs es; T=$(new_case)
   git_seed_repo "$T"
+  # 夹具按 F1 的动机场景建模：既有钩子以 exit 0 结尾（末尾追加块会被 exit 截断）
   ( cd "$T" && mkdir -p .githooks \
-      && printf '#!/usr/bin/env bash\necho CUSTOM-GATE\n' > .githooks/pre-commit \
+      && printf '#!/usr/bin/env bash\necho CUSTOM-GATE\nexit 0\n' > .githooks/pre-commit \
       && chmod +x .githooks/pre-commit ) >/dev/null 2>&1
   orig="$SBASE/hook.custom.orig"; cp "$T/.githooks/pre-commit" "$orig"
   run_cli "$T" init --yes
   assert_eq "既有自定义钩子场景 init exit 0" 0 "$R_RC"
   assert_file_has "原自定义行仍在" "$T/.githooks/pre-commit" "echo CUSTOM-GATE"
-  osz=$(wc -c < "$orig" | awk '{print $1}')
-  head -c "$osz" "$T/.githooks/pre-commit" > "$SBASE/hook.custom.head" 2>/dev/null
-  if cmp -s "$SBASE/hook.custom.head" "$orig"; then
-    ok "既有钩子原字节逐字节保留（前缀 cmp 一致）"
+  # 零篡改（F1 契约演进后的正确形式）：删掉哨兵区间（含边界行）后，剩余文本必须与原文件
+  # 逐字节相等——既证明用户原有行零改动/顺序不变，又允许块被**前置插入**（前缀形式已不成立）。
+  awk -v b="$GATE_MARKER" -v e="$GATE_MARKER_END" \
+    '$0==b{skip=1} !skip{print} $0==e{skip=0}' \
+    "$T/.githooks/pre-commit" > "$SBASE/hook.custom.stripped"
+  if cmp -s "$SBASE/hook.custom.stripped" "$orig"; then
+    ok "既有钩子零篡改：去掉哨兵区间后与原文逐字节一致（原行全在且顺序不变）"
   else
-    bad "既有钩子被改写（前缀与原文件不一致——违反 §6.1「永不改写既有行」）"
+    bad "既有钩子被篡改：去掉哨兵区间后与原文不一致（违反 §6.1「永不改写既有行」）"
+    diff "$orig" "$SBASE/hook.custom.stripped" | sed -n '1,6p' >&2
+  fi
+  # F1 位置契约：块必须在首个顶层 exit/exec 之前（否则永不执行）
+  bs=$(block_begin_line "$T/.githooks/pre-commit"); es=$(first_exit_line "$T/.githooks/pre-commit")
+  assert_eq "哨兵块紧接 shebang（第 2 行，F1 前置）" 2 "${bs:-缺失}"
+  if [ -n "$bs" ] && [ -n "$es" ] && [ "$bs" -lt "$es" ]; then
+    ok "哨兵块在首个顶层 exit/exec 之前（块 $bs 行 < exit $es 行）——不会被 exit 截断（F1）"
+  else
+    bad "哨兵块位置错误（块行 ${bs:-缺失} 应 < 首个顶层 exit/exec 行 ${es:-无}）——末尾追加会被 exit 截断（F1）"
   fi
   assert_file_has "追加哨兵块首行" "$T/.githooks/pre-commit" "$GATE_MARKER"
   assert_file_has "追加哨兵块尾行" "$T/.githooks/pre-commit" "$GATE_MARKER_END"
@@ -2891,6 +2917,389 @@ s57_ci_conditional_generation() {
   assert_contains "gitlab 项目 status 给出 ci-verify.sh 可执行指引" "$R_OUT" "ci-verify.sh"
 }
 
+# ============================================================
+# Wave-2 加固验收（s58~s65）—— L2-T 独立测试者冻结，实现方只读
+#
+# 真源：.dev-team/plan-freeze.md §7（F1–F12 终裁）。三条铁律：
+#   1) 每个反例都配**正向控制**（手工摆成合规形态后必须转绿），禁「跑通即 pass」；
+#   2) 失败描述写清「期望 / 实得」，失败即可定位；
+#   3) 平台降级如实披露、不静默跳过：目录写拒绝（chmod 555）、chmod -x、ln -s 在
+#      MSYS/root 下可能不生效 → 先探测，不生效则 ok + 说明「本环境无法复现，靠 Linux CI」。
+# ============================================================
+
+assert_matches() { # <描述> <整体> <ERE>
+  if printf '%s\n' "$2" | grep -Eq -- "$3"; then
+    ok "$1"
+  else
+    bad "$1（未匹配 /$3/；实得尾部：$(printf '%s' "$2" | tail -n 2 | tr '\n' ' '))"
+  fi
+}
+sentinel_block() { # <hook 文件> → 输出哨兵区间（含 BEGIN/END 两行）
+  sed -n '/>>> ponygo-gate: adr-verify v1 >>>/,/<<< ponygo-gate: adr-verify v1 <<</p' "$1" 2>/dev/null
+}
+block_begin_line() { # <hook 文件> → 哨兵 BEGIN 行号（无则空）
+  grep -nF -m1 "$GATE_MARKER" "$1" 2>/dev/null | head -n1 | cut -d: -f1
+}
+first_exit_line() { # <hook 文件> → 首个顶层 exit/exec 行号（无则空）
+  grep -nE '^[[:space:]]*(exit|exec)[[:space:]]' "$1" 2>/dev/null | head -n1 | cut -d: -f1
+}
+assert_block_canonical() { # <描述> <hook 文件> <规范块文件>
+  local got="$SBASE/got.block"
+  sentinel_block "$2" > "$got"
+  if [ ! -s "$got" ]; then bad "$1（哨兵区间为空：$2）"; return 0; fi
+  if diff <(tr -d '\r' < "$got") <(tr -d '\r' < "$3") >/dev/null 2>&1; then
+    ok "$1"
+  else
+    bad "$1（哨兵区间与规范块不一致——F3 要求逐字节相等）"
+    diff <(tr -d '\r' < "$got") <(tr -d '\r' < "$3") | sed -n '1,6p' >&2
+  fi
+}
+make_canonical_block() { # → 打印规范块文件路径（由一次性 ref 仓的 init 产物提取）
+  local r b
+  r=$(new_case); git_seed_repo "$r"; run_cli "$r" init --yes
+  b="$SBASE/canon.block"; sentinel_block "$r/.githooks/pre-commit" > "$b"
+  printf '%s' "$b"
+}
+set_level2() { # <case 目录>：level: 2 + 一条合法决策（2.1–2.3 由 init 落地的 A1/A2/A4 满足）
+  printf 'level: 2\n' > "$1/.meta/meta.yaml"
+  write_valid_decision "$1" "implemented/feature/2026-01-02-gate.md"
+}
+stage_status_violation() { # <dir> <文件名>：写 implemented/ 下 Status: proposed（1.7 违例）并暂存
+  local f=".agents/notes/implemented/feature/$2"
+  mkdir -p "$1/.agents/notes/implemented/feature"
+  cat > "$1/$f" <<'EOF'
+# Agent Note: status mismatch
+
+Status: proposed
+
+## Problem
+why
+
+## Decision
+what
+
+## Alternatives considered
+other
+EOF
+  git_local "$1" add "$f" >/dev/null 2>&1
+  printf '%s' "$f"
+}
+C_RC=0; C_OUT=""
+run_git_commit() { # <dir> <message>：真跑 git commit（钩子会执行），捕获合并输出与 rc
+  local dir="$1" msg="$2" G
+  G=$(sanitize_git)
+  # shellcheck disable=SC2086
+  C_OUT=$( cd "$dir" && env $G git -c user.email=t@t -c user.name=t -c commit.gpgsign=false \
+    commit -qm "$msg" 2>&1 ); C_RC=$?
+}
+
+s58_f1_block_before_exit() {
+  echo "--- 场景58：F1 哨兵块必须前置到 shebang 之后（exit 0 / exec 钩子下末尾追加=永不执行）"
+  local T H bs es CANON
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init --yes
+  CANON="$SBASE/canon58.block"; sentinel_block "$T/.githooks/pre-commit" > "$CANON"
+
+  # ① 既有钩子以 exit 0 结尾（极常见形态）
+  T=$(new_case); git_seed_repo "$T"
+  ( cd "$T" && mkdir -p .githooks && printf '#!/usr/bin/env bash\nexit 0\n' > .githooks/pre-commit \
+      && chmod +x .githooks/pre-commit ) >/dev/null 2>&1
+  run_cli "$T" init --yes
+  assert_eq "exit 0 钩子场景 init exit 0" 0 "$R_RC"
+  H="$T/.githooks/pre-commit"
+  bs=$(block_begin_line "$H"); es=$(first_exit_line "$H")
+  assert_eq "exit 0 钩子：哨兵块紧接 shebang（第 2 行，F1 前置）" 2 "${bs:-缺失}"
+  if [ -n "$es" ] && [ -n "$bs" ] && [ "$bs" -lt "$es" ]; then
+    ok "exit 0 钩子：哨兵块在首个顶层 exit/exec 之前（块 $bs 行 < exit $es 行）"
+  else
+    bad "exit 0 钩子：哨兵块位置错误（块行 ${bs:-缺失} 应 < 首个顶层 exit/exec 行 ${es:-无}）——末尾追加被 exit 截断（F1）"
+  fi
+  stage_status_violation "$T" "2026-01-09-exit0.md" >/dev/null
+  run_git_commit "$T" "must be rejected"
+  assert_nonzero "exit 0 钩子下非法 ADR 提交必须 rc≠0（F1 假绿反证）" "$C_RC"
+  assert_matches "提交被拒时输出点名判据（门真的跑到了）" "$C_OUT" '1\.7|adr-verify'
+
+  # ② 既有钩子 exec 他进程（同样截断末尾追加）
+  T=$(new_case); git_seed_repo "$T"
+  ( cd "$T" && mkdir -p .githooks && printf '#!/usr/bin/env bash\nexec /bin/true\n' > .githooks/pre-commit \
+      && chmod +x .githooks/pre-commit ) >/dev/null 2>&1
+  run_cli "$T" init --yes
+  H="$T/.githooks/pre-commit"
+  bs=$(block_begin_line "$H"); es=$(first_exit_line "$H")
+  assert_eq "exec 钩子：哨兵块紧接 shebang（第 2 行，F1 前置）" 2 "${bs:-缺失}"
+  if [ -n "$es" ] && [ -n "$bs" ] && [ "$bs" -lt "$es" ]; then
+    ok "exec 钩子：哨兵块在 exec 之前（块 $bs 行 < exec $es 行）"
+  else
+    bad "exec 钩子：哨兵块位置错误（块行 ${bs:-缺失} 应 < 首个顶层 exec 行 ${es:-无}）——exec 会替换进程（F1）"
+  fi
+  stage_status_violation "$T" "2026-01-09-exec.md" >/dev/null
+  run_git_commit "$T" "must be rejected"
+  assert_nonzero "exec 钩子下非法 ADR 提交必须 rc≠0" "$C_RC"
+
+  # ③ 正向控制：手工摆成 F1 合规位置（块在 shebang 后、exit 前）→ 同一非法 ADR 必被拒
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init --yes
+  H="$T/.githooks/pre-commit"
+  { printf '#!/usr/bin/env bash\n'; cat "$CANON"; printf 'exit 0\n'; } > "$H.tmp" && mv -f "$H.tmp" "$H"
+  chmod +x "$H"
+  assert_eq "正向控制：手工合规块的起始行" 2 "$(block_begin_line "$H")"
+  stage_status_violation "$T" "2026-01-09-ok.md" >/dev/null
+  run_git_commit "$T" "must be rejected"
+  assert_nonzero "正向控制：F1 合规位置下非法 ADR 提交被拒（rc≠0）" "$C_RC"
+}
+
+s59_f2_concurrent_atomicity() {
+  echo "--- 场景59：F2 原子性（10 并行 init × 10 轮 → 哨兵尾行恒为 1）+ 半截块自愈"
+  local T i r cnt maxc=0
+  T=$(new_case); git_seed_repo "$T"
+  ( cd "$T" && mkdir -p .githooks && git config core.hooksPath .githooks ) >/dev/null 2>&1
+  for r in 1 2 3 4 5 6 7 8 9 10; do
+    printf '#!/usr/bin/env bash\necho custom-gate\n' > "$T/.githooks/pre-commit"
+    chmod +x "$T/.githooks/pre-commit"
+    rm -f "$T/go"
+    # 起跑栅栏（flag 文件自旋）：让 10 个进程尽量同时进「读-判-写」窗口，
+    # 否则仅靠 & 的启动抖动会把竞态掩成偶然绿——这是**加强**同一契约，不换判据。
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+      ( cd "$T" && while [ ! -f go ]; do :; done; exec bash "$ROOT/ponygo" init --yes >/dev/null 2>&1 ) &
+    done
+    sleep 0.5
+    : > "$T/go"
+    wait
+    cnt=$(grep -cF "$GATE_MARKER_END" "$T/.githooks/pre-commit" 2>/dev/null || printf 0)
+    [ "${cnt:-0}" -gt "$maxc" ] && maxc=$cnt
+    if [ "$cnt" -eq 1 ]; then
+      ok "第 $r 轮：10 并行 init 后哨兵尾行恰好 1"
+    else
+      bad "第 $r 轮：10 并行 init 后哨兵尾行=$cnt（期望 1——F2 原子替换 + flock 缺失）"
+    fi
+  done
+  assert_eq "10 轮并发峰值哨兵尾行数" 1 "$maxc"
+  bash -n "$T/.githooks/pre-commit" 2>/dev/null
+  assert_eq "并发后钩子仍语法合法（无交错写坏，F2）" 0 "$?"
+
+  # 正向控制：顺序单次 init 必须恰好 1（证明「恰好 1」可达成、计数口径正确）
+  T=$(new_case); git_seed_repo "$T"
+  ( cd "$T" && mkdir -p .githooks && printf '#!/usr/bin/env bash\necho custom-gate\n' > .githooks/pre-commit \
+      && chmod +x .githooks/pre-commit && git config core.hooksPath .githooks ) >/dev/null 2>&1
+  run_cli "$T" init --yes
+  assert_eq "正向控制：顺序 init 后哨兵尾行恰好 1" 1 \
+    "$(grep -cF "$GATE_MARKER_END" "$T/.githooks/pre-commit" 2>/dev/null || printf 0)"
+
+  # ② 半截块（BEGIN + if…then，无 END/fi）→ init 后必须自愈：bash -n rc=0 且尾行恰好 1
+  T=$(new_case); git_seed_repo "$T"
+  ( cd "$T" && mkdir -p .githooks && git config core.hooksPath .githooks ) >/dev/null 2>&1
+  cat > "$T/.githooks/pre-commit" <<'EOF'
+#!/usr/bin/env bash
+# >>> ponygo-gate: adr-verify v1 >>>
+if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
+EOF
+  chmod +x "$T/.githooks/pre-commit"
+  run_cli "$T" init --yes
+  bash -n "$T/.githooks/pre-commit" 2>/dev/null
+  assert_eq "半截块自愈后 bash -n rc=0（不得留下未闭合 if）" 0 "$?"
+  assert_eq "半截块自愈后哨兵尾行恰好 1" 1 \
+    "$(grep -cF "$GATE_MARKER_END" "$T/.githooks/pre-commit" 2>/dev/null || printf 0)"
+}
+
+s60_f3_canonical_block() {
+  echo "--- 场景60：F3 哨兵块逐字节等于规范块（echo / || true / if false 三变体均判未接线）"
+  local T V CANON TPL
+  CANON=$(make_canonical_block)
+  assert_contains "前提取证：规范块内含非注释调用行" "$(cat "$CANON")" "adr-verify.sh"
+  for V in echo ortrue iffalse; do
+    T=$(new_case); git_seed_repo "$T"
+    ( cd "$T" && mkdir -p .githooks && git config core.hooksPath .githooks ) >/dev/null 2>&1
+    case "$V" in
+      echo) TPL='#!/usr/bin/env bash
+echo hook
+# >>> ponygo-gate: adr-verify v1 >>>
+echo adr-verify.sh
+# <<< ponygo-gate: adr-verify v1 <<<' ;;
+      ortrue) TPL='#!/usr/bin/env bash
+echo hook
+# >>> ponygo-gate: adr-verify v1 >>>
+if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
+  bash "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" || true
+fi
+# <<< ponygo-gate: adr-verify v1 <<<' ;;
+      iffalse) TPL='#!/usr/bin/env bash
+echo hook
+# >>> ponygo-gate: adr-verify v1 >>>
+if false; then
+  bash "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" || exit 1
+fi
+# <<< ponygo-gate: adr-verify v1 <<<' ;;
+    esac
+    printf '%s\n' "$TPL" > "$T/.githooks/pre-commit"; chmod +x "$T/.githooks/pre-commit"
+    run_cli "$T" init --yes
+    set_level2 "$T"
+    # shellcheck disable=SC2046
+    run_cli_env "$T" $(sanitize_git) status
+    assert_eq "变体 $V：status exit 1（非规范块=未接线，F3）" 1 "$R_RC"
+    assert_contains "变体 $V：报 2.4" "$R_OUT" "2.4"
+    run_cli "$T" init --yes
+    assert_block_canonical "变体 $V：init 重写为规范块（F3 gate_hook_wired 语义）" \
+      "$T/.githooks/pre-commit" "$CANON"
+    assert_eq "变体 $V：重写后哨兵尾行恰好 1" 1 \
+      "$(grep -cF "$GATE_MARKER_END" "$T/.githooks/pre-commit" 2>/dev/null || printf 0)"
+    # shellcheck disable=SC2046
+    run_cli_env "$T" $(sanitize_git) status
+    assert_eq "变体 $V：重写后 status exit 0（正向控制）" 0 "$R_RC"
+  done
+}
+
+s61_f4_write_failure_loud() {
+  echo "--- 场景61：F4 写失败必须响亮（.githooks 不可写 → init rc≠0 + WARN + 补救）"
+  local T; T=$(new_case)
+  git_seed_repo "$T"
+  ( cd "$T" && mkdir -p .githooks && git config core.hooksPath .githooks && chmod 555 .githooks ) >/dev/null 2>&1
+  if ( : > "$T/.githooks/.wprobe" ) 2>/dev/null; then
+    rm -f "$T/.githooks/.wprobe"; chmod 755 "$T/.githooks"
+    ok "本环境目录写拒绝不生效（MSYS/root）→ F4 写失败场景降级跳过（由 Linux CI 复现）"
+  else
+    run_cli "$T" init --yes
+    assert_nonzero "钩子写入失败 → init rc≠0（F4：禁止 Permission denied + exit 0）" "$R_RC"
+    assert_contains "输出点名失败目标 .githooks/pre-commit" "$R_OUT" ".githooks/pre-commit"
+    assert_contains "输出含 WARN（F4 要求 WARN + 失败清单）" "$R_OUT" "WARN"
+    assert_matches "输出给出可执行补救（非裸 Permission denied）" "$R_OUT" '补救|写入失败|不可写|修复失败'
+    chmod 755 "$T/.githooks"
+    run_cli "$T" init --yes
+    assert_eq "恢复权限后 init rc=0（正向控制）" 0 "$R_RC"
+    assert_exists "恢复权限后钩子已生成（正向控制）" "$T/.githooks/pre-commit"
+  fi
+  chmod 755 "$T/.githooks" 2>/dev/null || true
+}
+
+s62_f5_remedy_by_cause() {
+  echo "--- 场景62：F5 补救按因分支（非 git / hooksPath 不可达 / 钩子不可执行）且不得给统一 init 文案"
+  local T G; G=$(sanitize_git)
+
+  # ① 非 git → 补救 = git init
+  T=$(new_case); run_cli "$T" init --yes; set_level2 "$T"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G status
+  assert_eq "非 git 分支：status exit 1" 1 "$R_RC"
+  assert_contains "非 git 分支：报 2.4" "$R_OUT" "2.4"
+  assert_contains "非 git 分支：补救含 git init（F5）" "$R_OUT" "git init"
+  assert_not_contains "非 git 分支：不得给统一 bash ponygo init 文案（F5）" "$R_OUT" "bash ponygo init"
+
+  # ② hooksPath 指向不可达 → 补救 = git config core.hooksPath
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init --yes; set_level2 "$T"
+  rm -rf "$T/.githooks"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G status
+  assert_eq "hooksPath 不可达分支：status exit 1" 1 "$R_RC"
+  assert_contains "hooksPath 不可达分支：报 2.4" "$R_OUT" "2.4"
+  assert_contains "不可达分支：补救含 git config core.hooksPath（F5）" "$R_OUT" "git config core.hooksPath"
+  assert_not_contains "不可达分支：不得给统一 bash ponygo init 文案（F5）" "$R_OUT" "bash ponygo init"
+
+  # ③ 钩子不可执行 → 补救 = chmod +x；且 init 不得替它激活（§6.1 沉睡钩子是人的决定）
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init --yes; set_level2 "$T"
+  chmod -x "$T/.githooks/pre-commit" 2>/dev/null
+  if [ -x "$T/.githooks/pre-commit" ]; then
+    ok "本环境 chmod -x 不生效（MSYS）→ 钩子不可执行分支降级跳过（由 Linux CI 复现）"
+  else
+    # shellcheck disable=SC2046
+    run_cli_env "$T" $G status
+    assert_eq "钩子不可执行分支：status exit 1" 1 "$R_RC"
+    assert_contains "钩子不可执行分支：报 2.4" "$R_OUT" "2.4"
+    assert_matches "不可执行分支：补救含 chmod +x（F5）" "$R_OUT" 'chmod \+x'
+    assert_not_contains "不可执行分支：不得给统一 bash ponygo init 文案（F5）" "$R_OUT" "bash ponygo init"
+    run_cli "$T" init --yes
+    assert_eq "init 不替沉睡钩子 chmod（§6.1）" "no" \
+      "$([ -x "$T/.githooks/pre-commit" ] && echo yes || echo no)"
+  fi
+}
+
+s63_f6_tilde_expansion() {
+  echo "--- 场景63：F6 hooksPath 的 ~ 展开（~/hk → \$HOME/hk，level:2 status 必须 rc=0）"
+  local T G; G=$(sanitize_git); T=$(new_case)
+  git_seed_repo "$T"; run_cli "$T" init --yes; set_level2 "$T"
+  mkdir -p "$T/home/hk"
+  cp "$T/.githooks/pre-commit" "$T/home/hk/pre-commit"
+  chmod +x "$T/home/hk/pre-commit"
+  git_local "$T" config core.hooksPath '~/hk' >/dev/null 2>&1
+  # shellcheck disable=SC2046
+  run_cli_env "$T" HOME="$T/home" $G status
+  assert_eq "F6：hooksPath=~/hk 且 \$HOME/hk 已接线 → status exit 0（不得假 FAIL）" 0 "$R_RC"
+  assert_contains "F6：结论行为 L0-L2（2.4 判 PASS）" "$R_OUT" "L0-L2"
+  assert_missing "F6：不得在仓内造 ./~/hk 目录" "$T/~/hk"
+}
+
+s64_f8_f11_dry_run_provider() {
+  echo "--- 场景64：F8 dry-run 豁免非 TTY（含装配预览）+ F11 provider 收紧 + A5 timeout-minutes"
+  local T G; G=$(sanitize_git)
+
+  # ① F8：--yes --dry-run 在非 TTY（</dev/null）下 rc=0、零落盘、且打印装配预览
+  T=$(new_case); git_seed_repo "$T"
+  R_OUT=$( cd "$T" && bash "$ROOT/ponygo" init --yes --dry-run </dev/null 2>&1 ); R_RC=$?
+  assert_eq "F8：init --yes --dry-run（</dev/null）rc=0" 0 "$R_RC"
+  assert_missing "F8：dry-run 零落盘（.meta 不存在）" "$T/.meta"
+  assert_eq "F8：dry-run 不改 core.hooksPath" "" "$(hookspath_of "$T")"
+  assert_contains "F8：dry-run 打印装配预览（含 .githooks 计划）" "$R_OUT" ".githooks"
+  # ② F8 核心：--dry-run 且无 --yes、stdin 非 TTY → 不得触发 R15 的 die
+  T=$(new_case)
+  R_OUT=$( cd "$T" && bash "$ROOT/ponygo" init --dry-run </dev/null 2>&1 ); R_RC=$?
+  assert_eq "F8：init --dry-run（无 --yes、非 TTY）rc=0（DRY_RUN 豁免 R15）" 0 "$R_RC"
+  assert_missing "F8：无 --yes 的 dry-run 同样零落盘" "$T/.meta"
+
+  # ③ F11：仅 .github/ISSUE_TEMPLATE/（无 workflows）+ remote 非 github → 不生成 A5
+  T=$(new_case); git_seed_repo "$T"
+  mkdir -p "$T/.github/ISSUE_TEMPLATE"; printf 'x\n' > "$T/.github/ISSUE_TEMPLATE/bug.md"
+  git_local "$T" remote add origin https://gitlab.com/example/demo.git >/dev/null 2>&1
+  run_cli "$T" init --yes
+  assert_missing "F11：仅 .github/ISSUE_TEMPLATE 不算 github → 不生成 A5" \
+    "$T/.github/workflows/ponygo-governance.yml"
+  assert_exists "F11：A4 门禁本体仍生成" "$T/.meta/gates/ci-verify.sh"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G status
+  assert_contains "F11：status 报远端层" "$R_OUT" "远端层"
+  assert_not_contains "F11：status 不得误报「适配器已生成」" "$R_OUT" "适配器已生成"
+
+  # ④ F11：真 GitHub 证据（.github/workflows/）→ 生成 A5，且含 timeout-minutes: 10（B9）
+  T=$(new_case); git_seed_repo "$T"; mkdir -p "$T/.github/workflows"
+  run_cli "$T" init --yes
+  assert_exists "F11：.github/workflows/ 存在 → 生成 A5" "$T/.github/workflows/ponygo-governance.yml"
+  assert_file_has "F11：A5 含 timeout-minutes: 10（B9）" \
+    "$T/.github/workflows/ponygo-governance.yml" "timeout-minutes: 10"
+}
+
+s65_f9_f10_symlink_and_selfheal() {
+  echo "--- 场景65：F9 符号链接 ADR 必须拒绝 + F10 资产自愈（半截 A1 → init 恢复规范内容）"
+  local T; T=$(new_case)
+  git_seed_repo "$T"; run_cli "$T" init --yes
+  write_valid_decision "$T" "implemented/feature/2026-01-08-target.md"
+  ( cd "$T/.agents/notes/implemented/feature" && ln -sf 2026-01-08-target.md 2026-01-08-link.md ) 2>/dev/null
+  if [ ! -L "$T/.agents/notes/implemented/feature/2026-01-08-link.md" ]; then
+    ok "本环境 ln -s 未生成真符号链接（Git Bash）→ F9 符号链接用例降级跳过（由 Linux CI 复现）"
+  else
+    git_local "$T" add .agents/notes/implemented/feature/2026-01-08-link.md >/dev/null 2>&1
+    assert_contains "前提取证：索引内该 ADR 为符号链接（mode 120000）" \
+      "$(git_local "$T" ls-files -s .agents/notes/implemented/feature/2026-01-08-link.md)" "120000"
+    run_script "$T" .meta/gates/adr-verify.sh
+    assert_nonzero "F9：符号链接 ADR 暂存 → A1 必须非零" "$S_RC"
+    assert_matches "F9：拒绝文案说明必须是普通文件" "$S_OUT" '普通文件|符号链接|symlink|120000'
+    # 正向控制：同内容换成普通文件 → 放行
+    rm -f "$T/.agents/notes/implemented/feature/2026-01-08-link.md"
+    cp "$T/.agents/notes/implemented/feature/2026-01-08-target.md" \
+       "$T/.agents/notes/implemented/feature/2026-01-08-link.md"
+    git_local "$T" add .agents/notes/implemented/feature/2026-01-08-link.md >/dev/null 2>&1
+    run_script "$T" .meta/gates/adr-verify.sh
+    assert_eq "F9 正向控制：普通文件同内容 → A1 exit 0" 0 "$S_RC"
+  fi
+
+  # ② F10：A1 被改成半截内容 → init 自愈为规范内容（与仓库模板 eol 归一逐字节一致）
+  printf 'echo x\n' > "$T/.meta/gates/adr-verify.sh"
+  run_cli "$T" init --yes
+  assert_same_as_template "F10：init 自愈 A1 为仓库模板内容" \
+    "$T/.meta/gates/adr-verify.sh" "$ROOT/.meta/gates/adr-verify.sh"
+  bash -n "$T/.meta/gates/adr-verify.sh" 2>/dev/null
+  assert_eq "F10：自愈后 A1 bash -n rc=0" 0 "$?"
+  assert_matches "F10：自愈时打 WARN 一行（F10 明写 WARN）" "$R_OUT" 'WARN'
+  # 功能正向控制：自愈后的 A1 真的会拒绝 1.7 违例
+  stage_status_violation "$T" "2026-01-10-selfheal.md" >/dev/null
+  run_script "$T" .meta/gates/adr-verify.sh
+  assert_nonzero "F10 正向控制：自愈后的 A1 拒绝 1.7 违例" "$S_RC"
+}
+
 s42_observe_monorepo_subcomponents
 s43_observe_pipeline_awareness
 s44_observe_subcomponent_blocking
@@ -2907,6 +3316,14 @@ s54_init_non_tty_requires_yes
 s55_ladder_24_strong
 s56_dual_write_parity
 s57_ci_conditional_generation
+s58_f1_block_before_exit
+s59_f2_concurrent_atomicity
+s60_f3_canonical_block
+s61_f4_write_failure_loud
+s62_f5_remedy_by_cause
+s63_f6_tilde_expansion
+s64_f8_f11_dry_run_provider
+s65_f9_f10_symlink_and_selfheal
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
 [ "$FAIL" -eq 0 ] || exit 1

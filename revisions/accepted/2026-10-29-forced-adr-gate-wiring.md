@@ -1,6 +1,6 @@
 # Revision: ADR 格式门接线——`ensure_gate_wiring` + 资产 A1–A5 + 判据 2.4 五条 AND
 
-Status: proposed
+Status: accepted
 
 ## Problem
 
@@ -62,6 +62,31 @@ ponygo 的 L1 判据已能把 ADR 形状机械化（1.1–1.9，真源
 - **`dev-team` L3-P「六问 + 第 7 问决策追溯」并入本期**：推迟。跨仓依赖 `dev-nfr-lint.py`
   的 `REQUIRED_FIELDS`，独立 ADR 后续交付。
 
+## Migration
+
+已初始化实例（ponyfun / job_copilot / ponyllm / pony-sentry 等）**不需要重建治理根**，
+升级只有一步：
+
+1. **升级第一步永远是 `bash ponygo init --yes`**（幂等）：`.meta` 已存在时**不重铺骨架**，
+   但仍执行 `ensure_gate_wiring` —— 补齐 A1/A2/A4、把哨兵块插进 `pre-commit` 的 shebang 之后、
+   `core.hooksPath` 未设时设为 `.githooks` 并回读校验、给生成的钩子/脚本 `chmod +x`。
+   重复跑无副作用（第二次跑应当零改动），可安全放在 `upgrade` 之后。
+2. **非交互 / CI 环境必须显式带 `--yes`**：非 TTY 且无 `--yes` 时 `init` 直接 `die`
+   「非交互环境请显式 --yes」（R15）。这是有意的——`printf '' | ponygo init` 静默 no-op
+   会让 CI 里"成功"却什么都没做。
+3. **`--dry-run` 现在允许非 TTY**（F8）：`DRY_RUN=1` 时不触发上面的 `die`，只打印装配计划
+   （不落盘、不动 `git config`），因此可以在 CI 里先预览再执行。注意 `--dry-run` **不会**验证接线结果，
+   校验仍是 `ponygo status`。
+4. **升级后 `status` 可能由 0 变 1**：这是判据加强**暴露了旧的假 PASS**（旧 2.4 只查
+   `core.hooksPath` 字符串非空，不查钩子是否真调用门禁），不是回归。补救按因分支：
+   未接线/块不合规 → 跑一次 `bash ponygo init --yes` 即自愈；钩子**不可执行** →
+   `init` **不会**替你激活沉睡钩子（激活属破坏性副作用），须 `chmod +x <hook>`；非 git 目录 →
+   先 `git init` 再重跑；`hooksPath` 指向不可达目录 → `git config core.hooksPath .githooks`。
+5. **husky 实例**：`core.hooksPath` **不被改动**（改它会静默停用 husky v9 的 `.husky/_` 链），
+   门禁块会被插入到 husky 那个 `pre-commit` 的 **shebang 之后**（既有字节的顺序与内容零改动，
+   且不再末尾追加——末尾追加在以 `exit 0` 结尾的钩子里永不执行）。想撤掉门禁 = 删掉哨兵块，
+   `git config` 无法一键复原。
+
 ## Consequences
 
 - **正常装配路径不再返回非零**（唯一非零 = 非 TTY 且无 `--yes`，R15）；C2「不得静默缺席」由
@@ -75,6 +100,11 @@ ponygo 的 L1 判据已能把 ADR 形状机械化（1.1–1.9，真源
 - **覆盖缺口**：`## Alternatives considered` 是 notes/README 的强制契约，但 `verify-note.sh`
   1.1–1.9 不含该项 → A2 该 case 为探针（不私设第二真值）。修法方向：真源侧新增 1.10，
   随下一次框架变更统一做；
+- **两层互补不等价**（Wave-2 B5 订正）：本地 A1 只校验暂存**子集**（不含 1.9 整树项），CI A4 跑**整树**
+  （含 1.9）。例：缺 `docs/AGENTS.md` 且本次未碰 ADR → 本地 0、CI 1。别用"本地绿"推"CI 绿"；
+- **非普通文件曾可绕过**（Wave-2 B3）：A1 早期实现的 EOL 归一兜底（`git diff --quiet` 说"无差异"）
+  会把 symlink ADR 当假阳性放行 → §7 F9 改为先查 `git ls-files -s` 模式（`120000`/`160000`）一律拒绝；
+  A2 增该红相 case，F9 落地前该 case 必然 FAIL；
 - **版本**：随 v2.8.0 发布（`README.md` 安装示例与校验和链路口径同步）；模型面/命令面不变，
   已有命令语义仅 `init` 在装配上变强。
 
@@ -82,8 +112,8 @@ ponygo 的 L1 判据已能把 ADR 形状机械化（1.1–1.9，真源
 
 1. `bash .agents/skills/write-adr/verify-note.sh` → 0（整树 1.1–1.9）
 2. `bash -n` 对 A1/A2/A3/A4 逐个 → 0（判据 2.2 代理）
-3. `bash .meta/gates/adr-verify.spec.sh` → 0（拒绝语义 + 放行语义 + TOCTOU 文案）
-4. `bash .meta/gates/ci-verify.sh` → 0（= 全树格式 + 门自检，远端层与本地层同结论）
+3. `bash .meta/gates/adr-verify.spec.sh` → 0（拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件拒绝）
+4. `bash .meta/gates/ci-verify.sh` → 0（= 真源整树 + 门自检；与本地层**互补而不等价**）
 5. `bash tests/run.sh` → `fail=0`（基线 587 pass 之上新增装配/追加/不可执行分支用例）
 6. 真实 git 行为（非模拟）：临时仓 `ponygo init --yes` → `git commit` 触发钩子；非法 ADR 提交
    被真实拒绝（rc≠0）、合法 ADR 提交放行；`git add` 后再改文件 → 以「ADR 有未暂存改动」拒绝

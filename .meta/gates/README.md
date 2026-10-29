@@ -28,18 +28,36 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 | 重命名 ADR 不绕过门 | 同上（`--diff-filter=ACMR`） | R7 |
 | 全树 ADR 格式常绿 | `bash .agents/skills/write-adr/verify-note.sh` | 1.1–1.9 |
 | 门自己会拒绝非法样本 | `bash .meta/gates/adr-verify.spec.sh` | A2 |
-| 远端层与本地层同一套结论 | `bash .meta/gates/ci-verify.sh` | A4（= A1 全树 + A2） |
+| 远端层全树兜底 | `bash .meta/gates/ci-verify.sh` | A4（= `verify-note.sh` 整树 + A2） |
+
+### 本地层与远端层：互补，**不等价**（B5 实测结论）
+
+两层跑的不是同一套判据，**不得**用"本地绿"推断"CI 也绿"，反之亦然：
+
+| | 本地层 `adr-verify.sh`（A3 → A1） | 远端层 `ci-verify.sh`（A4 → A5） |
+|---|---|---|
+| 输入面 | 暂存区**改动的 ADR 子集**（`--diff-filter=ACMR -- .agents/notes/*.md`） | `verify-note.sh` **整树**（`find .agents/notes -type f -name '*.md'`） |
+| 判据范围 | 1.5–1.8（逐文件）+ R6 字节比对 + R7 覆盖面 | 1.1–1.9（整树），**含 1.9「文档有家」等只在整树模式判的项** |
+| 定位 | 提交**前**拦截"这次改动" | 全仓**兜底**，抓历史债与整树不变量 |
+| 通过时能推什么 | 只说明"本次改动的 ADR 是合法的" | 只说明"整树此刻合法"，不校验暂存态 |
+
+**具体例子（实测）**：仓库缺 `docs/AGENTS.md`（1.9 违例），且这次提交没碰 `.agents/notes/`：
+`bash .meta/gates/adr-verify.sh` → **exit 0**（无暂存 ADR 变更，直接跳过）；
+`bash .meta/gates/ci-verify.sh` → **exit 1**（整树模式跑 1.9 报缺文档家）。
+所以两层是**互补**关系（本地=窄而快，CI=全而慢），不是同一结论的两份拷贝。
 
 **判定真源唯一**：格式判据只存在于 `.agents/skills/write-adr/verify-note.sh`；
-A1 只做它做不到的两件事——TOCTOU 字节比对与 `ACMR` 覆盖面——不在此目录复刻 1.1–1.9
-（复刻必然漂移，故 `ponygo gate adr` 子命令被否决）。
+A1 只做它做不到的三件事——TOCTOU 字节比对、`ACMR` 覆盖面、非普通文件（symlink/gitlink）拒绝——
+不在此目录复刻 1.1–1.9（复刻必然漂移，故 `ponygo gate adr` 子命令被否决）。
+A4 不是"再实现一遍"，它只是**编排**：真源整树 + 本目录的负样本 spec。
 
 ### 挂载方式（非破坏性）
 
 - `core.hooksPath` 未设 → 设为 `.githooks` 并**回读校验**；已设（含 husky 绝对路径）→ **一律不动**，
   直接对该目录下的 `pre-commit` 动手（改 hooksPath 会静默停用 husky v9 的 `.husky/_` 链）。
 - `pre-commit` 不存在 → 新建 A3 并 `chmod +x`；
-- 已接线（含 marker）→ 什么都不做；存在但未接线**且可执行** → **追加**哨兵块，原有字节零改动、不动权限：
+- 已接线（块逐字节合规）→ 什么都不做；存在但未接线**且可执行** → 把哨兵块**插在 shebang 首行之后**
+  （无 shebang 时插在文件最前），既有字节的**顺序与内容零改动**、不动权限：
 
 ```bash
 # >>> ponygo-gate: adr-verify v1 >>>
@@ -49,19 +67,27 @@ fi
 # <<< ponygo-gate: adr-verify v1 <<<
 ```
 
+  为什么是"前置"而不是"末尾追加"：既有钩子常以 `exit 0` 结尾（或含 `exec 他脚本` / `trap 'exit 0' EXIT`），
+  末尾追加的块**永不执行**，而 2.4 仍报"已接线" → 假绿。块位置在首个顶层 `exit`/`exec` 之后 = 视为未接线并迁移
+  （删旧块 + 前置新块，一次原子替换）。写入一律「临时文件 + `chmod` + `mv -f` 原子替换」，禁止 `>>` 追加；
+  发现 BEGIN 无对应 END 的半截块 → 整块重建（不得再 append）。
 - 存在但**不可执行** → 不改权限（激活沉睡钩子属破坏性副作用），2.4 FAIL 并打印
-  「chmod +x 或删除该文件后重跑 init」。
-- 判据 2.4 的机器识别 = `hooksPath` 归一化目录内 `pre-commit`：①存在 ②可执行 ③含哨兵尾行
-  `# <<< ponygo-gate: adr-verify v1 <<<` ④该块内有**非注释**行调用 `adr-verify.sh`
-  ⑤ `<root>/.meta/gates/adr-verify.sh` 存在。①–⑤全真才 PASS（"写一行注释就骗过"已被封死）。
-- 前置条件：git 会**静默忽略**不可执行的钩子——生成/追加后务必确认 `test -x`。
+  「`chmod +x <hook>`（init 不会替你激活沉睡钩子）或删除该文件后重跑 init」。
+- 判据 2.4 的机器识别 = `hooksPath` 归一化目录内 `pre-commit`：①存在 ②可执行 ③哨兵块
+  （BEGIN..END 区间）**逐字节等于**规范块（EOL 归一；含 marker 行
+  `# ponygo-gate: adr-verify v1` 与非注释调用行） ④ `<root>/.meta/gates/adr-verify.sh` 存在。
+  ①–④全真才 PASS——逐字节比较一举封死 `echo adr-verify.sh`、`|| true`、`if false; then … fi`、
+  `: adr-verify.sh`、注释掉调用行等全部变体。
+- 前置条件：git 会**静默忽略**不可执行的钩子——生成/前置后务必确认 `test -x`。
 
 ### A2 的负样本怎么读
 
 `adr-verify.spec.sh` 在 `mktemp -d` 临时仓里造样本（`trap … EXIT` 清理，仓库只读）：
 合法 ADR（带参/无参两路）→ 断言 A1 为 0；时态错位（`proposed` 带 `## Decision`）、
 `implemented` 带提案时代标题、`Status` 与目录不一致 → 断言 A1 非零；
-staged 后又在工作区改动 → 断言 A1 非零**且**文案含「ADR 有未暂存改动，请先 git add」；
+符号链接 ADR（`ln -s`，index 模式 `120000`）→ 断言 A1 非零**且**文案指向"必须是普通文件"；
+staged 后又在工作区改动（两个方向：暂存合法→工作区改、暂存非法→工作区改好但未 `git add`）
+→ 断言 A1 非零**且**文案含「ADR 有未暂存改动，请先 git add」；
 无暂存 ADR / 无 `.agents/notes` → 断言放行。
 
 诚实条款：`## Alternatives considered` 是 notes/README 的强制契约，但判定真源 1.1–1.9

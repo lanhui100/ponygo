@@ -410,18 +410,36 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 | 重命名 ADR 不绕过门 | 同上（`--diff-filter=ACMR`） | R7 |
 | 全树 ADR 格式常绿 | `bash .agents/skills/write-adr/verify-note.sh` | 1.1–1.9 |
 | 门自己会拒绝非法样本 | `bash .meta/gates/adr-verify.spec.sh` | A2 |
-| 远端层与本地层同一套结论 | `bash .meta/gates/ci-verify.sh` | A4（= A1 全树 + A2） |
+| 远端层全树兜底 | `bash .meta/gates/ci-verify.sh` | A4（= `verify-note.sh` 整树 + A2） |
+
+### 本地层与远端层：互补，**不等价**（B5 实测结论）
+
+两层跑的不是同一套判据，**不得**用"本地绿"推断"CI 也绿"，反之亦然：
+
+| | 本地层 `adr-verify.sh`（A3 → A1） | 远端层 `ci-verify.sh`（A4 → A5） |
+|---|---|---|
+| 输入面 | 暂存区**改动的 ADR 子集**（`--diff-filter=ACMR -- .agents/notes/*.md`） | `verify-note.sh` **整树**（`find .agents/notes -type f -name '*.md'`） |
+| 判据范围 | 1.5–1.8（逐文件）+ R6 字节比对 + R7 覆盖面 | 1.1–1.9（整树），**含 1.9「文档有家」等只在整树模式判的项** |
+| 定位 | 提交**前**拦截"这次改动" | 全仓**兜底**，抓历史债与整树不变量 |
+| 通过时能推什么 | 只说明"本次改动的 ADR 是合法的" | 只说明"整树此刻合法"，不校验暂存态 |
+
+**具体例子（实测）**：仓库缺 `docs/AGENTS.md`（1.9 违例），且这次提交没碰 `.agents/notes/`：
+`bash .meta/gates/adr-verify.sh` → **exit 0**（无暂存 ADR 变更，直接跳过）；
+`bash .meta/gates/ci-verify.sh` → **exit 1**（整树模式跑 1.9 报缺文档家）。
+所以两层是**互补**关系（本地=窄而快，CI=全而慢），不是同一结论的两份拷贝。
 
 **判定真源唯一**：格式判据只存在于 `.agents/skills/write-adr/verify-note.sh`；
-A1 只做它做不到的两件事——TOCTOU 字节比对与 `ACMR` 覆盖面——不在此目录复刻 1.1–1.9
-（复刻必然漂移，故 `ponygo gate adr` 子命令被否决）。
+A1 只做它做不到的三件事——TOCTOU 字节比对、`ACMR` 覆盖面、非普通文件（symlink/gitlink）拒绝——
+不在此目录复刻 1.1–1.9（复刻必然漂移，故 `ponygo gate adr` 子命令被否决）。
+A4 不是"再实现一遍"，它只是**编排**：真源整树 + 本目录的负样本 spec。
 
 ### 挂载方式（非破坏性）
 
 - `core.hooksPath` 未设 → 设为 `.githooks` 并**回读校验**；已设（含 husky 绝对路径）→ **一律不动**，
   直接对该目录下的 `pre-commit` 动手（改 hooksPath 会静默停用 husky v9 的 `.husky/_` 链）。
 - `pre-commit` 不存在 → 新建 A3 并 `chmod +x`；
-- 已接线（含 marker）→ 什么都不做；存在但未接线**且可执行** → **追加**哨兵块，原有字节零改动、不动权限：
+- 已接线（块逐字节合规）→ 什么都不做；存在但未接线**且可执行** → 把哨兵块**插在 shebang 首行之后**
+  （无 shebang 时插在文件最前），既有字节的**顺序与内容零改动**、不动权限：
 
 ```bash
 # >>> ponygo-gate: adr-verify v1 >>>
@@ -431,19 +449,27 @@ fi
 # <<< ponygo-gate: adr-verify v1 <<<
 ```
 
+  为什么是"前置"而不是"末尾追加"：既有钩子常以 `exit 0` 结尾（或含 `exec 他脚本` / `trap 'exit 0' EXIT`），
+  末尾追加的块**永不执行**，而 2.4 仍报"已接线" → 假绿。块位置在首个顶层 `exit`/`exec` 之后 = 视为未接线并迁移
+  （删旧块 + 前置新块，一次原子替换）。写入一律「临时文件 + `chmod` + `mv -f` 原子替换」，禁止 `>>` 追加；
+  发现 BEGIN 无对应 END 的半截块 → 整块重建（不得再 append）。
 - 存在但**不可执行** → 不改权限（激活沉睡钩子属破坏性副作用），2.4 FAIL 并打印
-  「chmod +x 或删除该文件后重跑 init」。
-- 判据 2.4 的机器识别 = `hooksPath` 归一化目录内 `pre-commit`：①存在 ②可执行 ③含哨兵尾行
-  `# <<< ponygo-gate: adr-verify v1 <<<` ④该块内有**非注释**行调用 `adr-verify.sh`
-  ⑤ `<root>/.meta/gates/adr-verify.sh` 存在。①–⑤全真才 PASS（"写一行注释就骗过"已被封死）。
-- 前置条件：git 会**静默忽略**不可执行的钩子——生成/追加后务必确认 `test -x`。
+  「`chmod +x <hook>`（init 不会替你激活沉睡钩子）或删除该文件后重跑 init」。
+- 判据 2.4 的机器识别 = `hooksPath` 归一化目录内 `pre-commit`：①存在 ②可执行 ③哨兵块
+  （BEGIN..END 区间）**逐字节等于**规范块（EOL 归一；含 marker 行
+  `# ponygo-gate: adr-verify v1` 与非注释调用行） ④ `<root>/.meta/gates/adr-verify.sh` 存在。
+  ①–④全真才 PASS——逐字节比较一举封死 `echo adr-verify.sh`、`|| true`、`if false; then … fi`、
+  `: adr-verify.sh`、注释掉调用行等全部变体。
+- 前置条件：git 会**静默忽略**不可执行的钩子——生成/前置后务必确认 `test -x`。
 
 ### A2 的负样本怎么读
 
 `adr-verify.spec.sh` 在 `mktemp -d` 临时仓里造样本（`trap … EXIT` 清理，仓库只读）：
 合法 ADR（带参/无参两路）→ 断言 A1 为 0；时态错位（`proposed` 带 `## Decision`）、
 `implemented` 带提案时代标题、`Status` 与目录不一致 → 断言 A1 非零；
-staged 后又在工作区改动 → 断言 A1 非零**且**文案含「ADR 有未暂存改动，请先 git add」；
+符号链接 ADR（`ln -s`，index 模式 `120000`）→ 断言 A1 非零**且**文案指向"必须是普通文件"；
+staged 后又在工作区改动（两个方向：暂存合法→工作区改、暂存非法→工作区改好但未 `git add`）
+→ 断言 A1 非零**且**文案含「ADR 有未暂存改动，请先 git add」；
 无暂存 ADR / 无 `.agents/notes` → 断言放行。
 
 诚实条款：`## Alternatives considered` 是 notes/README 的强制契约，但判定真源 1.1–1.9
@@ -1407,38 +1433,17 @@ verify_ladder() {
       if ! find "$META_DIR/gates" -type f -name '*.spec.*' -print -quit 2>/dev/null | grep -q .; then
         vl_fail "2.3 gates/ 无负样本 spec（*.spec.*）→ 配一个证明门会拒绝非法样本的 spec（推荐 *.spec.sh 自检脚本，用 'ponygo audit --run-specs' 验证）"
       fi
-      # 2.4 「本地层已接 ADR 门」五条 AND（§6.6 / maturity-ladder.md §2.4）：
-      #   ① hooksPath 已设 ② 归一化目录可达 ③ 该目录内 pre-commit 存在且可执行
-      #   ④ 含哨兵尾行 ⑤ 哨兵区间内有非注释行调用 adr-verify.sh ⑥ <root>/.meta/gates/adr-verify.sh 存在
+      # 2.4 「本地层已接 ADR 门」六条 AND（§6.6 / §7 F1+F3+F5 / maturity-ladder.md §2.4）：
+      #   ① hooksPath 已设 ② 归一化目录可达（F6：~ 展开）③ 该目录内 pre-commit 存在且可执行
+      #   ④ 哨兵区间逐字节等于规范块（EOL 归一，F3）⑤ 块起始行 < 首个顶层 exit/exec 行
+      #   （位置判据：块在 exit/exec 之后 = 永不执行 = 假绿）⑥ <root>/.meta/gates/adr-verify.sh 存在
+      # 实现只在 gate_24_probe 一处（status 的接线报告复用同一口径）；失败文案按因分支（F5）。
       # 仅在 git 仓库内判定——非 git 目录读到的全局配置与本项目无关，视为未设（防假 PASS）。
-      # 判据加强的缘由（R3/R5）：非可执行钩子被 git 静默忽略；一行注释提及 adr-verify 就能骗过旧判据。
-      local hook_path="" hook_dir="" hook_f="" r24=""
-      if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        r24="不在 git 仓库内，本地钩子无从挂载（先 git init）"
-      else
-        hook_path=$(git config core.hooksPath 2>/dev/null)
-        if [ -z "$hook_path" ]; then
-          r24="core.hooksPath 未设"
-        else
-          # R9：归一化（相对/绝对/符号链接同一口径），不比较字符串
-          hook_dir=$(hook_dir_resolved "$(git rev-parse --show-toplevel 2>/dev/null)" "$hook_path")
-          hook_f="$hook_dir/pre-commit"
-          if [ -z "$hook_dir" ]; then
-            r24="core.hooksPath 指向的目录不可达：$hook_path"
-          elif [ ! -f "$hook_f" ]; then
-            r24="钩子缺失：$hook_path/pre-commit"
-          elif [ ! -x "$hook_f" ]; then
-            r24="钩子不可执行（git 会静默忽略）：$hook_path/pre-commit"
-          elif ! grep -qxF "$GATE_SENT_END" "$hook_f" 2>/dev/null; then
-            r24="钩子未接 ADR 门（缺哨兵尾行 $GATE_SENT_END）：$hook_path/pre-commit"
-          elif ! gate_hook_call_lines "$hook_f" | grep -qF 'adr-verify.sh'; then
-            r24="钩子哨兵块内无非注释调用行（注释掉调用行不算接线）：$hook_path/pre-commit"
-          elif [ ! -f "$META_DIR/gates/adr-verify.sh" ]; then
-            r24="缺门禁本体 $META_DIR/gates/adr-verify.sh"
-          fi
-        fi
+      # 判据加强的缘由（R3/R5/F3）：非可执行钩子被 git 静默忽略；一行注释/`echo`/`|| true`/
+      # `if false; then … fi`/注释掉调用行都能骗过「有调用行即可」的旧判据——故改为逐字节比对规范块。
+      if ! gate_24_probe; then
+        vl_fail "2.4 本地层未接 ADR 门：${G24_CAUSE} → 补救：${G24_FIX}"
       fi
-      [ -z "$r24" ] || vl_fail "2.4 本地层未接 ADR 门：$r24 → 唯一补救：bash ponygo init（幂等装配 A1/A2/A4 + 哨兵块 + chmod +x + git config core.hooksPath .githooks）"
       # 2.5 文档分层激活（v2.4 起为条件判据，Q1=A）：docs-tier: on|off 显式声明；未声明=SKIP+WARN 催声明。
       # 状态机：undeclared=SKIP+WARN；off=显式 opt-out（结论禁写"全部 PASS"）；on+TODO 残留=FAIL；
       #        off+已激活=矛盾 WARN；undeclared+已激活=PASS（实际做到优先于声明）。
@@ -1613,14 +1618,14 @@ run_gate_specs() {
 #   A1 .meta/gates/adr-verify.sh / A2 .meta/gates/adr-verify.spec.sh / A4 .meta/gates/ci-verify.sh
 #   A3 .githooks/pre-commit（落点由 core.hooksPath 决定，见 ensure_gate_wiring）
 #   A5 .github/workflows/ponygo-governance.yml（仅检出厂 github 证据时才落地，§6.3）
-# 只写**缺失**项：绝不覆盖用户已改过/已接线的文件（§6.1「永不改写既有行」）。
+# 只写**缺失**项；A1/A2/A4 例外——它们是框架不可变资产，内容与内置规范不一致时
+# **自愈覆盖**（F10，gate_asset_put），管线归「实例可编辑」的 A3/A5 才只补缺失。
 # 写后 chmod +x：git 会静默忽略不可执行的钩子，判据会假达标（R3）。
 # 铁律（R2）：本函数与 write_skeleton 内**严禁**出现 `git config`——cmd_upgrade 在非 git 的
 #            mktemp 目录里调用 write_skeleton 造漂移基准，git config 会 die。
 write_gate_assets() {
-  mkdir -p "$META_DIR/gates"
-  if [ ! -f "$META_DIR/gates/adr-verify.sh" ]; then
-    cat > "$META_DIR/gates/adr-verify.sh" <<'PONYGO_EOF'
+  mkdir -p "$META_DIR/gates" || gate_write_fail "$META_DIR/gates" "写入失败（目录不可写）——门禁资产无落点"
+  gate_asset_put "$META_DIR/gates/adr-verify.sh" 755 "A1 adr-verify.sh" <<'PONYGO_EOF'
 #!/usr/bin/env bash
 # ============================================================
 # adr-verify.sh —— 暂存区 ADR 格式门（门禁资产 A1）
@@ -1633,12 +1638,14 @@ write_gate_assets() {
 #
 # 语义边界（P6 诚实条款）：本门**不自己判** ADR 格式——判定真源是
 # `.agents/skills/write-adr/verify-note.sh`（maturity-ladder §5 的 1.1–1.9 机械影子）。
-# 本门只多做两件它做不到的事：
+# 本门只多做三件它做不到的事：
 #   1) R6 TOCTOU：verify-note 读**工作区**，而 pre-commit 的输入是**暂存区文件名**。
 #      两者不一致时（staged 后又在工作区改过），校验的就不是将要提交的那份字节。
 #      故先做「暂存区 blob vs 工作区」比对，不一致 → 直接拒绝，要求先 git add。
 #   2) R7 覆盖面：用 `--diff-filter=ACMR`（含 R 重命名，`git mv` 不能绕过），
 #      并豁免 README.md / AGENTS.md（治理契约载体，非决策记录）。
+#   3) F9 非普通文件：symlink（120000）/ gitlink（160000）ADR 一律拒绝——否则"被校验的字节"
+#      可以指向工作区外内容，判定面被换掉。此检查必须排在 EOL 归一兜底之前（见 §4a 注释）。
 # 为什么不在本门里重写 1.1–1.9：一份判据两份实现必然漂移（P9），
 # 且 `ponygo gate adr` 子命令已按同一理由被否决（见 ADR 的 Alternatives R-新子命令）。
 #
@@ -1720,6 +1727,7 @@ TMP=$(mktemp -d) || die "mktemp -d 失败"
 trap 'rm -rf "$TMP"' EXIT
 
 drift=0
+bad_mode=0
 for p in ${PATHS[@]+"${PATHS[@]}"}; do
   if ! git cat-file -e ":$p" 2>/dev/null; then
     printf '[%s] %s：%s（暂存区无该文件；只自查未暂存的新 ADR 请直接跑 bash %s）\n' \
@@ -1728,6 +1736,19 @@ for p in ${PATHS[@]+"${PATHS[@]}"}; do
     continue
   fi
   git show ":$p" >"$TMP/staged" 2>/dev/null || die "读取暂存区内容失败：$p"
+  # 4a) F9：ADR 必须是普通文件（symlink 120000 / gitlink 160000 一律拒绝）。
+  # 位置是判据本身的部分：必须早于 cmp 与下面的 EOL 归一兜底——
+  # symlink 暂存时 blob = 链接文本、cmp 读工作区 = 目标内容，两者必然不同，
+  # 而 `git diff --quiet` 对 symlink 只说"链接自身没改"（无差异）→ 会被兜底当假阳性放过。
+  # 实测根因即此，故模式检查排在兜底之前。
+  mode=$(git ls-files -s -- "$p" 2>/dev/null | awk '{print $1}' | head -1)
+  case "$mode" in
+    120000 | 160000)
+      printf '[%s] 拒绝：%s 不是普通文件（mode=%s；ADR 必须是普通文件）\n' "$PROG" "$p" "$mode" >&2
+      bad_mode=1
+      continue
+      ;;
+  esac
   if cmp -s "$TMP/staged" "$p"; then
     continue
   fi
@@ -1741,8 +1762,14 @@ for p in ${PATHS[@]+"${PATHS[@]}"}; do
   drift=1
 done
 
-if [ "$drift" -ne 0 ]; then
-  printf '[%s] 拒绝：暂存区与工作区不一致（verify-note 读工作区，会校验错字节）→ 先 git add 再提交\n' "$PROG" >&2
+if [ "$bad_mode" -ne 0 ] || [ "$drift" -ne 0 ]; then
+  # 按因给补救（不给一条万能命令）：两类成因的修法完全不同。
+  if [ "$bad_mode" -ne 0 ]; then
+    printf '[%s] 拒绝：ADR 必须是普通文件（符号链接/gitlink 会让被校验的字节指向工作区外）→ 用普通文件重写该 ADR 后 git add\n' "$PROG" >&2
+  fi
+  if [ "$drift" -ne 0 ]; then
+    printf '[%s] 拒绝：暂存区与工作区不一致（verify-note 读工作区，会校验错字节）→ 先 git add 再提交\n' "$PROG" >&2
+  fi
   exit 1
 fi
 
@@ -1752,12 +1779,9 @@ bash "$VERIFY" ${PATHS[@]+"${PATHS[@]}"} || exit 1
 printf '[%s] 通过：%d 条 ADR 经 %s 校验（暂存区与工作区一致）\n' "$PROG" "${#PATHS[@]}" "$VERIFY"
 exit 0
 PONYGO_EOF
-    chmod +x "$META_DIR/gates/adr-verify.sh"
-  fi
-  # 已存在但丢执行位（如经 Windows/zip 转手）→ 补回；A1/A2/A4 是框架不可变资产，改权限不改字节
+  # 已有但丢执行位（如经 Windows/zip 转手）→ 补回；A1/A2/A4 是框架不可变资产，改权限不改字节
   [ -x "$META_DIR/gates/adr-verify.sh" ] || chmod +x "$META_DIR/gates/adr-verify.sh" 2>/dev/null || true
-  if [ ! -f "$META_DIR/gates/adr-verify.spec.sh" ]; then
-    cat > "$META_DIR/gates/adr-verify.spec.sh" <<'PONYGO_EOF'
+  gate_asset_put "$META_DIR/gates/adr-verify.spec.sh" 755 "A2 adr-verify.spec.sh" <<'PONYGO_EOF'
 #!/usr/bin/env bash
 # ============================================================
 # adr-verify.spec.sh —— 暂存区 ADR 格式门的负样本执行判据（门禁资产 A2）
@@ -1859,6 +1883,22 @@ expect_reject() { # $1=用例名 $2=仓 [extra args]
   out=$(run_gate "$d" "$@") && rc=0 || rc=$?
   if [ "$rc" -eq 0 ]; then
     fail "$name：门应拒绝，实得 exit 0"
+    printf '%s\n' "$out" | tail -n 3 | sed 's/^/      /' >&2
+    return
+  fi
+  printf 'PASS  %s（exit %d）\n' "$name" "$rc"
+}
+
+expect_reject_with() { # $1=用例名 $2=仓 $3=拒绝文案正则（补救必须可执行）
+  local name="$1" d="$2" pat="$3" out rc
+  out=$(run_gate "$d") && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    fail "$name：门应拒绝，实得 exit 0"
+    printf '%s\n' "$out" | tail -n 3 | sed 's/^/      /' >&2
+    return
+  fi
+  if ! printf '%s' "$out" | grep -qE "$pat"; then
+    fail "$name：拒绝文案不含 /$pat/ → 补救不可执行"
     printf '%s\n' "$out" | tail -n 3 | sed 's/^/      /' >&2
     return
   fi
@@ -1967,7 +2007,62 @@ else
   printf 'PASS  TOCTOU 拒绝且文案可执行（exit %d）\n' "$RC"
 fi
 
-# ---------- 6. 缺 ## Alternatives considered —— 覆盖探针 ----------
+# ---------- 6. R6 TOCTOU 反向：暂存非法 + 工作区改好但未 git add → 仍拒绝 ----------
+# 这个方向才是 R6 真正保护的对象：将要提交的字节是**非法**的，工作区看起来已修好。
+# 若门读工作区（TOCTOU 未防），非法 ADR 会带着"已修好"的工作区一起进主干。
+R=$(new_repo toctou-reverse)
+write_adr "$R" .agents/notes/proposed/process/2026-10-29-rev.md '# Agent Note: 暂存非法
+
+Status: proposed
+
+## Problem
+
+样本：暂存区里是非法版本（时态错位）。
+
+## Decision
+
+不该出现在 proposed。'
+git -C "$R" add -A >/dev/null 2>&1
+write_adr "$R" .agents/notes/proposed/process/2026-10-29-rev.md '# Agent Note: 工作区已修好
+
+Status: proposed
+
+## Problem
+
+样本：工作区合法，但没 git add。
+
+## Proposal
+
+将来时。
+
+## Alternatives considered
+
+- 样本。'
+expect_reject_with "TOCTOU 反向（暂存非法/工作区合法）拒绝且文案可执行" "$R" \
+  'ADR 有未暂存改动，请先 git add'
+
+# ---------- 7. F9：符号链接 ADR（index 模式 120000）→ 拒绝 ----------
+# ADR 必须是普通文件：符号链接让"被校验的字节"可指向工作区外内容（判定面可被换掉）。
+# 断言强度说明：拒绝是**硬断言**（红相 driver）。实测（Wave-2）当前 A1 会放过
+# symlink ADR：暂存 blob 是链接文本、`cmp` 读工作区解引用后是目标内容，两者必然不同，
+# 但 A1 的 EOL 归一兜底（`git diff --quiet` 说"无差异"）把它当假阳性放行了。
+# F9（A1 先查 `git ls-files -s` 模式 120000/160000）由 Executor 落地，落地前本 case 必然 FAIL。
+R=$(new_repo symlink-adr)
+write_adr "$R" legal-target.md "$LEGAL_BODY"
+ln -s ../../../../legal-target.md \
+  "$R/.agents/notes/implemented/process/2026-10-29-link.md"
+git -C "$R" add -A >/dev/null 2>&1
+OUT=$(run_gate "$R") && RC=0 || RC=$?
+if [ "$RC" -eq 0 ]; then
+  fail "符号链接 ADR 应拒绝，实得 exit 0（F9 未落地：ADR 必须是普通文件）"
+  printf '%s\n' "$OUT" | tail -n 3 | sed 's/^/      /' >&2
+elif printf '%s' "$OUT" | grep -qE '普通文件|符号链接|120000'; then
+  printf 'PASS  符号链接 ADR 拒绝且文案指向"必须是普通文件"（exit %d）\n' "$RC"
+else
+  printf 'PASS  符号链接 ADR 已拒绝（exit %d）；WARN: 文案未指向"必须是普通文件"（F9 文案待补）\n' "$RC"
+fi
+
+# ---------- 8. 缺 ## Alternatives considered —— 覆盖探针 ----------
 # 诚实条款：`## Alternatives considered` 是 notes/README 的强制契约，但判定真源
 # verify-note.sh 的 1.1–1.9 里**没有**这一项（它只锁路径/文件名/Status/骨架标题）。
 # 本 case 因此做成探针：真源将来覆盖该节则断言拒绝；未覆盖则 WARN 保留缺口，
@@ -1992,14 +2087,14 @@ else
   printf 'WARN  缺 ## Alternatives considered 未被拒绝：判定真源 1.1–1.9 不含该节 → 本 case 不计入 PASS（缺口见 ADR Consequences）\n'
 fi
 
-# ---------- 7. 空场景一律放行：无暂存 ADR 变更 ----------
+# ---------- 9. 空场景一律放行：无暂存 ADR 变更 ----------
 R=$(new_repo no-change)
 write_adr "$R" .agents/notes/implemented/process/2026-10-29-legal-sample.md "$LEGAL_BODY"
 git -C "$R" add -A >/dev/null 2>&1
 git -C "$R" commit -q -m init >/dev/null 2>&1
 expect_accept "无暂存 ADR 变更放行" "$R"
 
-# ---------- 8. 空场景一律放行：无 .agents/notes ----------
+# ---------- 10. 空场景一律放行：无 .agents/notes ----------
 R="$TMP/no-notes"
 mkdir -p "$R/.meta/gates"
 cp "$GATE" "$R/.meta/gates/adr-verify.sh"
@@ -2010,15 +2105,12 @@ if [ "$FAIL" -ne 0 ]; then
   printf '[%s] 未通过：门禁的拒绝/放行语义与预期不符（见上方 FAIL）\n' "$SPEC" >&2
   exit 1
 fi
-printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 文案均已证明（exit 0）\n' "$SPEC"
+printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件均已证明（exit 0）\n' "$SPEC"
 exit 0
 PONYGO_EOF
-    chmod +x "$META_DIR/gates/adr-verify.spec.sh"
-  fi
-  # 已存在但丢执行位（如经 Windows/zip 转手）→ 补回；A1/A2/A4 是框架不可变资产，改权限不改字节
+  # 已有但丢执行位（如经 Windows/zip 转手）→ 补回；A1/A2/A4 是框架不可变资产，改权限不改字节
   [ -x "$META_DIR/gates/adr-verify.spec.sh" ] || chmod +x "$META_DIR/gates/adr-verify.spec.sh" 2>/dev/null || true
-  if [ ! -f "$META_DIR/gates/ci-verify.sh" ]; then
-    cat > "$META_DIR/gates/ci-verify.sh" <<'PONYGO_EOF'
+  gate_asset_put "$META_DIR/gates/ci-verify.sh" 755 "A4 ci-verify.sh" <<'PONYGO_EOF'
 #!/usr/bin/env bash
 # ============================================================
 # ci-verify.sh —— forge 无关的全树门（门禁资产 A4）
@@ -2066,17 +2158,18 @@ fi
 echo "ci-verify: 通过（全树 ADR 格式 + 门禁自检）"
 exit 0
 PONYGO_EOF
-    chmod +x "$META_DIR/gates/ci-verify.sh"
-  fi
-  # 已存在但丢执行位（如经 Windows/zip 转手）→ 补回；A1/A2/A4 是框架不可变资产，改权限不改字节
+  # 已有但丢执行位（如经 Windows/zip 转手）→ 补回；A1/A2/A4 是框架不可变资产，改权限不改字节
   [ -x "$META_DIR/gates/ci-verify.sh" ] || chmod +x "$META_DIR/gates/ci-verify.sh" 2>/dev/null || true
 }
 
 # A3 全量钩子（仅当目标位置**不存在**时新建）：marker 行 + 哨兵块 + 非注释调用行（§6.5）
+# F4：写入失败不再静默——chmod 的裸 `Permission denied` 会变成失败清单里的一条可执行项。
 write_gate_hook() { # <hook 文件绝对/相对路径>
   [ -f "$1" ] && return 0
-  mkdir -p "$(dirname "$1")" || return 1
-  cat > "$1" <<'PONYGO_EOF'
+  if ! mkdir -p "$(dirname "$1")"; then
+    gate_write_fail "$1" "写入失败（父目录不可写，mkdir 失败）——钩子未能生成"; return 1
+  fi
+  if ! write_atomic "$1" 755 <<'PONYGO_EOF'
 #!/usr/bin/env bash
 # 本地层（秒级）门禁：暂存区 ADR 格式门。
 # 由 `ponygo init` 生成（不存在时）或**非破坏性追加**哨兵块（已存在未接线时可执行时）；
@@ -2091,14 +2184,20 @@ if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
 fi
 # <<< ponygo-gate: adr-verify v1 <<<
 PONYGO_EOF
-  chmod +x "$1"
+  then
+    gate_write_fail "$1" "写入失败（原子替换 mv 失败/目录不可写）——钩子未能生成"; return 1
+  fi
+  if ! chmod +x "$1" 2>/dev/null; then
+    gate_write_fail "$1" "写入失败（chmod +x 不可执行，文件不可写）——钩子无法被 git 执行"; return 1
+  fi
+  return 0
 }
 
 # A5 薄适配器（10 行壳）：只在检出厂 GitHub 证据时落地（§6.3）；换 forge 只换这层壳
 write_ci_adapter() { # 无参；已存在则不覆盖（实例可编辑文件，不进宇宙表，R8）
   [ -f .github/workflows/ponygo-governance.yml ] && return 0
   mkdir -p .github/workflows || return 1
-  cat > .github/workflows/ponygo-governance.yml <<'PONYGO_EOF'
+  write_atomic .github/workflows/ponygo-governance.yml 644 <<'PONYGO_EOF'
 # ponygo 治理门（A5 = 薄适配器）：门禁逻辑本体在 .meta/gates/ci-verify.sh（A4），
 # 换 forge 只换这几行壳；本地等价命令 = bash .meta/gates/ci-verify.sh
 name: ponygo-governance
@@ -2110,6 +2209,7 @@ on:
 jobs:
   governance:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: bash .meta/gates/ci-verify.sh
@@ -2122,42 +2222,178 @@ GATE_SENT_BEGIN='# >>> ponygo-gate: adr-verify v1 >>>'
 GATE_SENT_END='# <<< ponygo-gate: adr-verify v1 <<<'
 GATE_MARKER='# ponygo-gate: adr-verify v1'
 
-# 钩子文件里哨兵区间内的**非注释**行（2.4 ④ 与「已接线」判定共用同一口径；
-# 锚定命令与 maturity-ladder.md §2.4 逐字同款：一行注释提及 adr-verify 骗不过，R5）
-gate_hook_call_lines() { # <hook 文件>
-  sed -n '/>>> ponygo-gate: adr-verify v1 >>>/,/<<< ponygo-gate: adr-verify v1 <<</p' "$1" 2>/dev/null \
-    | grep -vE '^[[:space:]]*#'
+# 规范哨兵块（F3 唯一真值）：gate_hook_bytes_ok（接线判据的字节原子）与它做「EOL 归一后逐字节」比较。
+# 末行/首行哨兵标记与测试夹具（tests/run.sh append_gate_block）逐字同款。
+# 任何变体（echo adr-verify.sh / || true / if false; then … fi / 注释掉调用行）都不相等 → 未接线。
+GATE_BLOCK_CANONICAL='# >>> ponygo-gate: adr-verify v1 >>>
+if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
+  bash "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" || exit 1
+fi
+# <<< ponygo-gate: adr-verify v1 <<<'
+
+# 取哨兵区间（BEGIN..END，含两行）。锚定口径与 maturity-ladder §2.4 / 测试夹具一致。
+gate_hook_block() { # <hook 文件>
+  sed -n '/>>> ponygo-gate: adr-verify v1 >>>/,/<<< ponygo-gate: adr-verify v1 <</p' "$1" 2>/dev/null
 }
 
-# 已接线 = 哨兵尾行在 ∧ 区间内有非注释行调用 adr-verify.sh
-gate_hook_wired() { # <hook 文件> → 0 = 已接线
+# 块必须位于首个顶层 exit/exec **之前**（F1）：末尾追加在 `exit 0` / `exec 他脚本` 钩子里
+# 永不执行，而旧判据仍报「已接线」= 假绿。
+gate_hook_block_before_exit() { # <hook 文件> → 0 = 位置安全
+  local f="$1" bs="" es=""
+  bs=$(grep -nF -m1 "$GATE_SENT_BEGIN" "$f" 2>/dev/null | head -n1 | cut -d: -f1)
+  [ -n "$bs" ] || return 1
+  es=$(grep -nE '^[[:space:]]*(exit|exec)[[:space:]]' "$f" 2>/dev/null | head -n1 | cut -d: -f1)
+  [ -n "$es" ] || return 0
+  [ "$bs" -lt "$es" ]
+}
+
+# 哨兵块结构是否完整（BEGIN 与 END 两行都在）——半截块（写中断残留）不完整，须整块重建
+gate_hook_block_complete() { # <hook 文件> → 0 = 两个哨兵行都在
   local f="$1"
-  [ -f "$f" ] || return 1
+  grep -qxF "$GATE_SENT_BEGIN" "$f" 2>/dev/null || return 1
   grep -qxF "$GATE_SENT_END" "$f" 2>/dev/null || return 1
-  gate_hook_call_lines "$f" | grep -qF 'adr-verify.sh' || return 1
   return 0
 }
 
-# 非破坏性追加（§6.1）：只 append 哨兵块，既有字节零改动，**不动权限**
-# （把一个不可执行钩子 chmod +x 属破坏性副作用——沉睡钩子是人的决定，不是框架的）。
-gate_hook_append_block() { # <hook 文件>
-  {
-    printf '\n%s\n' "$GATE_SENT_BEGIN"
-    printf 'if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then\n'
-    printf '  bash "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" || exit 1\n'
-    printf 'fi\n'
-    printf '%s\n' "$GATE_SENT_END"
-  } >> "$1"
+# 已接线 = 哨兵区间逐字节等于规范块（EOL 归一，F3）。**只回答问题「字节对不对」**，
+# 不回答「这段字节会不会被执行」——后者是 gate_hook_block_before_exit（F1）。
+# 两者由 gate_hook_wired 合成唯一对外口径，本函数仅是它的原子谓词之一，勿单独作为接线判据。
+gate_hook_bytes_ok() { # <hook 文件> → 0 = 哨兵区间逐字节等于规范块
+  local f="$1" got=""
+  [ -f "$f" ] || return 1
+  grep -qxF "$GATE_SENT_END" "$f" 2>/dev/null || return 1
+  got=$(gate_hook_block "$f" | tr -d '\r')
+  [ "$got" = "$GATE_BLOCK_CANONICAL" ] || return 1
+  return 0
+}
+
+# 接线判据的**唯一单点**（F1 + F3 合流）：字节等于规范块（F3）∧ 块在首个顶层 exit/exec
+# 之前（F1：位置在后 = 永不执行 = 假绿）。init 侧（已接线则不动 / 未接线则迁移）、
+# verify_ladder 2.4、status 的接线报告**全部**只走这一个函数——否则会出现
+# 「init 认为已接线、status 认为未接线」的双口径（L3-B 指出的正是这种不一致）。
+gate_hook_wired() { # <hook 文件> → 0 = 已接线（字节规范 + 位置可执行）
+  gate_hook_bytes_ok "$1" || return 1
+  gate_hook_block_before_exit "$1" || return 1
+  return 0
+}
+
+# 文件权限（八进制；GNU/BSD stat 双兼容）
+file_mode() { # <文件> → 如 755
+  if stat -c %a "$1" >/dev/null 2>&1; then stat -c %a "$1"; else stat -f %Lp "$1" 2>/dev/null; fi
+}
+
+# F4 写失败必须响亮：装配期写入失败一律登记到本清单，由 cmd_init 汇总成
+# 「[WARN] + 失败清单 + 可执行补救」并**返回非零**。绝不允许把 mv/mktemp 的
+# `Permission denied` 裸泄漏成一行噪声后 rc=0（那等于「装配没做成但机器说成功」）。
+GATE_WRITE_FAILS=""
+gate_write_fail() { # <目标> <因由>
+  GATE_WRITE_FAILS="${GATE_WRITE_FAILS}${1} — ${2}"$'\n'
+}
+
+# 汇总打印失败清单 + 补救；返回 0 表示「确实有失败」（调用方据此非零退出）
+gate_assembly_failed() {
+  [ -n "$GATE_WRITE_FAILS" ] || return 1
+  local n=0 ln=""
+  n=$(printf '%s' "$GATE_WRITE_FAILS" | grep -c . 2>/dev/null || true)
+  warn "[WARN] 门禁装配写入失败 ${n:-1} 项——写入失败 = 装配不完整（本次不会假装成功）："
+  printf '%s' "$GATE_WRITE_FAILS" | while IFS= read -r ln; do
+    [ -n "$ln" ] && warn "  - $ln"
+  done
+  warn "补救：按上面清单逐项修——① 目录不可写 → chmod u+w <该目录>（钩子落点 = core.hooksPath 目录，资产 = .meta/gates/）；② 目标文件只读/被占用 → chmod u+w <该文件>；③ 磁盘满/只读挂载 → 换可写盘。修完重跑 ponygo init（幂等装配：资产按规范内容自愈 + 钩子重建）。"
+  return 0
+}
+
+# F2 原子写：同目录 mktemp → 写入（内容走 stdin）→ chmod → mv -f 原子替换。
+# 禁止 `>>` 追加直写目标文件与多次 printf 直写（半截内容会被 git 当成有效钩子执行）。
+write_atomic() { # <目标路径> <权限，空=不改> ；内容走 stdin
+  local dst="$1" mode="$2" dir="" tmp=""
+  dir=$(dirname "$dst")
+  mkdir -p "$dir" || return 1
+  tmp=$(mktemp "$dir/.ponygo.tmp.XXXXXX" 2>/dev/null) || return 1
+  if ! cat > "$tmp"; then rm -f "$tmp"; return 1; fi
+  if [ -n "$mode" ]; then
+    chmod "$mode" "$tmp" || { rm -f "$tmp"; return 1; }
+  fi
+  mv -f "$tmp" "$dst" || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
+# F10 资产自愈：A1/A2/A4 是**框架不可变**资产（宇宙表成员）。规范内容走 stdin。
+#   缺失                                  → 原子写入（755）
+#   存在但与内置规范不一致（半截/被改）    → 用规范内容原子覆盖 + 一行 WARN
+#   一致                                  → 一字不动（幂等：重复 init 的字节/mtime 不变）
+# A3（钩子）/A5（workflow）是实例可编辑文件 → **不做**内容自愈，只补接线与缺失。
+gate_asset_put() { # <目标路径> <权限> <资产名>；规范内容走 stdin
+  local dst="$1" mode="$2" name="$3" canon="" same=0
+  canon=$(mktemp) || { gate_write_fail "$dst" "$name 自愈失败：无法创建比对临时文件"; return 1; }
+  if ! cat > "$canon"; then rm -f "$canon"; gate_write_fail "$dst" "$name 自愈失败：无法读取内置规范内容"; return 1; fi
+  if [ -f "$dst" ]; then
+    cmp -s <(tr -d '\r' < "$dst") <(tr -d '\r' < "$canon") && same=1
+    if [ "$same" = "0" ]; then
+      if write_atomic "$dst" "$mode" < "$canon"; then
+        warn "[WARN] $name 与内置规范不一致（半截/被改）→ 已按规范内容原子覆盖（F10 资产自愈）：$dst"
+      else
+        rm -f "$canon"; gate_write_fail "$dst" "写入失败（原子替换 mv 失败/目录不可写）——$name 未能自愈"; return 1
+      fi
+    fi
+  else
+    if ! write_atomic "$dst" "$mode" < "$canon"; then
+      rm -f "$canon"; gate_write_fail "$dst" "写入失败（原子替换 mv 失败/目录不可写）——$name 未能生成"; return 1
+    fi
+  fi
+  rm -f "$canon"
+  return 0
+}
+
+# F1+F2：把规范块前置到 shebang 行之后（无 #! 首行 → 文件最前），一次原子替换。
+# 既有字节顺序/内容零改动、权限不动；旧块（规范与否）与半截块（有 BEGIN 无 END）先整段摘除
+# 再前置重建——单次 awk 产出完整新内容，杜绝「半截钩子」跨写窗口。
+gate_hook_write_block() { # <hook 文件> → 0 = 已写
+  local f="$1" dir="" tmp="" mode="" blk=""
+  [ -f "$f" ] || return 1
+  dir=$(dirname "$f")
+  mode=$(file_mode "$f" 2>/dev/null || true)
+  tmp=$(mktemp "$dir/.ponygo.hook.XXXXXX" 2>/dev/null) || return 1
+  blk="$GATE_BLOCK_CANONICAL"
+  # CRLF 钩子在 bash 下本就不可执行（`then\r` 不是关键字）——整体归一为 LF（一次原子替换），
+  # 既避免同一文件内 EOL 混排，也让既有钩子第一次真正可跑；EOL 归一后判据口径不变（F3）。
+  if grep -q $'\r' "$f" 2>/dev/null; then
+    warn "既有钩子为 CRLF 行尾（bash 下 then\r 非法）→ 已统一归一为 LF 后前置规范块"
+  fi
+  if ! PONYGO_BLK="$blk" awk -v b="$GATE_SENT_BEGIN" -v e="$GATE_SENT_END" '
+      BEGIN { blk = ENVIRON["PONYGO_BLK"]; if (blk != "") blk = blk "\n" }
+      { line = $0; sub(/\r$/, "", line) }
+      line == b { inblk = 1; next }
+      inblk && line == e { inblk = 0; next }
+      inblk { next }
+      !placed {
+        placed = 1
+        if (line ~ /^#!/) { print line; printf "%s", blk; next }
+        printf "%s", blk
+      }
+      { print line }
+    ' "$f" > "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if [ -n "$mode" ]; then
+    chmod "$mode" "$tmp" || { rm -f "$tmp"; return 1; }
+  fi
+  mv -f "$tmp" "$f" || { rm -f "$tmp"; return 1; }
+  return 0
 }
 
 # CI provider 探测（§6.3：只按证据说话）。github 优先——A5 是 GitHub 专属薄壳。
+# F11：判 github 的证据收窄为「remote URL 含 github」**或**「.github/workflows/ 目录存在」。
+# 仅 .github/ 存在（ISSUE_TEMPLATE、CODEOWNERS、dependabot 等）与 Actions 无关，
+# 拿它当证据会在 GitLab 项目里凭空生成一个永不运行的 GitHub 适配器，并让 status 误报「已生成」。
 ci_provider() { # → github|gitlab|jenkins|azure|drone|bitbucket|none
   local remote=""
   if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     remote=$(git remote get-url origin 2>/dev/null || true)
   fi
   case "$remote" in *github*) printf 'github'; return 0 ;; esac
-  if [ -d .github ]; then printf 'github'; return 0; fi
+  if [ -d .github/workflows ]; then printf 'github'; return 0; fi
   if [ -f .gitlab-ci.yml ]; then printf 'gitlab'; return 0; fi
   if [ -f Jenkinsfile ]; then printf 'jenkins'; return 0; fi
   if [ -f azure-pipelines.yml ]; then printf 'azure'; return 0; fi
@@ -2167,8 +2403,15 @@ ci_provider() { # → github|gitlab|jenkins|azure|drone|bitbucket|none
 }
 
 # hooksPath → 归一化绝对目录（R9：相对/绝对/符号链接同一口径；不可达 → 空串）
+# F6：git 对 core.hooksPath 的 `~` / `~/` 按 $HOME 展开，判定侧必须同口径展开——
+# 否则 `core.hooksPath='~/hk'` 会被当成仓内相对路径 `./~/hk`（既假 FAIL，又诱导人在仓里
+# 造一个叫 `~` 的目录）。只展开「首个路径段就是 ~」的两种合法形态，其余一律不动。
 hook_dir_resolved() { # <repo root> <hooksPath>
-  local root="$1" hp="$2" d=""
+  local root="$1" hp="$2" d="" home="${HOME:-}"
+  case "$hp" in
+    '~')   [ -n "$home" ] && hp="$home" ;;
+    '~/'*) [ -n "$home" ] && hp="$home/${hp#\~/}" ;;
+  esac
   case "$hp" in
     /*) d=$(cd "$hp" 2>/dev/null && pwd -P) ;;
     *)  d=$(cd "$root/$hp" 2>/dev/null && pwd -P) ;;
@@ -2176,12 +2419,81 @@ hook_dir_resolved() { # <repo root> <hooksPath>
   printf '%s' "${d:-}"
 }
 
+# 2.4「本地层已接 ADR 门」判据的**唯一实现**（verify_ladder 2.4 与 status 的
+# gate_wiring_report 共用一处口径——两处各写一份必然漂移，F5 的按因补救会有一处退回统一文案）。
+# 判据 = ① hooksPath 已设 ② 归一化目录可达 ③ pre-commit 存在且可执行
+# ④ 哨兵区间逐字节等于规范块（F3）⑤ 块起始行 < 首个顶层 exit/exec 行（位置判据：
+# 块落在 exit/exec 之后 = 永不执行 = 假绿）⑥ <root>/.meta/gates/adr-verify.sh 存在。
+# F5：失败**按因**给补救——非 git / 目录不可达 / 钩子不可执行三类给统一「bash ponygo init」
+# 是缺陷（对它们无效），各自需要 git init / git config / chmod +x。
+# 输出（全局）：G24_OK=1 通过；G24_CAUSE 失败因由；G24_FIX 可执行补救命令。
+gate_24_probe() {
+  G24_OK=0; G24_CAUSE=""; G24_FIX=""
+  local root="" hp="" dir="" hook=""
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    G24_CAUSE="不在 git 仓库内，本地钩子无从挂载"
+    G24_FIX="git init（本目录还不是仓库）后重跑 ponygo init 装配本地层"
+    return 1
+  fi
+  hp=$(git config core.hooksPath 2>/dev/null)
+  if [ -z "$hp" ]; then
+    G24_CAUSE="core.hooksPath 未设（本地层没有落点）"
+    G24_FIX="bash ponygo init（设 core.hooksPath=.githooks + 生成 A3 钩子 + chmod +x）"
+    return 1
+  fi
+  root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+  dir=$(hook_dir_resolved "${root:-.}" "$hp")
+  if [ -z "$dir" ]; then
+    G24_CAUSE="core.hooksPath 指向的目录不可达：$hp"
+    G24_FIX="git config core.hooksPath .githooks（把落点改回仓内目录）后重跑 ponygo init 装配"
+    return 1
+  fi
+  hook="$dir/pre-commit"
+  if [ ! -f "$hook" ]; then
+    G24_CAUSE="钩子缺失：$hp/pre-commit"
+    G24_FIX="bash ponygo init（生成 A3：marker + 规范哨兵块 + chmod +x）"
+    return 1
+  fi
+  if [ ! -x "$hook" ]; then
+    G24_CAUSE="钩子不可执行（git 会静默忽略）：$hp/pre-commit"
+    G24_FIX="chmod +x $hp/pre-commit（init 不会替你激活沉睡钩子——执行位是人的决定）"
+    return 1
+  fi
+  if ! grep -qxF "$GATE_SENT_END" "$hook" 2>/dev/null; then
+    G24_CAUSE="钩子未接 ADR 门（缺哨兵尾行 $GATE_SENT_END）：$hp/pre-commit"
+    G24_FIX="bash ponygo init（按规范块重建哨兵块并前置到 shebang 之后）"
+    return 1
+  fi
+  # 判定单点：接线与否只由 gate_hook_wired 裁决（字节 F3 ∧ 位置 F1）。
+  # 下面两个原子谓词**只用于分因**给对症补救，不参与裁决——避免双口径。
+  if ! gate_hook_wired "$hook"; then
+    if ! gate_hook_bytes_ok "$hook"; then
+      G24_CAUSE="钩子哨兵块与规范块不逐字节一致（echo/|| true/if false/注释掉调用行等变体一律不算接线）：$hp/pre-commit"
+      G24_FIX="bash ponygo init（删旧块 + 前置规范块为一次原子替换）"
+    else
+      G24_CAUSE="哨兵块位于首个顶层 exit/exec 之后（该块永不执行）：$hp/pre-commit"
+      G24_FIX="bash ponygo init（删旧块并把规范块前置到 shebang 之后）"
+    fi
+    return 1
+  fi
+  if [ ! -f "$META_DIR/gates/adr-verify.sh" ]; then
+    G24_CAUSE="缺门禁本体 $META_DIR/gates/adr-verify.sh"
+    G24_FIX="bash ponygo init（A1 资产按规范内容自愈重建）"
+    return 1
+  fi
+  G24_OK=1
+  return 0
+}
+
 # ensure_gate_wiring —— 「交付即接线」装配入口（cmd_init 调用；.meta 已存在也照跑，§6.2）。
-# 幂等、非破坏：缺失才补；既有钩子只追加不改写、不改权限；hooksPath 已设一律不动（§6.1）。
+# 幂等装配：缺失才补；hooksPath 已设一律不动（§6.1）。既有钩子只在「未接线」时被重写，
+# 而重写只做两件事——摘除旧哨兵块 + 把规范块前置到 shebang 之后（原字节顺序与权限不动）。
+# F2：整个「读-判-写」段在 .git/ponygo-init.lock 上持 flock（无 flock 命令降级 mkdir 原子锁），
+#      获锁后重新读取 hooksPath / 钩子内容再判定，并发 init 不可能写出两块。
 # 正常装配路径不返回非零（唯一非零 = R15 的非 TTY 未确认，在 cmd_init 里）——
 # C2 由「恒定装配」满足，而非由「失败报错」满足。
 ensure_gate_wiring() {
-  local root="" hp="" dir="" hook="" provid=""
+  local provid="" fresh="${GATE_FRESH_SEED:-0}"
   provid=$(ci_provider)
 
   # --dry-run：只打印计划，不落盘、不动 git config（§4 矩阵）
@@ -2199,35 +2511,88 @@ ensure_gate_wiring() {
       info "[dry-run] 非 git 仓库：不设 core.hooksPath（git init 后重跑 ponygo init 才挂载本地层）"
       return 0
     fi
+    local hp="" root="" dir=""
     hp=$(git config core.hooksPath 2>/dev/null || true)
     root=$(git rev-parse --show-toplevel 2>/dev/null || true)
     if [ -z "$hp" ]; then
       info "[dry-run] 将设 core.hooksPath=.githooks（回读校验）+ 创建 .githooks/pre-commit（A3，chmod +x）"
       return 0
     fi
-    info "[dry-run] 既有 core.hooksPath=$hp —— 不动，只在其中补/追加 pre-commit"
+    info "[dry-run] 既有 core.hooksPath=$hp —— 不动，只在其中补/前置 pre-commit 哨兵块"
     dir=$(hook_dir_resolved "$root" "$hp")
     if [ -z "$dir" ]; then
       info "[dry-run] hooksPath 目录不可达：$hp（2.4 会 FAIL）"
     elif [ ! -f "$dir/pre-commit" ]; then
       info "[dry-run] 将新建 $hp/pre-commit（A3）+ chmod +x"
     elif gate_hook_wired "$dir/pre-commit"; then
-      info "[dry-run] $hp/pre-commit 已接线 —— 不动"
+      info "[dry-run] $hp/pre-commit 已接线（规范块 + 前置位置）—— 不动"
     elif [ -x "$dir/pre-commit" ]; then
-      info "[dry-run] 将向 $hp/pre-commit 追加哨兵块（原有字节零改动、权限不动）"
+      info "[dry-run] 将把规范哨兵块前置到 shebang 之后（原字节顺序与权限不动；旧块/半截块一并重建）"
     else
-      info "[dry-run] $hp/pre-commit 存在但不可执行 —— 不追加、不改权限（需人 chmod +x 后重跑）"
+      info "[dry-run] $hp/pre-commit 存在但不可执行 —— 不动权限（需人 chmod +x 后重跑）"
     fi
     return 0
   fi
 
-  # 1) A1/A2/A4：缺失才写 + chmod +x（幂等；已有则一字不动）
+  # F2 锁：写段一律在 git 目录的 ponygo-init.lock 上持锁；非 git / 无 git 目录 → 无共享写目标，直跑
+  local lockfile="" gd="" lk="" n=0
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    gd=$(git rev-parse --git-common-dir 2>/dev/null || true)
+    [ -n "$gd" ] || gd=$(git rev-parse --git-dir 2>/dev/null || true)
+    if [ -n "$gd" ]; then
+      gd=$(cd "$gd" 2>/dev/null && pwd -P) || gd=""
+      if [ -n "$gd" ] && [ -d "$gd" ]; then lockfile="$gd/ponygo-init.lock"; fi
+    fi
+  fi
+  if [ -z "$lockfile" ]; then
+    ensure_gate_wiring_locked
+    return 0
+  fi
+  if command -v flock >/dev/null 2>&1; then
+    # 注意：**不使用子 shell**（`( … ) 9>>lock`）——F4 的失败清单是 shell 变量，
+    # 在子 shell 里登记的失败会随子 shell 退出一起消失（写失败就又被吞成 rc=0）。
+    # 这里用 `exec 9>>` 在同一 shell 内持锁，装配结束后显式关闭 fd。
+    if ! exec 9>>"$lockfile"; then
+      warn "无法打开装配锁文件（$lockfile）→ 无锁继续；写入仍为 mktemp+mv 原子替换"
+      ensure_gate_wiring_locked
+      return 0
+    fi
+    flock -w 10 9 || warn "装配锁等待超时（10s，$lockfile）→ 继续；写入仍为 mktemp+mv 原子替换"
+    ensure_gate_wiring_locked
+    exec 9>&-
+    return 0
+  fi
+  # 降级：mkdir 原子锁（无 flock 命令时；最多等 10s，超时也继续——原子替换仍保证不写出半截块）
+  lk="$lockfile.d"
+  while ! mkdir "$lk" 2>/dev/null; do
+    n=$((n+1))
+    if [ "$n" -ge 100 ]; then
+      warn "装配锁等待超时（10s，$lk）→ 继续；写入仍为 mktemp+mv 原子替换"
+      lk=""
+      break
+    fi
+    sleep 0.1
+  done
+  ensure_gate_wiring_locked
+  [ -n "$lk" ] && rmdir "$lk" 2>/dev/null
+  return 0
+}
+
+# 装配主体（持锁调用；F2 要求获锁后**重新读取**再判定，故一切读操作都在这里）
+ensure_gate_wiring_locked() {
+  local root="" hp="" dir="" hook="" provid=""
+  provid=$(ci_provider)
+
+  # 1) A1/A2/A4：缺失才写 + 内容与规范不一致则自愈覆盖（F10）+ chmod +x
   write_gate_assets
 
   # 2) A5：只按 forge 证据生成（§6.3）；非 GitHub 不生成，由 status/audit 给可执行指引（不静默）
   if [ "$provid" = "github" ]; then
-    write_ci_adapter
-    info "远端层：检出 GitHub → 生成 .github/workflows/ponygo-governance.yml（A5 薄壳，调 .meta/gates/ci-verify.sh）"
+    if write_ci_adapter; then
+      info "远端层：检出 GitHub → 生成 .github/workflows/ponygo-governance.yml（A5 薄壳，调 .meta/gates/ci-verify.sh）"
+    else
+      gate_write_fail ".github/workflows/ponygo-governance.yml" "写入失败（目录不可写/原子替换失败）——A5 薄适配器未能生成"
+    fi
   else
     info "远端层：未检出 GitHub（provider=$provid）→ 不生成 A5；在你的 CI 里加一步 bash .meta/gates/ci-verify.sh（A4 门禁本体已就位）"
   fi
@@ -2272,39 +2637,43 @@ ensure_gate_wiring() {
   fi
   hook="$dir/pre-commit"
 
-  # 6) A3 四分支（§6.1：永不改写既有行）
+  # 6) A3（F1/F2/F3）：
+  #    已接线（逐字节等于规范块）且块前置于首个顶层 exit/exec → 一字不动；
+  #    无块 / 半截块 / 块在 exit·exec 之后 → 一次原子替换重写为「shebang 之后前置的规范块」；
+  #    首次播种（本函数由 cmd_init 的全新骨架分支调用，fresh=1）对「结构完整但内容非规范」的块
+  #    只 WARN 不动字节——首次播种不得销毁既有钩子内容，合规性交给 2.4；再跑一次 init
+  #    （has_meta 幂等装配分支）即按规范块重建，与 2.4 的补救指令一致。
+  #    权限永不由框架改（沉睡钩子是人的决定，2.4 会因缺执行位 FAIL 并给出 chmod +x）。
   if [ ! -f "$hook" ]; then
-    write_gate_hook "$hook" && info "新建 $hp/pre-commit（A3：marker + 哨兵块 + 非注释调用行）并 chmod +x"
+    write_gate_hook "$hook" && info "新建 $hp/pre-commit（A3：marker + 规范哨兵块 + 非注释调用行）并 chmod +x"
   elif gate_hook_wired "$hook"; then
     if [ -x "$hook" ]; then
-      info "$hp/pre-commit 已接线（哨兵块 + 非注释调用行 + 执行位）——不覆盖、不重复追加"
+      info "$hp/pre-commit 已接线（规范哨兵块 + 前置位置 + 执行位）——不覆盖、不重复写"
     else
       info "$hp/pre-commit 已接线但缺执行位（git 会静默忽略）——不改权限：chmod +x $hp/pre-commit"
     fi
-  elif [ -x "$hook" ]; then
-    gate_hook_append_block "$hook"
-    info "$hp/pre-commit 未接线且可执行 → 已追加哨兵块（原有字节零改动、权限不动）"
+  elif [ "$fresh" = "1" ] && gate_hook_block_complete "$hook"; then
+    warn "$hp/pre-commit 哨兵块非规范或位置在 exit/exec 之后（首次播种不改写既有块）→ 再跑一次 ponygo init 将按规范块重建（2.4 现报未接线）"
+  elif gate_hook_write_block "$hook"; then
+    warn "$hp/pre-commit 哨兵块非规范或位置在 exit/exec 之后 → 已重写为规范块并前置到 shebang 之后（原字节顺序与权限不动）"
+    [ -x "$hook" ] || info "提示：该钩子不可执行（沉睡钩子）——框架不改权限：chmod +x $hp/pre-commit"
   else
-    warn "$hp/pre-commit 存在但不可执行（沉睡钩子）→ 不追加、不改权限：chmod +x $hp/pre-commit 或删除该文件后重跑 ponygo init"
+    gate_write_fail "$hp/pre-commit" "写入失败（原子替换/grep 失败，目录不可写？）——哨兵块未能重建"
   fi
   return 0
 }
 
 # 治理门接线现场（status / audit 双挂；报告性输出，不改退出码——硬判据在 verify_ladder 2.4）
+# 本地层结论**复用 gate_24_probe**（与 2.4 同一口径）；F5：未接线时按因给补救，
+# 三类「装配前提未满足」（非 git / 目录不可达 / 钩子不可执行）不得给统一「bash ponygo init」。
 gate_wiring_report() {
-  local root="" hp="" dir="" hook="" provid="" state=""
+  local provid="" state="" hp=""
   provid=$(ci_provider)
-  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    root=$(git rev-parse --show-toplevel 2>/dev/null || true)
-    hp=$(git config core.hooksPath 2>/dev/null || true)
-    if [ -n "$hp" ]; then dir=$(hook_dir_resolved "${root:-.}" "$hp"); fi
-    if [ -n "$dir" ]; then hook="$dir/pre-commit"; fi
-  fi
-  if [ -n "$hook" ] && [ -f "$hook" ] && [ -x "$hook" ] && gate_hook_wired "$hook" \
-     && [ -f "$META_DIR/gates/adr-verify.sh" ]; then
+  hp=$(git config core.hooksPath 2>/dev/null || true)
+  if gate_24_probe; then
     state="已接线（${hp}/pre-commit → .meta/gates/adr-verify.sh，暂存区 ADR 门生效）"
   else
-    state="未接线（本地层不拦截暂存区 ADR；补救：bash ponygo init）"
+    state="未接线（本地层不拦截暂存区 ADR）——因由：${G24_CAUSE}；补救：${G24_FIX}"
   fi
   printf '治理门接线：%s\n' "$state"
   case "$provid" in
@@ -2322,6 +2691,7 @@ gate_wiring_report() {
       printf '远端层：检出 %s 但未接门 → 在你的 CI 里加一步 bash .meta/gates/ci-verify.sh（A4 门禁本体已就位）\n' "$provid"
       ;;
   esac
+  return 0
 }
 
 # ---------- 命令实现 ----------
@@ -2339,24 +2709,33 @@ detect_alt_gov() {
 }
 
 cmd_init() {
+  local dry=0
+  [ "${DRY_RUN:-0}" = "1" ] && dry=1
   # R15：非 TTY 且未显式 --yes → 明确拒绝。旧实现在空 stdin 下 read 失败即「已取消」→
   # exit 0 静默 no-op（等于没装配），与 C2「不得静默缺席」矛盾。
-  if [ "${YES:-0}" != "1" ] && [ ! -t 0 ]; then
+  # F8：--dry-run 豁免本判据——dry-run 不落盘、只打印计划，无需确认；若也被 die 拦住，
+  #     非交互环境（CI / 管道 / </dev/null）就永远看不到装配预览。R15 的本意是「不让
+  #     破坏性动作在无人确认时静默发生」，dry-run 不具破坏性，不在其射程内。
+  if [ "${YES:-0}" != "1" ] && [ "$dry" = "0" ] && [ ! -t 0 ]; then
     die "非交互环境（stdin 非 TTY）无法确认——请显式加 --yes，例如：ponygo init --yes"
   fi
 
   if has_meta; then
     info "已存在 .meta/ 治理根（level=$(read_level)）。"
     info "不重铺骨架；执行「交付即接线」幂等装配（缺什么补什么，既有文件一字不动）。"
+    GATE_FRESH_SEED=0
     ensure_gate_wiring
+    # F4：写入失败必须响亮——WARN + 失败清单 + 可执行补救，然后非零退出
+    # （禁止裸 `Permission denied` 一行噪声 + rc=0：那等于「装配没做成但机器说成功」）
+    gate_assembly_failed && exit 1
     info "完成（幂等装配）。下一步：ponygo status 看级自洽与门禁接线，ponygo audit 体检。"
     exit 0
   fi
 
   if looks_empty; then
     info "探测：空项目 / 新项目 → 全新铺骨架"
-    confirm_or_skip "在新项目根建立 .agents/ + .meta/ 治理骨架（level: 0）" || exit 0
-    write_skeleton 0
+    confirm_or_skip "在新项目根建立 .agents/ + .meta/ 治理骨架（level: 0）" || [ "$dry" = "1" ] || exit 0
+    [ "$dry" = "1" ] || write_skeleton 0
   else
     local alt
     alt=$(detect_alt_gov)
@@ -2367,13 +2746,19 @@ cmd_init() {
     else
       info "探测：有代码但无治理 → 注入骨架（不碰业务代码）"
     fi
-    confirm_or_skip "注入 .agents/ + .meta/ 治理骨架到既有代码仓库（只增不改业务文件）" || exit 0
-    write_skeleton 0
+    confirm_or_skip "注入 .agents/ + .meta/ 治理骨架到既有代码仓库（只增不改业务文件）" || [ "$dry" = "1" ] || exit 0
+    [ "$dry" = "1" ] || write_skeleton 0
   fi
 
   # 「交付即接线」：A1/A2/A4 已随骨架落地，这里补本地层（hooksPath + A3 钩子）并按 forge 生成 A5。
-  # 与 has_meta 分支共用同一函数——两个入口的装配语义必须一致（否则既有实例永远收不到改造）。
+  # 与 has_meta 分支共用同一函数——两个入口的装配语义必须一致（否则既有实例永远收不到改造）；
+  # 唯一差别：首次播种（fresh=1）不重写「结构完整但内容非规范」的既有块，交给下一次 init 重建。
+  # F8：fresh 路径在 --dry-run 下也必须走到这里——ensure_gate_wiring 的 dry-run 分支打印
+  #     装配计划（hooksPath/A3/A5 的去向）后返回，全程零落盘、零 git config 改动。
+  GATE_FRESH_SEED=1
   ensure_gate_wiring
+  # F4：同 has_meta 分支——写失败一律非零退出
+  gate_assembly_failed && exit 1
 
   # 铺完骨架后始终投影：模板态投初始引导（bootstrap），已填槽投常载命约
   confirm_or_skip "把 constitution 投影到根 AGENTS.md / CLAUDE.md（模板态投影初始引导）" && do_sync

@@ -1,4 +1,4 @@
-# Agent Note: 交付即接线——ADR 格式门强制挂载（A1–A5，非破坏性追加）
+# Agent Note: 交付即接线——ADR 格式门强制挂载（A1–A5，非破坏性前置插入）
 
 Status: implemented
 
@@ -27,23 +27,25 @@ ponygo 的 L1 判据（`maturity-ladder.md` §5 的 1.1–1.9）已经能机械�
 |---|---|---|
 | A1 | `.meta/gates/adr-verify.sh` | 无参 = 校验暂存区改动的 ADR（`--diff-filter=ACMR`，豁免 `README.md`/`AGENTS.md`）；带参 = 校验指定相对路径。自包含 `ROOT=$(git rev-parse --show-toplevel)`；非 git / 无 `.agents/notes` / 无 ADR 变更 → exit 0；任一不合规 → 非零。**不自己判格式**，只补判定真源做不到的两件事：R6 暂存态与工作区**字节比对**（不一致即「ADR 有未暂存改动，请先 git add」并 exit 1）、R7 重命名覆盖。**不写仓库任何文件**（`mktemp -d` + `trap … EXIT`） |
 | A2 | `.meta/gates/adr-verify.spec.sh` | A1 的负样本执行判据：临时仓造非法样本 → 断言非零；合法样本 → 断言 0；`PONYGO_IN_SPEC=1` 已存在 → SKIPPED 且**不计入 PASS**；自包裹 `timeout 30`；exit 0 = 自检通过 |
-| A3 | `.githooks/pre-commit`（或既有钩子内的哨兵块） | 首行 `#!/usr/bin/env bash`；含精确 marker 行 `# ponygo-gate: adr-verify v1`；含哨兵首尾块与块内非注释调用 `adr-verify.sh`；由 `init` 生成/追加后 `chmod +x` |
+| A3 | `.githooks/pre-commit`（或既有钩子内的哨兵块） | 首行 `#!/usr/bin/env bash`；含精确 marker 行 `# ponygo-gate: adr-verify v1`；哨兵块**插在 shebang 之后**且**逐字节等于规范块**；由 `init` 生成/插入后 `chmod +x` |
 | A4 | `.meta/gates/ci-verify.sh` | forge 无关的**门禁逻辑本体**：`verify-note.sh` 整树 + `adr-verify.spec.sh`；恒生成、可本地复现远端结论 |
 | A5 | `.github/workflows/ponygo-governance.yml` | 薄适配器：checkout + `bash .meta/gates/ci-verify.sh`，触发 push/pull_request；**按 forge 证据生成**，不进宇宙表 |
 
 装配语义（`ensure_gate_wiring`，`cmd_init` 在 `.meta` 已存在时也执行——R1/R2 的最高优先项）：
 
 - `core.hooksPath` **未设** → 设为 `.githooks` 并**回读校验**；**已设**（含 husky 绝对路径）→
-  **一律不动**，直接对该目录下的 `pre-commit` 追加哨兵块（改 hooksPath 会静默停用 husky v9 的
+  **一律不动**，直接对该目录下的 `pre-commit` 插入哨兵块（改 hooksPath 会静默停用 husky v9 的
   `.husky/_` 链，属破坏性副作用）；
 - `pre-commit` 不存在 → 新建 A3 + `chmod +x`；已接线（含 marker）→ 什么都不做；
-  存在但未接线**且可执行** → **追加**哨兵块，**原有字节零改动、不动权限**；
+  存在但未接线**且可执行** → 把哨兵块**插在 shebang 之后**（无 shebang 则文件最前），
+  **原有字节顺序与内容零改动、不动权限**（末尾追加不算接线：以 `exit 0` 结尾的钩子里该块永不执行）；
   存在但**不可执行** → 不改权限（激活沉睡钩子是破坏性副作用），判据 2.4 FAIL 并给出
   「`chmod +x` 或删除该文件后重跑 init」；
-- 判据 2.4（`maturity-ladder.md` §5）同步加强为五条 AND：① `hooksPath` 已设 ② 归一化
-  （`pwd -P`/`realpath`）后目录内 `pre-commit` 存在 ③ 可执行 ④ 含哨兵尾行
-  `# <<< ponygo-gate: adr-verify v1 <<<` 且块内有非注释行调用 `adr-verify.sh`
-  ⑤ `<root>/.meta/gates/adr-verify.sh` 存在。①–⑤ 全真才 PASS（编号不变，结论行文案不变）。
+- 判据 2.4（`maturity-ladder.md` §5）同步加强为五条 AND：① `hooksPath` 已设 ② 先展开 `~` 再归一化
+  （`pwd -P`/`realpath`）后目录内 `pre-commit` 存在 ③ 可执行（`-x`） ④ 哨兵块（BEGIN..END 区间）
+  **逐字节等于**规范块（含 marker 行与非注释调用行；"含某行"式判据被封死） ⑤ `<root>/.meta/gates/adr-verify.sh` 存在。
+  ①–⑤ 全真才 PASS（编号不变，结论行文案不变）；FAIL 文案**按因分支**给补救
+  （非 git / 目录不可达 / 钩子不可执行 → `chmod +x` / 块不合规 → `bash ponygo init`）。
 
 ## Alternatives considered
 
@@ -65,7 +67,8 @@ ponygo 的 L1 判据（`maturity-ladder.md` §5 的 1.1–1.9）已经能机械�
 **R4 "内容不同 → 覆盖"会销毁用户既有 pre-commit** → **采纳**（禁止覆盖）。终裁 v2 进一步把
 v1 的"fail-closed 拒绝 + 打印补救片段"也否决了：**fail-closed 在正常装配路径上制造非零退出**，
 把"框架没接线"变成"你的提交失败"，代价转嫁给用户且对 husky 项目无从自助（见 §6.1）。
-故最终形态 = **哨兵块非破坏性追加**：既有钩子字节零改动、可删除块回退、可重复执行不重复追加。
+故最终形态 = **哨兵块非破坏性插入**（shebang 之后、既有字节零改动、可删块回退、可重复执行不重复插入，
+写入走「临时文件 + `chmod` + `mv -f` 原子替换」并由 `flock` 保护）。
 **被否决的两条**：① 覆盖（销毁用户逻辑）；② fail-closed 非零退出（正常路径不应红色）。
 
 **R5 `grep 'adr-verify\|verify-note'` 一行注释即骗过** → **采纳**（判据要求哨兵尾行 + 块内
@@ -91,9 +94,10 @@ v1 的"fail-closed 拒绝 + 打印补救片段"也否决了：**fail-closed 在�
 注，判据加强但不改编号）。备选"只在 CLI 里加强、文档滞后"：否决，ladder 是 CLI 判据的**唯一真源**，
 代码领先文档 = 下一次评审必抓的漂移。
 
-**R11 钩子执行受版本控制脚本 = 供应链面（ADVISORY）** → **部分采纳**（本期只登记为下面
-Consequences 的 Known risk；钩子内 sha256 pin 不在本期范围）。备选"立刻给钩子加内容 pin"：推迟——
-pin 需要发布侧生成清单 + 校验时机设计，本期做会造出半成品的假安全感。
+**R11 钩子执行受版本控制脚本 = 供应链面（ADVISORY）** → **部分采纳**（登记为下面 Consequences
+的 Known risk，论证见该节："只读/无网络"**不是**有效缓解；钩子内 sha256 pin 不在本期范围）。
+备选"立刻给钩子加内容 pin"：推迟——pin 需要发布侧生成清单 + 校验时机设计，本期做会造出半成品的
+假安全感。备选"用 `CODEOWNERS` 做缓解"：接受为**后续事项**（本次不实现，见 Consequences）。
 
 **R12 维护税/最小闭包：建议砍 CI 资产（ADVISORY）** → **部分否决**（保留 CI，但拆成
 「forge 无关的真实门脚本 A4」+「薄适配器 A5」）。备选"全砍，只留本地钩子"：否决——本地钩子
@@ -138,17 +142,35 @@ ponygo 自身纪律是"每门配负样本执行判据"，框架仓自己豁免�
 
 **已知代价（四条，诚实登记）**：
 
-1. **R11 供应链面**：钩子在每次提交时执行受版本控制的脚本（`.meta/gates/adr-verify.sh`）——
-   仓库写入权 = 本地代码执行权。本期未做 sha256 pin，缓解仅在于"该脚本只读、无网络、无写操作"
-   （可 review 验证），以及提交前 `git diff` 的人工可见性。
+1. **R11 供应链面（论证已订正，Wave-2 B5/F13）**：钩子在每次提交时执行受版本控制的脚本
+   （`.meta/gates/adr-verify.sh`），**钩子跑的是工作区字节而非 index 字节**——实测在第 2 行插一句
+   `touch /tmp/x`，此后任意 `git commit` 都会执行它。因此"该脚本只读、无网络、无写操作，可 review 验证"
+   **不是有效缓解**（循环论证：能改这个文件的人，恰恰就是被 review 假设排除掉的那个人）。
+   诚实表述：**仓库写权限本来就等价于代码执行权**——同一个人还能改 CI 配置、改 `.gitattributes`
+   （`filter.*.clean` 直接执行命令）、改 `Makefile`/`package.json` 脚本。**本机制不新增特权面**，
+   它只是把"已存在的能力"挪到一个每次提交都必然经过的位置（可见性上升，权限不变）。
+   缓解方向（登记为**后续事项，不在本次实现**）：`CODEOWNERS` 覆盖 `.meta/gates/**` 与 `.githooks/**`，
+   让这些路径的改动至少需要一个非作者的 reviewer；内容 sha256 pin 同理推迟（需发布侧清单 + 校验时机设计，
+   本期硬做只会造出半成品的假安全感）。
 2. **6.1 不改 hooksPath 的代价**：husky（或其它外来钩子目录）项目的本地层归属 `husky` 目录，
-   门禁块被追加在 `.husky/pre-commit` 里；`git config core.hooksPath` **无法一键复原**——
+   门禁块被插入到 `.husky/pre-commit` 的 shebang 之后；`git config core.hooksPath` **无法一键复原**——
    想撤掉门禁必须编辑那个文件（删哨兵块）。对 husky 用户，这是"非破坏性"换来的可逆性折损。
 3. **6.3 CI 条件生成的代价**：非 GitHub 项目没有 A5，远端层需要人工加一步
    `bash .meta/gates/ci-verify.sh`——门禁在那里不是自动的，只被显式告知（不静默）。
 4. **双写维护税**：A1/A2/A4 三处同源（仓库模板文件 + `ponygo` 内 heredoc + 实例落盘），
    外加 A3/A5 的两处（模板 + heredoc）。任何资产改动必须三处齐改并 diff 验证，后期若某实例
    长期落后，`upgrade --check` 会报 drift（宇宙表只登记 A1/A2/A4，正是为了让这个信号可控）。
+
+**已知边界（ADVISORY，Wave-2 审核接受，登记不实现）**：
+
+1. **`git mv` 把 ADR 移出 `.agents/notes/`、或 `git rm` 删除 ADR → 不做格式校验**。
+   理由：这两种操作之后该路径**已不再是 ADR**（不再有被提交的决策记录语义），门禁对"没有 ADR 的提交"
+   本就放行（`无暂存 ADR 变更 → exit 0`）。守它需要一条"删除/搬走也必须校验"的路径级判据，
+   收益低而误报高（README/AGENTS 豁免、跨目录搬家的中间态都会被误伤）。
+2. **钩子主路径上的本地子进程没有 `timeout`**（`git` / `find` / `bash` 全为本地进程，超时风险低）。
+   与 A2 不同：spec 里包 `timeout 30` 是因为 spec 会**执行**仓库脚本（不可信代码）；A1/A3 主路径只调
+   `git`/`find`/`bash` 与判定真源，挂死面来自本机文件系统而非外部代码。真要兜底应由钩子层加
+   `timeout` 包装——那是实例可编辑面（A3），不在框架资产里硬编码。
 
 **覆盖缺口（本次实测发现，登记为已知限制）**：`.agents/notes/README.md` 规定每条决策必含
 `## Alternatives considered`，但判定真源 `verify-note.sh` 的 1.1–1.9 **不含**这一项
@@ -176,5 +198,5 @@ A2 把该 case 做成**探针**：真源将来覆盖则断言拒绝，未覆盖�
 `ponygo status` 会由 0 变 1——这是判据加强的**正确**结果（原先的"PASS"只是因为旧 2.4 只看了
 `core.hooksPath` 字符串）。补救 = 重跑 `ponygo init`（幂等补齐）后 `chmod +x`。
 
-**框架规则细节与验收口径**：见 `revisions/proposed/2026-10-29-forced-adr-gate-wiring.md`
+**框架规则细节、Migration 与验收口径**：见 `revisions/accepted/2026-10-29-forced-adr-gate-wiring.md`
 （框架自身演进提案：Problem / Decision / Alternatives / Consequences / 验收）。
