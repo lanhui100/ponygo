@@ -55,6 +55,95 @@ sanitize_git() {
   printf 'GIT_CONFIG_GLOBAL=%s GIT_CONFIG_SYSTEM=%s' "$G" "$G"
 }
 
+# ---- 断言补件（s46+ 用；一律是真断言：禁「跑了没报错即 pass」）----
+assert_nonzero() { # <描述> <实得 rc>
+  case "${2:-0}" in
+    0) bad "$1（期望非零，实得 0）" ;;
+    *) ok "$1" ;;
+  esac
+}
+assert_exists()    { [ -e "$2" ] && ok "$1" || bad "$1（缺失 $2）"; }
+assert_missing()   { [ ! -e "$2" ] && ok "$1" || bad "$1（不应存在 $2）"; }
+assert_exec()      { [ -x "$2" ] && ok "$1" || bad "$1（无执行位 $2）"; }
+assert_file_has() { # <描述> <文件> <固定串>
+  if [ -f "$2" ] && grep -qF -- "$3" "$2"; then ok "$1"; else bad "$1（$2 缺 [$3]）"; fi
+}
+md5_of() { # <文件> → md5；文件缺失打印 MISSING（防「空==空」假绿）
+  if [ -f "$1" ]; then md5sum "$1" 2>/dev/null | awk '{print $1}'; else printf 'MISSING'; fi
+}
+# 双写一致性断言（照 s14 写法 + 失败时打印 diff 便于定位）
+assert_same_as_template() { # <描述> <生成文件> <模板文件>
+  local d
+  if [ ! -f "$3" ]; then bad "$1（仓库模板缺失：$3）"; return 0; fi
+  if [ ! -f "$2" ]; then bad "$1（未生成：$2）"; return 0; fi
+  if d=$(diff <(tr -d '\r' < "$2") <(tr -d '\r' < "$3") 2>&1); then
+    ok "$1"
+  else
+    bad "$1（eol 归一后不一致）"
+    printf '%s\n' "$d" | sed -n '1,8p' >&2
+  fi
+}
+
+# ---- ADR 门禁装配夹具（契约真源：.dev-team/plan-freeze.md §2/§6.5/§6.6）----
+# 说明：s12/s24/s28 的正例夹具按 §6.6 加强后的 2.4 判据补装配（哨兵块 + 非注释调用行
+# + 执行位 + A1 资产），属**判据加强**，断言一条不删、不弱化。
+GATE_MARKER='# >>> ponygo-gate: adr-verify v1 >>>'
+GATE_MARKER_END='# <<< ponygo-gate: adr-verify v1 <<<'
+
+# 追加哨兵块（§6.5 逐字形态）：原有字节零改动，只 append；随后补执行位。
+append_gate_block() { # <hook-file>
+  local f="$1"
+  [ -d "$(dirname "$f")" ] || mkdir -p "$(dirname "$f")"
+  [ -f "$f" ] || printf '#!/usr/bin/env bash\n' > "$f"
+  {
+    printf '\n%s\n' "$GATE_MARKER"
+    printf 'if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then\n'
+    printf '  bash "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" || exit 1\n'
+    printf 'fi\n'
+    printf '%s\n' "$GATE_MARKER_END"
+  } >> "$f"
+  chmod +x "$f"
+}
+
+# A1 资产存在性垫片（2.4 ⑤）：init 已生成则不覆盖（夹具不得吃掉被测产物）
+ensure_gate_asset() { # <case-dir>
+  local f="$1/.meta/gates/adr-verify.sh"
+  mkdir -p "$(dirname "$f")"
+  [ -s "$f" ] || printf '#!/usr/bin/env bash\n# fixture stub（init 未生成 A1 时的存在性垫片，不参与判定）\nexit 0\n' > "$f"
+  chmod +x "$f"
+}
+
+# 正例夹具装配：手工钩子升级为「已接线」形态
+wire_gate_fixture() { # <case-dir> [hook 相对路径]
+  local T="$1" rel="${2:-.githooks/pre-commit}"
+  ensure_gate_asset "$T"
+  append_gate_block "$T/$rel"
+}
+
+# ---- git 夹具（一律消毒：不读机器全局配置，跨机同结论）----
+git_local() { # <dir> <git args...>
+  local dir="$1"; shift
+  local G; G=$(sanitize_git)
+  # shellcheck disable=SC2086
+  ( cd "$dir" && env $G git "$@" )
+}
+hookspath_of() { git_local "$1" config core.hooksPath 2>/dev/null || true; }
+# 建仓 + 一个初始提交（--no-verify：装配前的提交不被新钩子拦）
+git_seed_repo() { # <dir>
+  ( cd "$1" && git init -q . >/dev/null 2>&1 \
+      && printf '# seed\n' > README.md \
+      && git add -A >/dev/null 2>&1 \
+      && git -c user.email=t@t -c user.name=t -c commit.gpgsign=false \
+           commit -qm seed --no-verify >/dev/null 2>&1 ) || :
+  [ -d "$1/.git" ] || mkdir -p "$1/.git"
+}
+# 直跑仓库内脚本（A1/A2 等资产的执行语义），捕获合并输出与 rc
+S_RC=0; S_OUT=""
+run_script() { # <dir> <脚本相对路径> [args...]
+  local dir="$1"; shift
+  S_OUT=$( cd "$dir" && bash "$@" 2>&1 ); S_RC=$?
+}
+
 # ---- 场景素材 ----
 write_constitution_filled() { # 填掉 constitution 全部 TODO 槽位
   sed -i -e 's/【TODO: 填项目名】/ponygo-test/' \
@@ -424,6 +513,9 @@ s12_l2_criteria() {
   printf 'level: 2\n' > "$T/.meta/meta.yaml"
   ( cd "$T" && git init -q && git config core.hooksPath .githooks \
       && mkdir -p .githooks && printf '#!/usr/bin/env bash\necho hook\n' > .githooks/pre-commit ) >/dev/null 2>&1
+  # 契约演进（freeze §3/§6.6）：2.4 判据加强后，正例夹具须含哨兵块 + 非注释调用行
+  # + 执行位 + <root>/.meta/gates/adr-verify.sh；断言一条未删、未弱化。
+  wire_gate_fixture "$T"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
   printf 'purpose: negative sample spec\n' > "$T/.meta/gates/format.spec.md"
   # 分支：未声明 docs-tier + 已激活 → PASS（实际做到优先于声明）
@@ -453,6 +545,9 @@ s12_l2_criteria() {
   printf 'level: 2\n' > "$T/.meta/meta.yaml"
   ( cd "$T" && git init -q && git config core.hooksPath .githooks \
       && mkdir -p .githooks && printf '#!/usr/bin/env bash\necho hook\n' > .githooks/pre-commit ) >/dev/null 2>&1
+  # 契约演进（freeze §3/§6.6）：2.4 判据加强后，正例夹具须含哨兵块 + 非注释调用行
+  # + 执行位 + <root>/.meta/gates/adr-verify.sh；断言一条未删、未弱化。
+  wire_gate_fixture "$T"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
   printf 'x\n' > "$T/.meta/gates/format.spec.md"
   run_cli "$T" status
@@ -468,6 +563,9 @@ s12_l2_criteria() {
   printf 'docs-tier: off\n' >> "$T/.meta/meta.yaml"
   ( cd "$T" && git init -q && git config core.hooksPath .githooks \
       && mkdir -p .githooks && printf '#!/usr/bin/env bash\necho hook\n' > .githooks/pre-commit ) >/dev/null 2>&1
+  # 契约演进（freeze §3/§6.6）：2.4 判据加强后，正例夹具须含哨兵块 + 非注释调用行
+  # + 执行位 + <root>/.meta/gates/adr-verify.sh；断言一条未删、未弱化。
+  wire_gate_fixture "$T"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
   printf 'x\n' > "$T/.meta/gates/format.spec.md"
   run_cli "$T" status
@@ -483,6 +581,9 @@ s12_l2_criteria() {
   printf 'docs-tier: on\n' >> "$T/.meta/meta.yaml"
   ( cd "$T" && git init -q && git config core.hooksPath .githooks \
       && mkdir -p .githooks && printf '#!/usr/bin/env bash\necho hook\n' > .githooks/pre-commit ) >/dev/null 2>&1
+  # 契约演进（freeze §3/§6.6）：2.4 判据加强后，正例夹具须含哨兵块 + 非注释调用行
+  # + 执行位 + <root>/.meta/gates/adr-verify.sh；断言一条未删、未弱化。
+  wire_gate_fixture "$T"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
   printf 'x\n' > "$T/.meta/gates/format.spec.md"
   # 模板态 docs-tier/README.md 未激活（无已激活锚点）
@@ -506,6 +607,9 @@ s12_l2_criteria() {
   printf 'level: 2\ndocs-tier: off\n' > "$T/.meta/meta.yaml"
   ( cd "$T" && git init -q && git config core.hooksPath .githooks \
       && mkdir -p .githooks && printf '#!/usr/bin/env bash\necho hook\n' > .githooks/pre-commit ) >/dev/null 2>&1
+  # 契约演进（freeze §3/§6.6）：2.4 判据加强后，正例夹具须含哨兵块 + 非注释调用行
+  # + 执行位 + <root>/.meta/gates/adr-verify.sh；断言一条未删、未弱化。
+  wire_gate_fixture "$T"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
   printf 'x\n' > "$T/.meta/gates/format.spec.md"
   printf '## 已激活文档家清单\n\n| tier | 家 |\n|---|---|\n| 决策记录 | .agents/notes/ |\n' > "$T/.meta/docs-tier/README.md"
@@ -523,6 +627,9 @@ s12_l2_criteria() {
   printf 'docs-tier: on\n' >> "$T/.meta/meta.yaml"
   ( cd "$T" && git init -q && git config core.hooksPath .githooks \
       && mkdir -p .githooks && printf '#!/usr/bin/env bash\necho hook\n' > .githooks/pre-commit ) >/dev/null 2>&1
+  # 契约演进（freeze §3/§6.6）：2.4 判据加强后，正例夹具须含哨兵块 + 非注释调用行
+  # + 执行位 + <root>/.meta/gates/adr-verify.sh；断言一条未删、未弱化。
+  wire_gate_fixture "$T"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
   printf 'x\n' > "$T/.meta/gates/format.spec.md"
   # 清零模板态 TODO：重写为已激活清单（无 TODO 残留）
@@ -539,6 +646,9 @@ s12_l2_criteria() {
   printf 'docs-tier: "off"\n' >> "$T/.meta/meta.yaml"
   ( cd "$T" && git init -q && git config core.hooksPath .githooks \
       && mkdir -p .githooks && printf '#!/usr/bin/env bash\necho hook\n' > .githooks/pre-commit ) >/dev/null 2>&1
+  # 契约演进（freeze §3/§6.6）：2.4 判据加强后，正例夹具须含哨兵块 + 非注释调用行
+  # + 执行位 + <root>/.meta/gates/adr-verify.sh；断言一条未删、未弱化。
+  wire_gate_fixture "$T"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
   printf 'x\n' > "$T/.meta/gates/format.spec.md"
   run_cli "$T" status
@@ -935,6 +1045,10 @@ s24_gate_layers() {
       && printf '#!/usr/bin/env bash\necho typecheck\n' > .githooks/pre-push \
       && printf 'name: ci\n' > .github/workflows/ci.yml \
       && git init -q && git config core.hooksPath .githooks ) >/dev/null 2>&1
+  # 契约演进（freeze §6.6）：本地层 pre-commit 夹具补哨兵块 + 非注释调用行 + 执行位；
+  # 「本地层 pre-commit（秒级）：有」的断言保持不变（新判据下仍须为「有」）。
+  wire_gate_fixture "$T"
+  chmod +x "$T/.githooks/pre-push"
   # shellcheck disable=SC2046
   run_cli_env "$T" $G audit --level S
   assert_contains "本地层 pre-commit 有" "$R_OUT" "本地层 pre-commit（秒级）：有"
@@ -1100,6 +1214,9 @@ s28_l2_reachability() {
   printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/readme.spec.sh"
   ( cd "$T" && git init -q && git config core.hooksPath .githooks && mkdir -p .githooks \
       && printf '#!/usr/bin/env bash\nexit 0\n' > .githooks/pre-commit ) >/dev/null 2>&1
+  # 契约演进（freeze §6.6）：L2 四件套的「本地钩子挂载」须含哨兵块 + 非注释调用行 + 执行位
+  # + A1 资产；反例（撤掉 hooksPath → 2.4 FAIL）保持原样，未弱化。
+  wire_gate_fixture "$T"
   printf 'level: 2\n' > "$T/.meta/meta.yaml"
   printf '## 已激活文档家清单\n' >> "$T/.meta/docs-tier/README.md"
   run_cli "$T" status
@@ -2287,11 +2404,509 @@ s45_observe_diff_timeout_budget() {
   assert_eq "observe[45] 快路径 rc=0 + 载体 → 全达 exit 0" 0 "$R_RC"
 }
 
+# ============================================================
+# ADR 交付门禁验收（s46~s57）—— L2-T 独立测试者冻结，实现方只读
+#
+# 真源：.dev-team/plan-freeze.md §2（资产契约 A1–A5）/§3+§6.6（2.4 五条 AND）/
+#       §4（cmd_init 行为矩阵）/§6.1–6.5（非破坏性追加、CI 条件生成、钩子调用形态）。
+# 铁律：每条断言必须是 rc / 输出子串 / 文件内容 / 文件模式（-x）之一；
+#       禁「跑通即 pass」——每个反例都配正向控制，防「空==空」假绿。
+# 注（Lead 终裁 T1）：判定真源是 .agents/skills/write-adr/verify-note.sh（1.1–1.9），
+#       `## Alternatives considered` **不在**真源判据内，故此处不作断言；违例一律用真源
+#       真判的 1.6（文件名/日期）、1.7（Status 与目录）、1.8（骨架标题）三条。
+# ============================================================
+
+# 2.4 ④ 锚定口径（与 maturity-ladder §2.4 锚定命令逐字同款）：
+# 取哨兵块区间，剔除注释行，剩下的必须含真实调用 adr-verify.sh
+sentinel_noncomment() { # <hook 文件>
+  sed -n '/>>> ponygo-gate: adr-verify v1 >>>/,/<<< ponygo-gate: adr-verify v1 <<</p' "$1" 2>/dev/null \
+    | grep -vE '^[[:space:]]*#'
+}
+
+s46_init_gate_wiring() {
+  echo "--- 场景46：init --yes 在 git 仓内装配本地层（hooksPath/pre-commit/marker/执行位/A1·A2·A4）"
+  local T; T=$(new_case)
+  git_seed_repo "$T"
+  run_cli "$T" init --yes
+  assert_eq "init --yes（git 仓内）exit 0" 0 "$R_RC"
+  assert_eq "core.hooksPath 设为 .githooks" ".githooks" "$(hookspath_of "$T")"
+  assert_exists "生成 .githooks/pre-commit" "$T/.githooks/pre-commit"
+  assert_exec ".githooks/pre-commit 可执行（R3：非可执行钩子被 git 静默忽略）" "$T/.githooks/pre-commit"
+  assert_file_has "含 marker 行 # ponygo-gate: adr-verify v1" "$T/.githooks/pre-commit" \
+    "# ponygo-gate: adr-verify v1"
+  assert_file_has "含哨兵尾行（2.4 ④）" "$T/.githooks/pre-commit" "$GATE_MARKER_END"
+  assert_contains "哨兵块内有非注释行调用 adr-verify.sh（2.4 ④）" \
+    "$(sentinel_noncomment "$T/.githooks/pre-commit")" "adr-verify.sh"
+  assert_exists "A1 .meta/gates/adr-verify.sh 落地" "$T/.meta/gates/adr-verify.sh"
+  assert_exists "A2 .meta/gates/adr-verify.spec.sh 落地" "$T/.meta/gates/adr-verify.spec.sh"
+  assert_exists "A4 .meta/gates/ci-verify.sh 恒生成（§6.3）" "$T/.meta/gates/ci-verify.sh"
+  # 非 git 目录（R14）：不设 hooksPath、不静默、仍 exit 0
+  T=$(new_case)
+  run_cli "$T" init --yes
+  assert_eq "非 git 目录 init 仍 exit 0（R14）" 0 "$R_RC"
+  assert_eq "非 git 目录不设 core.hooksPath（R14）" "" "$(hookspath_of "$T")"
+  assert_contains "非 git 目录打印 git init 指引（R14 不静默）" "$R_OUT" "git init"
+}
+
+s47_adr_verify_semantics() {
+  echo "--- 场景47：A1 语义（合法放行 / 1.6·1.7·1.8 违例拒绝 / 无 ADR 变更放行）+ A2 自检"
+  local T; T=$(new_case)
+  git_seed_repo "$T"
+  run_cli "$T" init --yes
+  assert_exists "A1 已由 init 生成" "$T/.meta/gates/adr-verify.sh"
+
+  # ① 无 ADR 变更（只暂存非-notes 文件）→ exit 0
+  printf '# tweak\n' >> "$T/README.md"
+  git_local "$T" add README.md >/dev/null 2>&1
+  run_script "$T" .meta/gates/adr-verify.sh
+  assert_eq "A1 无 ADR 变更（只暂存非-notes 文件）→ exit 0" 0 "$S_RC"
+
+  # ② 合法 ADR 暂存 → exit 0
+  git_local "$T" reset -q >/dev/null 2>&1
+  write_valid_decision "$T" "implemented/feature/2026-01-02-good.md"
+  git_local "$T" add .agents/notes/implemented/feature/2026-01-02-good.md >/dev/null 2>&1
+  run_script "$T" .meta/gates/adr-verify.sh
+  assert_eq "A1 合法 ADR 暂存 → exit 0" 0 "$S_RC"
+
+  # ③ 1.7 违例：implemented/ 下 Status: proposed → 非零
+  git_local "$T" reset -q >/dev/null 2>&1
+  mkdir -p "$T/.agents/notes/implemented/feature"
+  cat > "$T/.agents/notes/implemented/feature/2026-01-03-status.md" <<'EOF'
+# Agent Note: status mismatch
+
+Status: proposed
+
+## Problem
+why
+
+## Decision
+what
+
+## Alternatives considered
+other
+EOF
+  git_local "$T" add .agents/notes/implemented/feature/2026-01-03-status.md >/dev/null 2>&1
+  run_script "$T" .meta/gates/adr-verify.sh
+  assert_nonzero "A1 1.7 违例（Status 与目录不一致）暂存 → 非零" "$S_RC"
+  assert_contains "A1 1.7 违例报出判据号" "$S_OUT" "1.7"
+
+  # ④ 1.8 违例：implemented/ 下含 ## Proposal 标题 → 非零
+  git_local "$T" reset -q >/dev/null 2>&1
+  cat > "$T/.agents/notes/implemented/feature/2026-01-04-proposal.md" <<'EOF'
+# Agent Note: proposal-era heading
+
+Status: implemented
+
+## Problem
+why
+
+## Proposal
+what
+
+## Alternatives considered
+other
+EOF
+  git_local "$T" add .agents/notes/implemented/feature/2026-01-04-proposal.md >/dev/null 2>&1
+  run_script "$T" .meta/gates/adr-verify.sh
+  assert_nonzero "A1 1.8 违例（implemented 含 ## Proposal）暂存 → 非零" "$S_RC"
+  assert_contains "A1 1.8 违例报出判据号" "$S_OUT" "1.8"
+
+  # ⑤ 1.6 违例：坏文件名 → 非零
+  git_local "$T" reset -q >/dev/null 2>&1
+  cat > "$T/.agents/notes/implemented/feature/badname.md" <<'EOF'
+# Agent Note: bad filename
+
+Status: implemented
+
+## Problem
+why
+
+## Decision
+what
+
+## Alternatives considered
+other
+EOF
+  git_local "$T" add .agents/notes/implemented/feature/badname.md >/dev/null 2>&1
+  run_script "$T" .meta/gates/adr-verify.sh
+  assert_nonzero "A1 1.6 违例（文件名不符 yyyy-mm-dd-topic.md）暂存 → 非零" "$S_RC"
+  assert_contains "A1 1.6 违例报出判据号" "$S_OUT" "1.6"
+
+  # ⑥ 1.6 违例（非法日期）；仅 GNU date 环境机械可判（同 verify-note DATE_OK 降级，如实披露）
+  if date -d @0 '+%Y' >/dev/null 2>&1; then
+    git_local "$T" reset -q >/dev/null 2>&1
+    cat > "$T/.agents/notes/implemented/feature/2026-02-30-baddate.md" <<'EOF'
+# Agent Note: bad date
+
+Status: implemented
+
+## Problem
+why
+
+## Decision
+what
+
+## Alternatives considered
+other
+EOF
+    git_local "$T" add .agents/notes/implemented/feature/2026-02-30-baddate.md >/dev/null 2>&1
+    run_script "$T" .meta/gates/adr-verify.sh
+    assert_nonzero "A1 1.6 违例（非法日期 2026-02-30）暂存 → 非零" "$S_RC"
+  else
+    ok "无 GNU date：坏日期用例降级跳过（verify-note 同款诚实条款，靠 review）"
+  fi
+
+  # ⑦ A2 负样本自检 exit 0 = 「门确实会拒绝非法样本，且会放行合法样本」
+  run_script "$T" .meta/gates/adr-verify.spec.sh
+  assert_eq "A2 adr-verify.spec.sh 自检 exit 0" 0 "$S_RC"
+}
+
+s48_adr_verify_toctou() {
+  echo "--- 场景48：A1 TOCTOU（index 内非法、工作区已改回合法 → 必须非零，R6）"
+  local T P; T=$(new_case); P=".agents/notes/implemented/feature/2026-01-05-toctou.md"
+  git_seed_repo "$T"; run_cli "$T" init --yes
+  mkdir -p "$T/$(dirname "$P")"
+  cat > "$T/$P" <<'EOF'
+# Agent Note: staged is invalid
+
+Status: proposed
+
+## Problem
+why
+
+## Decision
+what
+
+## Alternatives considered
+other
+EOF
+  git_local "$T" add "$P" >/dev/null 2>&1
+  # 工作区改回合法、故意不再 git add：index 仍留非法字节
+  cat > "$T/$P" <<'EOF'
+# Agent Note: staged is invalid
+
+Status: implemented
+
+## Problem
+why
+
+## Decision
+what
+
+## Alternatives considered
+other
+EOF
+  assert_contains "前提取证：index 与工作区确已分叉" "$(git_local "$T" diff --name-only)" \
+    "2026-01-05-toctou.md"
+  run_script "$T" .meta/gates/adr-verify.sh
+  assert_nonzero "A1 index 非法 + 工作区合法 → 非零（R6 fail-closed）" "$S_RC"
+  assert_contains "A1 拒绝文案含「未暂存」补救" "$S_OUT" "未暂存"
+  # 补齐 git add 后放行（证明上面非零不是「一律非零」）
+  git_local "$T" add "$P" >/dev/null 2>&1
+  run_script "$T" .meta/gates/adr-verify.sh
+  assert_eq "A1 补齐暂存（index=合法）→ exit 0" 0 "$S_RC"
+}
+
+s49_adr_verify_rename() {
+  echo "--- 场景49：rename 逃逸（git mv 非法 ADR 进 notes → 非零；合法 ADR 同路径 → 放行）"
+  local T V; T=$(new_case)
+  git_seed_repo "$T"; run_cli "$T" init --yes
+  mkdir -p "$T/inbox"
+  cat > "$T/inbox/2026-01-06-renamed-invalid.md" <<'EOF'
+# Agent Note: renamed with status mismatch
+
+Status: proposed
+
+## Problem
+why
+
+## Decision
+what
+
+## Alternatives considered
+other
+EOF
+  git_local "$T" add -A >/dev/null 2>&1
+  git_local "$T" -c user.email=t@t -c user.name=t -c commit.gpgsign=false \
+    commit -qm "seed inbox" --no-verify >/dev/null 2>&1
+  mkdir -p "$T/.agents/notes/implemented/feature"
+  git_local "$T" mv inbox/2026-01-06-renamed-invalid.md \
+    .agents/notes/implemented/feature/2026-01-06-renamed-invalid.md >/dev/null 2>&1
+  assert_contains "前提取证：索引内确为 rename（R）" \
+    "$(git_local "$T" diff --cached --name-status --diff-filter=R)" "2026-01-06-renamed-invalid.md"
+  run_script "$T" .meta/gates/adr-verify.sh
+  assert_nonzero "A1 git mv 进 notes 的非法 ADR → 非零（--diff-filter=ACMR）" "$S_RC"
+
+  # 正向控制：合法 ADR 被 mv 进 notes → 放行（证明不是「见 R 就拒」）
+  V=$(new_case); git_seed_repo "$V"; run_cli "$V" init --yes
+  mkdir -p "$V/inbox"
+  cat > "$V/inbox/2026-01-07-renamed-valid.md" <<'EOF'
+# Agent Note: renamed valid
+
+Status: implemented
+
+## Problem
+why
+
+## Decision
+what
+
+## Alternatives considered
+other
+EOF
+  git_local "$V" add -A >/dev/null 2>&1
+  git_local "$V" -c user.email=t@t -c user.name=t -c commit.gpgsign=false \
+    commit -qm "seed inbox" --no-verify >/dev/null 2>&1
+  mkdir -p "$V/.agents/notes/implemented/feature"
+  git_local "$V" mv inbox/2026-01-07-renamed-valid.md \
+    .agents/notes/implemented/feature/2026-01-07-renamed-valid.md >/dev/null 2>&1
+  assert_contains "前提取证：合法 ADR 的 mv 亦为 rename（R）" \
+    "$(git_local "$V" diff --cached --name-status --diff-filter=R)" "2026-01-07-renamed-valid.md"
+  run_script "$V" .meta/gates/adr-verify.sh
+  assert_eq "A1 合法 ADR rename 进 notes → exit 0" 0 "$S_RC"
+}
+
+s50_preexisting_hook_preserved() {
+  echo "--- 场景50：既有自定义 pre-commit 不被覆盖（§6.1 非破坏性追加，原字节零改动）"
+  local T orig osz; T=$(new_case)
+  git_seed_repo "$T"
+  ( cd "$T" && mkdir -p .githooks \
+      && printf '#!/usr/bin/env bash\necho CUSTOM-GATE\n' > .githooks/pre-commit \
+      && chmod +x .githooks/pre-commit ) >/dev/null 2>&1
+  orig="$SBASE/hook.custom.orig"; cp "$T/.githooks/pre-commit" "$orig"
+  run_cli "$T" init --yes
+  assert_eq "既有自定义钩子场景 init exit 0" 0 "$R_RC"
+  assert_file_has "原自定义行仍在" "$T/.githooks/pre-commit" "echo CUSTOM-GATE"
+  osz=$(wc -c < "$orig" | awk '{print $1}')
+  head -c "$osz" "$T/.githooks/pre-commit" > "$SBASE/hook.custom.head" 2>/dev/null
+  if cmp -s "$SBASE/hook.custom.head" "$orig"; then
+    ok "既有钩子原字节逐字节保留（前缀 cmp 一致）"
+  else
+    bad "既有钩子被改写（前缀与原文件不一致——违反 §6.1「永不改写既有行」）"
+  fi
+  assert_file_has "追加哨兵块首行" "$T/.githooks/pre-commit" "$GATE_MARKER"
+  assert_file_has "追加哨兵块尾行" "$T/.githooks/pre-commit" "$GATE_MARKER_END"
+  assert_contains "追加块内有非注释调用行" "$(sentinel_noncomment "$T/.githooks/pre-commit")" "adr-verify.sh"
+  assert_exec "追加后仍有执行位（§6.1：不改其权限）" "$T/.githooks/pre-commit"
+  assert_eq "core.hooksPath 设为 .githooks" ".githooks" "$(hookspath_of "$T")"
+  # 追加块必须被 2.4 机器识别
+  printf 'level: 2\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $(sanitize_git) status
+  assert_eq "追加块后 level:2 status exit 0（2.4 认块）" 0 "$R_RC"
+  assert_contains "追加块后结论行 L0-L2" "$R_OUT" "L0-L2"
+}
+
+s51_husky_foreign_hookspath() {
+  echo "--- 场景51：husky 式外来 hooksPath（§6.1：一律不动 hooksPath，直接对目录内 pre-commit 追加）"
+  local T; T=$(new_case)
+  git_seed_repo "$T"
+  ( cd "$T" && git config core.hooksPath .husky && mkdir -p .husky \
+      && printf '#!/usr/bin/env bash\necho HUSKY-COMMIT\n' > .husky/pre-commit \
+      && chmod +x .husky/pre-commit ) >/dev/null 2>&1
+  run_cli "$T" init --yes
+  assert_eq "husky 场景 init exit 0" 0 "$R_RC"
+  assert_eq "外来 core.hooksPath 未被改动（§6.1 防停用 husky）" ".husky" "$(hookspath_of "$T")"
+  assert_file_has "原 husky 内容保留" "$T/.husky/pre-commit" "echo HUSKY-COMMIT"
+  assert_file_has "对 .husky/pre-commit 追加哨兵块首行" "$T/.husky/pre-commit" "$GATE_MARKER"
+  assert_file_has "对 .husky/pre-commit 追加哨兵块尾行" "$T/.husky/pre-commit" "$GATE_MARKER_END"
+  assert_contains "追加块内有非注释调用行" "$(sentinel_noncomment "$T/.husky/pre-commit")" "adr-verify.sh"
+  assert_exec ".husky/pre-commit 仍有执行位" "$T/.husky/pre-commit"
+  # 2.4 接线判定：level: 2 下必须 PASS（证明判据按 hooksPath 归一化目录判定，不写死 .githooks）
+  printf 'level: 2\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/feature/2026-01-02-husky.md"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $(sanitize_git) status
+  assert_eq "husky 接线后 status exit 0（2.4 PASS）" 0 "$R_RC"
+  assert_contains "husky 接线结论行 L0-L2" "$R_OUT" "L0-L2"
+}
+
+s52_init_idempotent() {
+  echo "--- 场景52：已接线幂等（连续两次 init --yes，钩子与 A1 的 md5 不变、哨兵块不重复）"
+  local T h1 h2 g1 g2; T=$(new_case)
+  git_seed_repo "$T"
+  run_cli "$T" init --yes
+  assert_eq "首次 init exit 0" 0 "$R_RC"
+  h1=$(md5_of "$T/.githooks/pre-commit"); g1=$(md5_of "$T/.meta/gates/adr-verify.sh")
+  if [ "$h1" = "MISSING" ] || [ "$g1" = "MISSING" ]; then
+    bad "前提取证：首次 init 未生成钩子/A1（缺 .githooks/pre-commit 或 .meta/gates/adr-verify.sh）"
+  else
+    ok "前提取证：首次 init 已生成钩子与 A1"
+  fi
+  run_cli "$T" init --yes
+  assert_eq "二次 init exit 0（has_meta 分支仍补装配，§6.2）" 0 "$R_RC"
+  h2=$(md5_of "$T/.githooks/pre-commit"); g2=$(md5_of "$T/.meta/gates/adr-verify.sh")
+  assert_eq "钩子文件 md5 不变（未重复追加）" "$h1" "$h2"
+  assert_eq "A1 资产 md5 不变" "$g1" "$g2"
+  assert_eq "哨兵尾行只出现 1 次（防「每次追加一块」冒充幂等）" 1 \
+    "$(grep -cF "$GATE_MARKER_END" "$T/.githooks/pre-commit" 2>/dev/null || printf 0)"
+}
+
+s53_init_dry_run() {
+  echo "--- 场景53：--dry-run 不落盘、不改 core.hooksPath（§4 矩阵）"
+  local T; T=$(new_case)
+  git_seed_repo "$T"
+  run_cli "$T" init --yes --dry-run
+  assert_eq "git 仓内 init --dry-run exit 0" 0 "$R_RC"
+  assert_missing "dry-run 未落盘（.meta 不存在）" "$T/.meta"
+  assert_missing "dry-run 未生成 .githooks/pre-commit" "$T/.githooks/pre-commit"
+  assert_eq "dry-run 未改 core.hooksPath" "" "$(hookspath_of "$T")"
+  # 正向控制：同一目录真跑 init 必须落装配（证明上面「未落盘」不是空断言）
+  run_cli "$T" init --yes
+  assert_exists "真跑 init 生成钩子（正向控制）" "$T/.githooks/pre-commit"
+  assert_eq "真跑 init 设 hooksPath（正向控制）" ".githooks" "$(hookspath_of "$T")"
+  # 已存在 .meta 但未接线 → --dry-run 仍只打印（R1 的 dry-run 语义）
+  T=$(new_case); git_seed_repo "$T"
+  run_cli "$T" init --yes
+  git_local "$T" config --unset core.hooksPath >/dev/null 2>&1
+  rm -f "$T/.githooks/pre-commit"
+  run_cli "$T" init --yes --dry-run
+  assert_eq "已初始化实例 --dry-run exit 0" 0 "$R_RC"
+  assert_eq "已初始化实例 --dry-run 不改 hooksPath" "" "$(hookspath_of "$T")"
+  assert_missing "已初始化实例 --dry-run 不生成钩子" "$T/.githooks/pre-commit"
+  # 正向控制：去掉 --dry-run → has_meta 分支必须补齐（R1/§6.2）
+  run_cli "$T" init --yes
+  assert_exists "has_meta 分支真跑 init 补齐钩子（R1）" "$T/.githooks/pre-commit"
+  assert_eq "has_meta 分支真跑 init 设 hooksPath（R1）" ".githooks" "$(hookspath_of "$T")"
+}
+
+s54_init_non_tty_requires_yes() {
+  echo "--- 场景54：非 TTY 且未给 --yes → 非零退出（R15，不得静默 no-op）"
+  local T; T=$(new_case)
+  R_OUT=$( cd "$T" && printf '' | bash "$ROOT/ponygo" init 2>&1 ); R_RC=$?
+  assert_nonzero "printf '' | ponygo init → 非零（R15）" "$R_RC"
+  assert_contains "文案给出 --yes 指引" "$R_OUT" "--yes"
+  assert_missing "非 TTY 未确认 → 不落盘" "$T/.meta"
+  # 正向控制：同一目录加 --yes → exit 0（证明非零来自 TTY 判据，不是目录问题）
+  run_cli "$T" init --yes
+  assert_eq "同目录 init --yes → exit 0（正向控制）" 0 "$R_RC"
+  assert_exists "确认后骨架已落盘（正向控制）" "$T/.meta/meta.yaml"
+}
+
+s55_ladder_24_strong() {
+  echo "--- 场景55：2.4 强判据反证（一行注释骗不过；哨兵块内调用被注释也骗不过）"
+  local T G; G=$(sanitize_git); T=$(new_case)
+  git_seed_repo "$T"; run_cli "$T" init --yes
+  printf 'level: 2\n' > "$T/.meta/meta.yaml"
+  write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
+  # 2.1–2.3 隔离：保证 FAIL 只能归因到 2.4（否则「报 2.4」断言会被别的原因顶掉）
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
+  printf 'x\n' > "$T/.meta/gates/format.spec.md"
+  git_local "$T" config core.hooksPath .githooks >/dev/null 2>&1
+  mkdir -p "$T/.githooks"
+
+  # ① 只有一行注释写 adr-verify（R5 反例）
+  cat > "$T/.githooks/pre-commit" <<'EOF'
+#!/usr/bin/env bash
+# adr-verify：本钩子本应调用 .meta/gates/adr-verify.sh（这里只有注释）
+echo hook
+EOF
+  chmod +x "$T/.githooks/pre-commit"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G status
+  assert_eq "仅注释提及 adr-verify → status exit 1（R5）" 1 "$R_RC"
+  assert_contains "仅注释提及 → 报 2.4" "$R_OUT" "2.4"
+  assert_contains "2.4 失败文案给出补救（重跑 ponygo init）" "$R_OUT" "ponygo init"
+
+  # ② 哨兵块在、但块内调用行被注释掉（2.4 ④ 反例）
+  cat > "$T/.githooks/pre-commit" <<'EOF'
+#!/usr/bin/env bash
+echo hook
+# >>> ponygo-gate: adr-verify v1 >>>
+# if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
+#   bash "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" || exit 1
+# fi
+# <<< ponygo-gate: adr-verify v1 <<<
+EOF
+  chmod +x "$T/.githooks/pre-commit"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G status
+  assert_eq "哨兵块内调用被注释 → status exit 1（2.4 ④）" 1 "$R_RC"
+  assert_contains "哨兵块内调用被注释 → 报 2.4" "$R_OUT" "2.4"
+
+  # ③ 正向控制：补成真接线 → PASS（证明红来自缺非注释调用行，非其它原因）
+  cat > "$T/.githooks/pre-commit" <<'EOF'
+#!/usr/bin/env bash
+echo hook
+# >>> ponygo-gate: adr-verify v1 >>>
+if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
+  bash "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" || exit 1
+fi
+# <<< ponygo-gate: adr-verify v1 <<<
+EOF
+  chmod +x "$T/.githooks/pre-commit"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G status
+  assert_eq "真接线 → status exit 0（正向控制）" 0 "$R_RC"
+  assert_contains "真接线结论行 L0-L2" "$R_OUT" "L0-L2"
+}
+
+s56_dual_write_parity() {
+  echo "--- 场景56：双写一致性（init 生成的 A1/A2/A4 与仓库模板 eol 归一后逐字节一致）"
+  local T a; T=$(new_case)
+  git_seed_repo "$T"
+  run_cli "$T" init --yes
+  assert_eq "init exit 0" 0 "$R_RC"
+  for a in adr-verify.sh adr-verify.spec.sh ci-verify.sh; do
+    assert_exists "生成 .meta/gates/$a" "$T/.meta/gates/$a"
+    assert_same_as_template "生成 $a 与仓库模板 eol 归一后一致" \
+      "$T/.meta/gates/$a" "$ROOT/.meta/gates/$a"
+  done
+}
+
+s57_ci_conditional_generation() {
+  echo "--- 场景57：CI 条件生成（§6.3：github 证据 → A5；无/他 provider → 不生成 + status 报远端层）"
+  local T G; G=$(sanitize_git)
+  # ① git remote 含 github → 生成 A5（薄壳），A4 可执行且自检 exit 0
+  T=$(new_case); git_seed_repo "$T"
+  git_local "$T" remote add origin https://github.com/example/demo.git >/dev/null 2>&1
+  run_cli "$T" init --yes
+  assert_eq "github remote 场景 init exit 0" 0 "$R_RC"
+  assert_exists "github 证据 → 生成 ponygo-governance.yml" "$T/.github/workflows/ponygo-governance.yml"
+  assert_file_has "A5 是薄壳：只调 ci-verify.sh" "$T/.github/workflows/ponygo-governance.yml" "ci-verify.sh"
+  assert_exists "A4 ci-verify.sh 恒生成（§6.3）" "$T/.meta/gates/ci-verify.sh"
+  assert_exec "A4 ci-verify.sh 可执行" "$T/.meta/gates/ci-verify.sh"
+  run_script "$T" .meta/gates/ci-verify.sh
+  assert_eq "A4 ci-verify.sh 在本仓实跑 exit 0" 0 "$S_RC"
+  # ② 预置 .github/ 同样视为 github 证据
+  T=$(new_case); git_seed_repo "$T"; mkdir -p "$T/.github/workflows"
+  run_cli "$T" init --yes
+  assert_exists "预置 .github/ → 生成 A5" "$T/.github/workflows/ponygo-governance.yml"
+  # ③ 无任何 provider → 不生成 A5，A4 仍生成，status 报「远端层」缺口
+  T=$(new_case); git_seed_repo "$T"
+  run_cli "$T" init --yes
+  assert_missing "无 provider → 不生成 A5" "$T/.github/workflows/ponygo-governance.yml"
+  assert_exists "无 provider 时 A4 仍生成（门禁本体恒在）" "$T/.meta/gates/ci-verify.sh"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G status
+  assert_contains "status 报「远端层」缺口行" "$R_OUT" "远端层"
+  # ④ 非 GitHub 但检出其它 provider（gitlab）→ 不生成 A5，status 给可执行指引
+  T=$(new_case); git_seed_repo "$T"; printf 'stages: [test]\n' > "$T/.gitlab-ci.yml"
+  run_cli "$T" init --yes
+  assert_missing "gitlab 项目 → 不生成 A5" "$T/.github/workflows/ponygo-governance.yml"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G status
+  assert_contains "gitlab 项目 status 报远端层" "$R_OUT" "远端层"
+  assert_contains "gitlab 项目 status 给出 ci-verify.sh 可执行指引" "$R_OUT" "ci-verify.sh"
+}
+
 s42_observe_monorepo_subcomponents
 s43_observe_pipeline_awareness
 s44_observe_subcomponent_blocking
 s45_observe_diff_timeout_budget
-
+s46_init_gate_wiring
+s47_adr_verify_semantics
+s48_adr_verify_toctou
+s49_adr_verify_rename
+s50_preexisting_hook_preserved
+s51_husky_foreign_hookspath
+s52_init_idempotent
+s53_init_dry_run
+s54_init_non_tty_requires_yes
+s55_ladder_24_strong
+s56_dual_write_parity
+s57_ci_conditional_generation
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
 [ "$FAIL" -eq 0 ] || exit 1

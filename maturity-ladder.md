@@ -140,12 +140,21 @@ L0–L2 的每条退出标准，落到**布尔检查项 + 锚定命令**。这�
 | 2.1 | `gates/` 目录存在且非空 | `find .meta/gates -type f ! -name 'README.md' ! -name '.gitkeep' \| wc -l` | 结果 > 0 |
 | 2.2 | 门禁脚本可运行（非零退出是"拒绝"语义） | `<gate-script> --help` 或跑一次空样本 | 返回可理解的帮助 / 退出码 |
 | 2.3 | 至少一个门禁带负样本 spec（构造非法样本证明门会拒绝） | `find .meta/gates -type f -name '*.spec.*'` | 存在 |
-| 2.4 | 本地钩子已挂载（若交付） | `git config core.hooksPath` | 指向已配置路径 |
+| 2.4 | 本地钩子已挂载**且真接线**（五条 AND）：① `core.hooksPath` 已设 ② 归一化（`pwd -P`/`realpath`）后目录内 `pre-commit` **存在** ③ 该文件**可执行**（`-x`；非可执行钩子被 git 静默忽略） ④ 文件含哨兵尾行 `# <<< ponygo-gate: adr-verify v1 <<<`，且哨兵块内有**非注释行**调用 `adr-verify.sh` ⑤ `<root>/.meta/gates/adr-verify.sh` 存在 | `p=$(git config core.hooksPath) && d=$(cd "$p" && pwd -P) && test -x "$d/pre-commit" && grep -qxF '# <<< ponygo-gate: adr-verify v1 <<<' "$d/pre-commit" && sed -n '/>>> ponygo-gate: adr-verify v1 >>>/,/<<< ponygo-gate: adr-verify v1 <<</p' "$d/pre-commit" \| grep -vE '^[[:space:]]*#' \| grep -q 'adr-verify\.sh' && test -f .meta/gates/adr-verify.sh` | ①–⑤ 全真 → PASS；任一不真 → FAIL（文案给出唯一补救命令） |
 | 2.5 | 文档分层已激活（**条件判据**）：`docs-tier: on` 声明且 `docs-tier/README.md` 非模板态（含"已激活文档家"标记） | `grep -q '已激活' .meta/docs-tier/README.md` | 存在（仅当 `meta.yaml` 含 `docs-tier: on` 时校验；未声明/`off` 时 2.5 SKIPPED 不计入 PASS） |
 
 > L2 判据的关键不在"脚本多"，而在**每条"必须/禁止"承诺都能被一条非零退出命令抓到**（P2）。2.2–2.3 是 L2 能被称为"承诺可验"的最低自证。
 > 2.1 的 README/`.gitkeep` 豁免：占位说明文件不算门禁落地。2.2 的机械化实现以 `bash -n` 语法校验为**代理判据**，真判据仍是 `<gate> --help` / 空样本拒绝非零退出，供人工补验。
 > 2.3 的机械化实现：存在性判据（形状，靠 review）。**执行判据**是 opt-in 的 `ponygo audit --run-specs`——跑 `*.spec.sh` 并断言各自 exit 0（契约见 `.meta/gates/README.md`；有 `timeout` 时 30 秒上限；`PONYGO_IN_SPEC=1` 时 SKIPPED 且**不计入 PASS**）。为什么默认不执行：只读命令（`status`/`audit`）不得执行仓库脚本（对陌生遗留仓库 = 任意代码执行），故执行需显式开关。"空 spec 文件"过得了存在性，证明不了任何拒绝语义。
+> **2.4 为加强判据（本地钩子真接线，2026-10-29 起）**：原判据「`core.hooksPath` 指向已配置路径」只证明**目录被指向**，不证明钩子真在跑——一行 `grep 'adr-verify'` 命中注释即可骗过，非可执行钩子被 git 静默忽略又让判据假达标（R3/R5）。故 2.4 = 表中①–⑤ 五条 AND，`hooksPath` 归一化（`realpath` / `pwd -P`）后比较，绝对路径与符号链接不再被误判"指向别处"（R9）。**唯一补救命令**：`git config core.hooksPath .githooks` 后重跑 `ponygo init`（幂等补齐 A1/A2/A4、追加哨兵块、`chmod +x`）；`hooksPath` 已设（如 husky 绝对路径）时 `init` 一律不动它，直接对该目录的 `pre-commit` 追加哨兵块。①–⑤ 全真才 PASS，缺一即 FAIL——判据加强不改编号，结论行文案仍是 `2.1–2.4 PASS`。判据原理与代价见 `.agents/notes/implemented/process/2026-10-29-forced-adr-gate-wiring.md`。
+> 2.4 的哨兵块形态（`pre-commit` 内，首尾同文，marker 行 `# ponygo-gate: adr-verify v1` 供机器识别）：
+> ```bash
+> # >>> ponygo-gate: adr-verify v1 >>>
+> if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
+>   bash "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" || exit 1
+> fi
+> # <<< ponygo-gate: adr-verify v1 <<<
+> ```
 > 2.5 的"文档分层已激活"由 `ponygo init` 生成**模板态**（仅骨架占位）——升到 L2 时把 `.meta/docs-tier/README.md` 推进为"已激活文档家清单"（doc-sync 门作为 L3 依赖，§2），判据只锁"已从模板态离开"这一形状。tier 放置正确性靠 review（§2 诚实声明）。
 > **2.5 为条件判据（v2.4 起，Q1=A）**：声明载体是 `meta.yaml` 的 `docs-tier: on|off` 键（顶格、值仅小写 on/off；`on` = 启用文档分层并校验 2.5，`off` = 显式 opt-out，未声明 = SKIP + WARN 催声明）。状态机：**undeclared = SKIP + WARN 催声明（不计入 PASS）**；**off = 显式 opt-out（结论行改写为"2.1–2.4 PASS；2.5 未启用"，禁写"全部 PASS"）**；**on + 家清单仍有 `【TODO】` 残留 = FAIL**；**off + 已激活 = 矛盾 WARN（声明与事实不符，催对齐）**；**undeclared + 已激活 = PASS（实际做到优先于声明）**。`docs-tier: on` 但模板态未激活同样 FAIL。仅 `level >= 2` 时生效（L1 声明 docs-tier: on 被忽略，2.x 不在 L1 判据内），`lv >= 3` 同 L2 分支处理。声明为何不是"目录存在即可"：目录在 init 时即生成模板态，存在 ≠ 已激活——若"存在即声明"，模板态实例会被误判为已启用（见 §3.3 的 L 包实施）。
 

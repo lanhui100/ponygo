@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# 本地层（秒级）门禁：暂存区 ADR 格式门。
+# 由 `ponygo init` 生成（不存在时）或**非破坏性追加**哨兵块（已存在未接线时可执行时）；
+# 本仓自用 = dogfood。允许 `git commit --no-verify` 绕过，但 CI 层（A4/A5）兜底。
+#
+# marker（2.4 机器识别用，与哨兵同文）：下一行
+# ponygo-gate: adr-verify v1
+#
+# >>> ponygo-gate: adr-verify v1 >>>
+if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
+  bash "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" || exit 1
+fi
+# <<< ponygo-gate: adr-verify v1 <<<

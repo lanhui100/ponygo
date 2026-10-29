@@ -1,6 +1,75 @@
 # gates/ —— 门禁（把承诺转成非零退出命令）
 
 **首版（L2 及以下）此目录为空。** 升到 L2 时放你的第一个门禁，并同步 meta.yaml 的 level 改为 2。
+（ponygo 框架仓自身是例外：它在此目录 dogfood 自己的 ADR 门，见下节——实例仓照旧从空开始。）
+
+## 本仓已接线的门禁（ADR 门，A1–A5）
+
+「交付即接线」：`ponygo init` 幂等装配下列资产（`.meta` 已存在也装配，见 plan-freeze §6.2）；
+repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致。
+
+| 资产 | 路径 | 角色 | 退出语义 |
+|---|---|---|---|
+| A1 | `.meta/gates/adr-verify.sh` | 暂存区 ADR 格式门（无参=暂存 ADR；带参=指定路径） | 0 放行 / 非零拒绝 |
+| A2 | `.meta/gates/adr-verify.spec.sh` | A1 的负样本执行判据（非法→拒、合法→放行、TOCTOU→拒） | 0 = 自检通过 |
+| A3 | `.githooks/pre-commit`（或既有钩子内追加块） | 本地层挂载点 | 转发 A1 的退出码 |
+| A4 | `.meta/gates/ci-verify.sh` | forge 无关全树门（verify-note 整树 + A2） | 0 放行 / 非零拒绝 |
+| A5 | `.github/workflows/ponygo-governance.yml` | GitHub 薄适配器（checkout + A4） | 同 A4 |
+
+**宇宙表只登记 A1/A2/A4**（不可变资产）：A3/A5 是实例可编辑文件（有人会追加自己的钩子逻辑、
+改 CI 触发），塞进 `UPGRADE_UNIVERSE` 会让实例永久 drift 红。
+
+### 承诺 → 非零退出命令
+
+| 承诺（maturity-ladder §5） | 命令 | 命中判据 |
+|---|---|---|
+| 落了 ADR 就必须过机械格式门（暂存区） | `bash .meta/gates/adr-verify.sh` | 1.5–1.8 |
+| 暂存字节 = 校验字节（不许"暂存后偷改"） | 同上（内建 R6 比对） | R6 TOCTOU |
+| 重命名 ADR 不绕过门 | 同上（`--diff-filter=ACMR`） | R7 |
+| 全树 ADR 格式常绿 | `bash .agents/skills/write-adr/verify-note.sh` | 1.1–1.9 |
+| 门自己会拒绝非法样本 | `bash .meta/gates/adr-verify.spec.sh` | A2 |
+| 远端层与本地层同一套结论 | `bash .meta/gates/ci-verify.sh` | A4（= A1 全树 + A2） |
+
+**判定真源唯一**：格式判据只存在于 `.agents/skills/write-adr/verify-note.sh`；
+A1 只做它做不到的两件事——TOCTOU 字节比对与 `ACMR` 覆盖面——不在此目录复刻 1.1–1.9
+（复刻必然漂移，故 `ponygo gate adr` 子命令被否决）。
+
+### 挂载方式（非破坏性）
+
+- `core.hooksPath` 未设 → 设为 `.githooks` 并**回读校验**；已设（含 husky 绝对路径）→ **一律不动**，
+  直接对该目录下的 `pre-commit` 动手（改 hooksPath 会静默停用 husky v9 的 `.husky/_` 链）。
+- `pre-commit` 不存在 → 新建 A3 并 `chmod +x`；
+- 已接线（含 marker）→ 什么都不做；存在但未接线**且可执行** → **追加**哨兵块，原有字节零改动、不动权限：
+
+```bash
+# >>> ponygo-gate: adr-verify v1 >>>
+if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
+  bash "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" || exit 1
+fi
+# <<< ponygo-gate: adr-verify v1 <<<
+```
+
+- 存在但**不可执行** → 不改权限（激活沉睡钩子属破坏性副作用），2.4 FAIL 并打印
+  「chmod +x 或删除该文件后重跑 init」。
+- 判据 2.4 的机器识别 = `hooksPath` 归一化目录内 `pre-commit`：①存在 ②可执行 ③含哨兵尾行
+  `# <<< ponygo-gate: adr-verify v1 <<<` ④该块内有**非注释**行调用 `adr-verify.sh`
+  ⑤ `<root>/.meta/gates/adr-verify.sh` 存在。①–⑤全真才 PASS（"写一行注释就骗过"已被封死）。
+- 前置条件：git 会**静默忽略**不可执行的钩子——生成/追加后务必确认 `test -x`。
+
+### A2 的负样本怎么读
+
+`adr-verify.spec.sh` 在 `mktemp -d` 临时仓里造样本（`trap … EXIT` 清理，仓库只读）：
+合法 ADR（带参/无参两路）→ 断言 A1 为 0；时态错位（`proposed` 带 `## Decision`）、
+`implemented` 带提案时代标题、`Status` 与目录不一致 → 断言 A1 非零；
+staged 后又在工作区改动 → 断言 A1 非零**且**文案含「ADR 有未暂存改动，请先 git add」；
+无暂存 ADR / 无 `.agents/notes` → 断言放行。
+
+诚实条款：`## Alternatives considered` 是 notes/README 的强制契约，但判定真源 1.1–1.9
+**不含**这一项，故该 case 是**探针**（真源覆盖则断言拒绝，未覆盖则打 `WARN` 并声明不计入 PASS）；
+本目录不私设第二真值。执行判据只证明"门会响"，抽样无偏靠 review。
+
+运行时机：`bash .meta/gates/ci-verify.sh`（CI/本地全树）、`ponygo audit --run-specs`（opt-in，
+届时本 spec 因 `PONYGO_IN_SPEC=1` 报 SKIPPED、不计入 PASS）、pre-commit 不跑它（秒级预算）。
 
 ## 门禁分层的三个时间经济层（P7，dsh 实证）
 
