@@ -26,15 +26,25 @@ cd "$ROOT" || exit 1
 
 fail=0
 
-echo "== [1/2] 全树 ADR 格式（verify-note.sh，1.1–1.10）=="
+echo "== [1/3] 全树 ADR 格式（verify-note.sh，1.1–1.10）=="
 if ! bash .agents/skills/write-adr/verify-note.sh; then
   echo "ci-verify: FAIL 全树 ADR 格式门未通过 → 逐项修 FAIL 后重跑" >&2
   fail=1
 fi
 
-echo "== [2/2] 暂存区门负样本 spec（adr-verify.spec.sh）=="
+echo "== [2/3] 暂存区门负样本 spec（adr-verify.spec.sh）=="
 if ! bash .meta/gates/adr-verify.spec.sh; then
   echo "ci-verify: FAIL 门禁自检未通过（A1 的拒绝/放行语义与预期不符）" >&2
+  fail=1
+fi
+
+echo "== [3/3] 工作区临时产物卫生门与 spec（scratch-hygiene）=="
+if ! bash .meta/gates/scratch-hygiene.sh; then
+  echo "ci-verify: FAIL 工作区临时产物卫生门未通过" >&2
+  fail=1
+fi
+if ! bash .meta/gates/scratch-hygiene.spec.sh; then
+  echo "ci-verify: FAIL scratch-hygiene 负样本自检未通过" >&2
   fail=1
 fi
 
@@ -42,5 +52,5 @@ if [ "$fail" -ne 0 ]; then
   echo "ci-verify: 未通过（见上方 FAIL）" >&2
   exit 1
 fi
-echo "ci-verify: 通过（全树 ADR 格式 + 门禁自检）"
+echo "ci-verify: 通过（全树 ADR 格式 + 门禁自检 + 临时产物卫生）"
 exit 0

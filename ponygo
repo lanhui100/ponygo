@@ -130,6 +130,22 @@ write_skeleton() {
   mkdir -p "$DECISIONS_DIR"/{proposed,implemented,rejected,archived}
   mkdir -p "$META_DIR"/{constitution,gates,docs-tier}
   mkdir -p "$SKILLS_DIR"
+  mkdir -p .scratch
+
+  # 临时工作区契约说明（已存在则不覆盖）
+  if [ ! -f .scratch/README.md ]; then
+    cat > .scratch/README.md <<'PONYGO_EOF'
+# .scratch/ —— 临时与过程副产物工作区
+
+这是本项目的**单一临时边界**。一切临时脚本、实验抓包、调试日志、验证截图等必须且只能写在此处，严禁散落至项目根目录或源代码旁。
+
+## 规则契约
+
+1. **强忽略**：本目录已在 `.gitignore` 显式声明，任何子文件与目录均不纳入版本控制。
+2. **目录即标签（TTL 编码）**：子目录必须以日期为前缀：`.scratch/<yyyy-mm-dd>-<topic>/`。
+3. **退场纪律**：任务交付后蒸馏有效证据至 `docs/dev-team/receipts/`，销毁对应目录；超 7 天由清理机制兜底。
+PONYGO_EOF
+  fi
 
   # 归档搜索隔离（DSH 实证：防陈旧事实按词法命中挤掉当前结果）；已有 .rgignore 则追加不覆盖
   if [ -f .rgignore ]; then
@@ -140,7 +156,7 @@ write_skeleton() {
 
   # 最小 .gitignore（栈无关；构建产物按栈自行补充；已存在则不覆盖）
   if [ ! -f .gitignore ]; then
-    printf '# ponygo 最小 .gitignore（栈无关）\n# OS/编辑器噪声：\n.DS_Store\nThumbs.db\n*~\n# 构建产物/依赖目录按栈补充，例如：\n# target/         # Rust\n# node_modules/   # Node\n# __pycache__/    # Python\n' > .gitignore
+    printf '# ponygo 最小 .gitignore（栈无关）\n# OS/编辑器噪声：\n.DS_Store\nThumbs.db\n*~\n\n# 临时与过程副产物（工作区抗熵增）\n.scratch/\n.dev-team/\n\n# 构建产物/依赖目录按栈补充，例如：\n# target/         # Rust\n# node_modules/   # Node\n# __pycache__/    # Python\n' > .gitignore
   fi
 
   # notes/README.md：缺失时生成与模板仓库 eol 归一后逐字节一致的全量版（内容源收敛为本 heredoc 常量）

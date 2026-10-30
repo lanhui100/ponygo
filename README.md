@@ -51,14 +51,14 @@ curl -fsSL https://raw.githubusercontent.com/lanhui100/ponygo/main/install.sh | 
 #    未发布时按下方口径本地自算。awk 剥掉文件名列，与 install.sh 的整串比对口径对齐）
 #    fail-closed 守卫：SHA 为空（附件 404 / 下载失败）→ 立即退出，不安装
 set -o pipefail
-SHA=$(curl -fsSL https://github.com/lanhui100/ponygo/releases/download/v2.7.0/ponygo.sha256 | awk '{print $1}')
+SHA=$(curl -fsSL https://github.com/lanhui100/ponygo/releases/download/v2.8.0/ponygo.sha256 | awk '{print $1}')
 [ -n "$SHA" ] || { echo "无法获取校验和（未发布或网络失败），拒绝安装。" >&2; exit 1; }
 # 2) 钉版本 + 校验和安装（installer 与载荷同钉 tag：bootstrap 行取 tag 化 install.sh，不再浮动 main）
-curl -fsSL https://raw.githubusercontent.com/lanhui100/ponygo/v2.7.0/install.sh | \
-  PONYGO_VERSION=v2.7.0 PONYGO_SHA256="$SHA" bash
+curl -fsSL https://raw.githubusercontent.com/lanhui100/ponygo/v2.8.0/install.sh | \
+  PONYGO_VERSION=v2.8.0 PONYGO_SHA256="$SHA" bash
 ```
 
-校验和的生成口径（维护者）：`git checkout v2.7.0 && sha256sum ponygo | awk '{print $1}' > ponygo.sha256`，
+校验和的生成口径（维护者）：`git checkout v2.8.0 && sha256sum ponygo | awk '{print $1}' > ponygo.sha256`，
 随 Release 附件发布。`ponygo` 在仓库中以 LF 存储（`.gitattributes: eol=lf`），故 raw 下载与本地自算口径一致；
 `install.sh` 不设 `PONYGO_VERSION` 时仍取 main（兼容分支，供未发布新版本时使用）。
 **注意：校验和只保 `ponygo` 本体，不保 `install.sh` 自身**——bootstrap 行钉 tag 后 installer 与载荷同源，

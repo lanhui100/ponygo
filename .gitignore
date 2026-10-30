@@ -3,6 +3,11 @@
 .DS_Store
 Thumbs.db
 *~
+
+# 临时与过程副产物（工作区抗熵增）
+.scratch/
+.dev-team/
+
 # 构建产物/依赖目录按栈补充，例如：
 # target/         # Rust
 # node_modules/   # Node
