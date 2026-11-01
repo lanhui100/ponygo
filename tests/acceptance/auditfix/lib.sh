@@ -106,6 +106,17 @@ assert_same_tree() { # <描述> <dir> <before>
   after=$(snap "$2")
   if [ "$after" = "$3" ]; then ok "$1"; else bad "$1（文件树已变化，零写被破坏）"; fi
 }
+# 快照差集（TEST-DEFECT 修复）：snap 用 LC_ALL=C 定序，comm 若按环境 locale
+# （如 en_US.UTF-8）比对会报 "input is not in sorted order" 并给出错误计数——
+# 故两端一律先 LC_ALL=C sort 再喂 LC_ALL=C comm（只改测试侧，不动断言语义）。
+snap_added() { # <before-snapshot> <after-snapshot> → 只出现在 after 的行数
+  LC_ALL=C comm -13 <(printf '%s\n' "$1" | LC_ALL=C sort) \
+                     <(printf '%s\n' "$2" | LC_ALL=C sort) | wc -l | tr -d ' '
+}
+snap_removed() { # <before-snapshot> <after-snapshot> → 只出现在 before 的行数
+  LC_ALL=C comm -23 <(printf '%s\n' "$1" | LC_ALL=C sort) \
+                     <(printf '%s\n' "$2" | LC_ALL=C sort) | wc -l | tr -d ' '
+}
 
 # ---------- 夹具 ----------
 # 造一个「机械判据可通过」的治理仓：git 仓 + 真 ponygo init 骨架 + 一条合法 ADR + 声明级。

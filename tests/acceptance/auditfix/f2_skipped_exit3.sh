@@ -55,6 +55,55 @@ SPECEOF
   assert_not_contains "F2-3 NOGO：禁止把 SKIPPED 当 PASS（「spec 全部自检通过」）" "$R_OUT" "spec 全部自检通过"
 fi
 
+# ---- F2-9（契约演进 #5）：**部分** spec 自报 SKIPPED 同样是「证据不足」----
+# 判定：任一 spec 自报 SKIPPED（未真正验证）→ exit 3；FAIL 仍优先（1 > 3，见 F2-8）。
+# 只有全部 spec 真跑通过才允许结论行出现「已真跑并通过」；有 skipped 时须给
+# 「N 真跑通过 / M 未验证（SKIPPED）」计数，且禁写「机械判据全部 PASS」。
+T=$(new_case)
+if gov_repo "$T" 1; then
+  rm -f "$T"/.meta/gates/*.spec.sh
+  cat > "$T/.meta/gates/a-pass.spec.sh" <<'SPECEOF'
+#!/usr/bin/env bash
+# 验收夹具：真跑通过（exit 0，不自报 SKIPPED）
+set -u
+printf '[a-pass.spec] [ok] 门拒绝了非法样本，放行了合法样本
+'
+exit 0
+SPECEOF
+  cat > "$T/.meta/gates/b-skip.spec.sh" <<'SPECEOF'
+#!/usr/bin/env bash
+# 验收夹具：自报 SKIPPED 且 exit 0（= 未真正验证，不得计入 PASS）
+set -u
+printf '[b-skip.spec] SKIPPED（夹具：本次未真正跑门）
+'
+exit 0
+SPECEOF
+  chmod +x "$T/.meta/gates/a-pass.spec.sh" "$T/.meta/gates/b-skip.spec.sh"
+
+  run_in "$T" audit --run-specs
+  assert_rc_is "F2-9 部分 SKIPPED（1 真过 + 1 SKIPPED）→ exit 3（证据不足）" 3 "$R_RC"
+  assert_contains "F2-9 GO：输出披露 SKIPPED（未验证）事实" "$R_OUT" "SKIPPED"
+  assert_contains "F2-9 GO：输出用「未验证」措辞" "$R_OUT" "未验证"
+  assert_matches "F2-9 GO：输出给出真跑通过计数面" "$R_OUT" '真跑通过'
+  assert_not_contains "F2-9 NOGO：存在 SKIPPED 时不得写「机械判据全部 PASS」" \
+    "$R_OUT" "机械判据全部 PASS"
+  assert_not_contains "F2-9 NOGO：存在 SKIPPED 时不得写「已真跑并通过」" "$R_OUT" "已真跑并通过"
+fi
+
+# ---- F2-9 反向控制：两个 spec 都真过 → exit 0 且结论行「已真跑并通过」----
+T=$(new_case)
+if gov_repo "$T" 1; then
+  rm -f "$T"/.meta/gates/*.spec.sh
+  printf '#!/usr/bin/env bash\nprintf "[a-pass.spec] [ok] ok\\n"\nexit 0\n' > "$T/.meta/gates/a-pass.spec.sh"
+  printf '#!/usr/bin/env bash\nprintf "[c-pass.spec] [ok] ok\\n"\nexit 0\n' > "$T/.meta/gates/c-pass.spec.sh"
+  chmod +x "$T/.meta/gates/a-pass.spec.sh" "$T/.meta/gates/c-pass.spec.sh"
+
+  run_in "$T" audit --run-specs
+  assert_rc_is "F2-9 反向控制：全部真跑通过 → exit 0" 0 "$R_RC"
+  assert_contains "F2-9 反向控制 GO：结论行「已真跑并通过」" "$R_OUT" "已真跑并通过"
+  assert_not_contains "F2-9 反向控制 NOGO：不得出现「未验证」" "$R_OUT" "未验证"
+fi
+
 # ---- F2-6 OPEN-1：dry-run 不执行、不判定 → exit 0 ----
 T=$(new_case)
 if gov_repo "$T" 1; then

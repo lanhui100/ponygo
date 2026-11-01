@@ -96,7 +96,9 @@ staged 后又在工作区改动（两个方向：暂存合法→工作区改、�
 本目录仍不私设第二真值（判据实现只在 verify-note.sh 一处）。执行判据只证明"门会响"，抽样无偏靠 review。
 
 运行时机：`bash .meta/gates/ci-verify.sh`（CI/本地全树）、`ponygo audit --run-specs`（opt-in，
-届时本 spec 因 `PONYGO_IN_SPEC=1` 报 SKIPPED、不计入 PASS）、pre-commit 不跑它（秒级预算）。
+本 spec 会被**真跑**并断言 exit 0）、pre-commit 不跑它（秒级预算）。
+若 `audit --run-specs` 最终没有**任何** spec 被真正执行（0 个 / 全部自报 SKIPPED / 递归护栏拦截），
+`audit` 以 **exit 3（证据不足）** 结束，且结论行不得出现「机械判据全部 PASS」。
 
 ## 门禁分层的三个时间经济层（P7，dsh 实证）
 
@@ -140,7 +142,10 @@ bash .meta/gates/<name>.spec.sh   # CI / pre-push 层的等价写法
 - **只读仓库**：样本一律建在 `mktemp -d` 临时目录、退出时清理；不得改动仓库文件；
 - **秒级**：有 `timeout` 时施加 30 秒上限（挂死的 spec 不会拖死体检）；
 - **exit 0 = 自检通过**（"门确实会拒绝非法样本"）；非零 → 报 FAIL 并回显该 spec 输出尾部；
-- **防递归**：`PONYGO_IN_SPEC=1` 已在环境中时跳过并报 `SKIPPED`——**SKIPPED 不计入 PASS**。
+- **防递归**：嵌套由调起方判定——`ponygo audit` 在 `PONYGO_AUDIT_SPEC_DEPTH ≥ 1` 时拒绝再跑 spec
+  （该层不执行任何 spec，按 `SKIPPED` 处理并 **exit 3**）；第一层 spec **必须真跑**。
+  spec 内若仍见 `PONYGO_IN_SPEC=1`，那是旧版 `audit` 的遗留标记，**不再**表示"可跳过"；
+  自检脚本保留该判断只作向后兼容，不得据此把"未验证"当"通过"。
 
 > 诚实标注（P6）：执行判据只证明"脚本自检通过"，证明不了"脚本真的构造了非法样本"——后者靠 review；
 > 非 `.sh` 后缀的 spec 连执行都没有，只是形状判据。"放个空 spec 文件"过得了存在性，证明不了任何拒绝语义。

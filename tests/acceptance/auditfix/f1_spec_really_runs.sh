@@ -22,6 +22,15 @@ SPECEOF
   chmod +x "$T/.meta/gates/zz-fake.spec.sh"
   rm -f "$T/.meta/gates/WITNESS.txt"
 
+  # 聚合行断言必须确定性：先数出仓内 *.spec.sh 的实际个数（框架 spec 数量随交付演进，
+  # 冻结字面量会假红/假绿），再断言「<N> 个 spec 全部自检通过」（不放宽成 [0-9]+ 无约束匹配）。
+  N_SPEC=$(ls -1 "$T"/.meta/gates/*.spec.sh 2>/dev/null | wc -l | tr -d ' ')
+  if [ "${N_SPEC:-0}" -ge 2 ]; then
+    ok "F1-2 夹具：仓内 *.spec.sh 计数 = $N_SPEC（≥2：框架 A2 + 假 spec）"
+  else
+    bad "F1-2 夹具：仓内 *.spec.sh 计数异常（实得 ${N_SPEC:-空}，应 ≥2）"
+  fi
+
   run_in "$T" audit --run-specs
   assert_contains "F1-1 GO：--run-specs 输出含「2.3 spec 自检：」" "$R_OUT" "2.3 spec 自检："
   assert_not_contains "F1-1 NOGO：不得出现「[skipped] 2.3 spec 自检：」（框架资产必须真跑）" \
@@ -29,7 +38,7 @@ SPECEOF
   assert_not_contains "F1-1 NOGO：不得出现「自报 SKIPPED」" "$R_OUT" "自报 SKIPPED"
   assert_contains "F1-1 真跑取证：假 spec 已被执行（输出含其文件名）" "$R_OUT" "zz-fake.spec.sh"
   assert_contains "F1-1 真跑取证：输出含「2.3 执行判据」段" "$R_OUT" "2.3 执行判据"
-  assert_contains "F1-2 GO：聚合行声明 2 个 spec 全部自检通过" "$R_OUT" "2 个 spec 全部自检通过"
+  assert_contains "F1-2 GO：聚合行声明 $N_SPEC 个 spec 全部自检通过" "$R_OUT" "$N_SPEC 个 spec 全部自检通过"
   assert_not_contains "F1-2 NOGO：不得出现「全部自报 SKIPPED」" "$R_OUT" "全部自报 SKIPPED"
   assert_not_contains "F1-2 NOGO：不得出现「本次未真正跑门」" "$R_OUT" "本次未真正跑门"
   assert_exists "F1-4 物理收据：spec 副作用探针 WITNESS.txt 已产生" "$T/.meta/gates/WITNESS.txt"

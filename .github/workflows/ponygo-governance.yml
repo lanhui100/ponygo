@@ -13,3 +13,15 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: bash .meta/gates/ci-verify.sh
+      # 实例专属（本仓 dogfood；A5 属实例可编辑文件、不进 UPGRADE_UNIVERSE，故 ponygo 的 A5 模板不随此改）：
+      # ① 工作区临时产物卫生门 + 其负样本 spec——刻意**不进 A4**：新实例没有这两个资产，
+      #    挂在 A4 里会让它们成为「可选门」（缺文件 → 静默跳过 → 仍报通过）。
+      - run: bash .meta/gates/scratch-hygiene.sh && bash .meta/gates/scratch-hygiene.spec.sh
+      # ② 执行判据的真实执行面（exit 3 的跨实例语义：未验证 ≠ 通过）。
+      #    本仓就是 ponygo 源码仓 → 直接跑检出里的 CLI，无安装依赖。
+      #    CI 检出不含 core.hooksPath（git config 不入库），而 2.4 判据要求本地层有落点才有
+      #    判定对象 → 故就地按 'ponygo init' 的口径配置 core.hooksPath=.githooks，让 2.4 可判。
+      #    这不是绕过判据：判据本身仍是全量执行（ladder 全部判据照跑，任一项 FAIL 即非零）。
+      - run: |
+          git config core.hooksPath .githooks
+          bash ponygo audit --run-specs

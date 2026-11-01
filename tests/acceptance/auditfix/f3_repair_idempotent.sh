@@ -65,8 +65,8 @@ if gov_repo "$T" 1; then
 
   # 只补缺失的强判据：新增文件恰 2 个、零删除、其余文件 cksum 全等
   SNAP_AFTER=$(snap "$T")
-  ADDED=$(comm -13 <(printf '%s\n' "$SNAP_DRY") <(printf '%s\n' "$SNAP_AFTER") | wc -l | tr -d ' ')
-  REMOVED=$(comm -23 <(printf '%s\n' "$SNAP_DRY") <(printf '%s\n' "$SNAP_AFTER") | wc -l | tr -d ' ')
+  ADDED=$(snap_added "$SNAP_DRY" "$SNAP_AFTER")
+  REMOVED=$(snap_removed "$SNAP_DRY" "$SNAP_AFTER")
   assert_eq "F3-1 只补缺失：新增文件恰为 2 个（实得 $ADDED）" 2 "$ADDED"
   assert_eq "F3-2 绝不覆盖：既有文件零变化/零删除（实得 $REMOVED）" 0 "$REMOVED"
 

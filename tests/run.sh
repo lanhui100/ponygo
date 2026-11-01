@@ -1262,9 +1262,12 @@ s27_run_specs() {
   assert_contains "结论行限定未验证" "$R_OUT" "2.3 执行判据 SKIPPED——本次未验证"
 
   # ⑥ 无 *.spec.sh → SKIPPED（不计入 PASS），非 FAIL
+  # TEST-DEFECT：init 交付两个框架 *.spec.sh（A2 + scratch-hygiene），本 case 语义是「0 个 *.spec.sh」
+  # （与契约矩阵 FX2 同款），须先把框架 spec 移走——否则测到的是「全部真跑通过」而非「无 spec」。
   T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
+  rm -f "$T"/.meta/gates/*.spec.sh
   printf 'x\n' > "$T/.meta/gates/format.spec.md"
   run_cli "$T" audit --run-specs
   assert_eq "无 .sh spec → exit 3（SKIPPED=未验证，fail-closed；P0-2 契约演进）" 3 "$R_RC"
@@ -1506,7 +1509,8 @@ s32_task004_static() {
 #   * gaps 按 A6 词表顺序输出：declaration_missing,placeholder_present,declaration_inconsistent,
 #     evidence_insufficient,enforcement_points_missing,diff_warn,enforcement_violation,
 #     mount_missing,tool_error,below_target
-#   * below_target 当且仅当 current∈{ob0,ob1,ob2} 且 rank(current) < rank(target)
+#   * below_target 当且仅当**显式 --level** 且 rank(current) < rank(target)（体检模式不产出：
+#     否则文案会把用户往「补断言」方向误导——P2-7）
 #   * status 子命令：current 恒 unknown；declaration_consistent / enforcement_mounted 恒 skip
 #   * target 由 .meta/meta.yaml 的 level 经 target_level_<N> 求得（缺 .meta/缺行 ⇒ level=0 ⇒ ob0）
 #   * --json 时 skill 的原始输出与「人读证据」一律走 stderr（stdout 不得混入 STUB-* 标记）
@@ -1937,14 +1941,14 @@ s36_observe_json() {
 
   # ③ audit skill rc=2：current=ob0 / declaration_consistent=fail / gaps 含 below_target
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3
-  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=2 observe audit --skill-dir "$SK" --json
+  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=2 observe audit --level ob2 --skill-dir "$SK" --json
   EXP='{"schema":"ponygo.observe/1","command":"audit","declared_kind":"cli","current":"ob0","target":"ob2","skill":{"present":true,"contract_version":"1.0.3","compatible":true},"judges":[{"id":"declaration_present","status":"pass"},{"id":"no_placeholder","status":"pass"},{"id":"declaration_consistent","status":"fail"},{"id":"enforcement_mounted","status":"skip"}],"gaps":["declaration_inconsistent","below_target"]}'
   assert_eq "observe[A6] audit skill rc=2 --json 逐字" "$EXP" "$STD_OUT"
   assert_eq "observe[A6] audit skill rc=2 exit 1" 1 "$STD_RC"
 
   # ④ audit skill rc=3：证据不足 → current=ob0 / declaration_consistent=unknown
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3
-  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=3 observe audit --skill-dir "$SK" --json
+  run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=3 observe audit --level ob2 --skill-dir "$SK" --json
   EXP='{"schema":"ponygo.observe/1","command":"audit","declared_kind":"cli","current":"ob0","target":"ob2","skill":{"present":true,"contract_version":"1.0.3","compatible":true},"judges":[{"id":"declaration_present","status":"pass"},{"id":"no_placeholder","status":"pass"},{"id":"declaration_consistent","status":"unknown"},{"id":"enforcement_mounted","status":"skip"}],"gaps":["evidence_insufficient","below_target"]}'
   assert_eq "observe[A6] audit skill rc=3 --json 逐字" "$EXP" "$STD_OUT"
   assert_eq "observe[A6] audit skill rc=3 exit 3" 3 "$STD_RC"
@@ -1968,7 +1972,7 @@ s36_observe_json() {
   # ⑦ ob2 挂载缺失的逐字 JSON（current=ob1 / enforcement_mounted=fail / 两缺口）
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3
   run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 \
-    observe audit --skill-dir "$SK" --json
+    observe audit --level ob2 --skill-dir "$SK" --json
   EXP='{"schema":"ponygo.observe/1","command":"audit","declared_kind":"cli","current":"ob1","target":"ob2","skill":{"present":true,"contract_version":"1.0.3","compatible":true},"judges":[{"id":"declaration_present","status":"pass"},{"id":"no_placeholder","status":"pass"},{"id":"declaration_consistent","status":"pass"},{"id":"enforcement_mounted","status":"fail"}],"gaps":["mount_missing","below_target"]}'
   assert_eq "observe[A6] 挂载缺失 --json 逐字" "$EXP" "$STD_OUT"
   assert_eq "observe[A6] 挂载缺失 exit 1" 1 "$STD_RC"
