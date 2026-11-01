@@ -96,8 +96,9 @@ T4（`dynamic`）判据实际是「存在任意一条到达 Tempo 的 span」。
 
 ## 6. 修复状态（2026-11-01，dev-team B 级闭环）
 
-修复提交 `e3fd9d8`（tag `wave-1-auditfix`），决策记录见 ADR
-`.agents/notes/implemented/process/2026-11-01-audit-judgement-fail-closed.md`。
+修复提交：第一批 `e3fd9d8`（tag `wave-1-auditfix`）+ `e16253b`/`6da96cc`；第二批（延后事项）`5feec5e`（tag `wave-8-deferred`）。
+决策记录见 ADR `.agents/notes/implemented/process/2026-11-01-audit-judgement-fail-closed.md`（判据 fail-closed）与
+`2026-11-01-audit-machine-surface-and-ai-projection.md`（机读面 / 2.6 / 探针）。
 
 | 缺陷 | 状态 | 落点 |
 |---|---|---|
@@ -109,11 +110,11 @@ T4（`dynamic`）判据实际是「存在任意一条到达 Tempo 的 span」。
 | P2-7 `below_target` 误导 | 已修 | 仅随显式 `--level` 产生 |
 | P2-8 dry-run 承诺 chmod | 已修 | hp 空分支按「已存在/可执行/不可执行」分流 |
 | P2-9 零缺口空标题 | 已修 | 无缺口不打印缺口标题 |
-| P2-11 审计不可机读 | 未做 | 延后（非本轮判据修复必需） |
+| P2-11 审计不可机读 | 已修（2026-11-01 第二批） | `ponygo audit/status --json` 单行固定词表（`ponygo.audit/1`/`ponygo.status/1`），exit 字段与真实退出码同源 |
 | P2-12 悬空文档引用 | 已修 | 实例侧输出改为框架仓 URL 形态 |
-| P2-13 缺 explain/probe 面 | 部分 | `init --repair-skeleton` 消除病灶；`observe probe` 延后另立项 |
-| P1-5 observe 动态证据不溯源 | 未做 | 延后（需动 observability-onboarding 契约，另立项） |
-| P1-10 AI 常载命约不判 | 未做 | 延后（新增 L2 判据会打断既有实例，需跨仓灰度） |
+| P2-13 缺 explain/probe 面 | 已修（第二批） | 新增 `ponygo observe probe` 受控探针（token 只读 env、永不回显、`--dry-run` 零网络） |
+| P1-5 observe 动态证据不溯源 | 部分（第二批） | 已产出 RFC `docs/dev-team/reviews/rfc-observe-t4-provenance.md`（技能侧 T4 分档提案）+ `observe probe` 让证据可复现；判据绑定仍需技能侧改动，未改技能本体 |
+| P1-10 AI 常载命约不判 | 已修（第二批） | 新增 L2 条件判据 **2.6**：`ai-surface: on` 才校验根 `AGENTS.md` 成对哨兵块；未声明 SKIP+WARN（**退出码零变化**；stdout 结论行新增 `2.6 SKIPPED` 说明，与 2.5 SKIPPED 同先例；WARN 走 stderr） |
 
 附带修复（复审期发现的既有缺陷）：`gate_hook_write_block` 在 0 字节/纯残块钩子上"声称重写却永不愈合"，
 且会静默清空残块——`init` 现在会真正写出规范块并保持块外字节零删除。

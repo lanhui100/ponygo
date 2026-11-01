@@ -1591,11 +1591,35 @@ verify_ladder() {
       esac
       case "$ai_state" in
         on)
-          if [ -f "AGENTS.md" ] && grep -qxF "$SYNC_BEGIN" "AGENTS.md" 2>/dev/null \
-             && grep -qxF "$SYNC_END" "AGENTS.md" 2>/dev/null; then
-            ai_proj=1
+          # W9-A2：成对性严格判定——恰一个 BEGIN、恰一个 END、BEGIN 行号 < END 行号、块内非空；
+          # 任一不满足即 FAIL（残缺/重复/倒序/空块都不得算「已投影」）。
+          local ab_cnt=0 ae_cnt=0 ab_ln=0 ae_ln=0 abody=""
+          if [ -f "AGENTS.md" ]; then
+            ab_cnt=$(grep -cxF "$SYNC_BEGIN" "AGENTS.md" 2>/dev/null || true)
+            ae_cnt=$(grep -cxF "$SYNC_END" "AGENTS.md" 2>/dev/null || true)
+            ab_ln=$(grep -nxF "$SYNC_BEGIN" "AGENTS.md" 2>/dev/null | head -n1 | cut -d: -f1)
+            ae_ln=$(grep -nxF "$SYNC_END" "AGENTS.md" 2>/dev/null | head -n1 | cut -d: -f1)
           fi
-          [ "$ai_proj" = "1" ] || vl_fail "2.6 已声明 ai-surface: on 但根 AGENTS.md 缺成对投影哨兵块（$SYNC_BEGIN … $SYNC_END——未投影或哨兵被删）→ 补救：bash ponygo sync"
+          if [ "${ab_cnt:-0}" = "1" ] && [ "${ae_cnt:-0}" = "1" ] \
+             && [ "${ab_ln:-0}" -gt 0 ] && [ "${ae_ln:-0}" -gt "${ab_ln:-0}" ]; then
+            # 注意：numeric 区间 start>end 时 GNU sed 会把 start 行**单独打印**（不是空输出），
+            # 所以「BEGIN/END 相邻 = 空块」必须先显式判区间长度，否则会把 END 行本身当成块内容。
+            if [ "$((ae_ln - ab_ln))" -ge 2 ]; then
+              abody=$(sed -n "$((ab_ln+1)),$((ae_ln-1))p" "AGENTS.md" 2>/dev/null | tr -d '[:space:]')
+            fi
+            [ -n "$abody" ] && ai_proj=1
+          fi
+          if [ "$ai_proj" = "1" ]; then :; elif [ ! -f "AGENTS.md" ]; then
+            vl_fail "2.6 已声明 ai-surface: on 但根 AGENTS.md 不存在（无 AI 常载命约投影）→ 补救：bash ponygo sync"
+          elif [ "${ab_cnt:-0}" = "0" ] || [ "${ae_cnt:-0}" = "0" ]; then
+            vl_fail "2.6 已声明 ai-surface: on 但根 AGENTS.md 缺投影哨兵块（BEGIN $ab_cnt 个 / END $ae_cnt 个——未投影或哨兵被删）→ 补救：bash ponygo sync"
+          elif [ "${ab_cnt:-0}" != "1" ] || [ "${ae_cnt:-0}" != "1" ]; then
+            vl_fail "2.6 已声明 ai-surface: on 但根 AGENTS.md 哨兵块不成对（BEGIN $ab_cnt 个 / END $ae_cnt 个——须各恰 1 个）→ 补救：bash ponygo sync"
+          elif [ "${ae_ln:-0}" -le "${ab_ln:-0}" ]; then
+            vl_fail "2.6 已声明 ai-surface: on 但根 AGENTS.md 哨兵块顺序颠倒（BEGIN 行 $ab_ln / END 行 $ae_ln）→ 补救：bash ponygo sync"
+          else
+            vl_fail "2.6 已声明 ai-surface: on 但投影区为空（BEGIN…END 之间无内容）→ 补救：bash ponygo sync"
+          fi
           ;;
         off)
           # 显式 opt-out：不判 FAIL；结论行由 AS_OFF 改写（不得出现「全部 PASS」）
@@ -1738,16 +1762,16 @@ run_gate_specs() {
     # 后台进程 + 立即退出的 spec 能拖住 timeout（实证）。
     if [ -n "$outfile" ]; then
       if command -v timeout >/dev/null 2>&1; then
-        PONYGO_AUDIT_SPEC_DEPTH=$spec_depth timeout -k 5 25 bash "$f" >"$outfile" 2>&1; rc=$?
+        PONYGO_AUDIT_SPEC_DEPTH=$spec_depth timeout -k 5 25 bash "$f" >"$outfile" 2>&1 3>&-; rc=$?
       else
-        PONYGO_AUDIT_SPEC_DEPTH=$spec_depth bash "$f" >"$outfile" 2>&1; rc=$?
+        PONYGO_AUDIT_SPEC_DEPTH=$spec_depth bash "$f" >"$outfile" 2>&1 3>&-; rc=$?
       fi
       tail_=$(tail -n 3 "$outfile" 2>/dev/null | tr '\n' ' ')
     else
       if command -v timeout >/dev/null 2>&1; then
-        out=$(PONYGO_AUDIT_SPEC_DEPTH=$spec_depth timeout -k 5 25 bash "$f" 2>&1); rc=$?
+        out=$(PONYGO_AUDIT_SPEC_DEPTH=$spec_depth timeout -k 5 25 bash "$f" 2>&1 3>&-); rc=$?
       else
-        out=$(PONYGO_AUDIT_SPEC_DEPTH=$spec_depth bash "$f" 2>&1); rc=$?
+        out=$(PONYGO_AUDIT_SPEC_DEPTH=$spec_depth bash "$f" 2>&1 3>&-); rc=$?
       fi
       tail_=$(printf '%s\n' "$out" | tail -n 3 | tr '\n' ' ')
     fi
@@ -3403,10 +3427,34 @@ gates_remote_state() { # → wired|missing|none|other（只按 forge 证据形�
     *)      printf 'other' ;;
   esac
 }
-json_id_list() { # <空格分隔的 id 列表> → "a","b"（空输入 → 空）
+json_escape() { # <任意字符串> → JSON 安全的内容（不含外层引号；W9-B7）
+  # 严格转义 `"`、`\`、换行/回车/制表符与其余 C0 控制字符（→ \u00XX）；非 ASCII 原样保留（UTF-8 直出）。
+  awk 'BEGIN{
+    s = ARGV[1]
+    gsub(/\\/, "\\\\", s)
+    gsub(/"/,  "\\\"", s)
+    gsub(/\t/, "\\t", s); gsub(/\r/, "\\r", s); gsub(/\n/, "\\n", s)
+    for (i = 1; i < 32; i++) {
+      if (i == 9 || i == 10 || i == 13) continue
+      gsub(sprintf("%c", i), sprintf("\\u%04x", i), s)
+    }
+    printf "%s", s
+  }' "$1"
+}
+json_id_list() { # <空格分隔的 id 列表> → "a","b"（空输入 → 空；元素为受控 token，无需转义）
   local v out=""
   for v in $1; do out="${out}${out:+,}\"${v}\""; done
   printf '%s' "$out"
+}
+json_path_list() { # <空格分隔的仓库相对路径> → "a","b"（空 → 空；路径按 JSON 规则转义）
+  local v out=""
+  for v in $1; do out="${out}${out:+,}\"$(json_escape "$v")\""; done
+  printf '%s' "$out"
+}
+count_words() { # <空格分隔列表> → 元素个数（0 表示空）
+  local n=0 v
+  for v in $1; do n=$((n+1)); done
+  printf '%s' "$n"
 }
 audit_json_line() { # <exit code> → 单行 JSON
   printf '{"schema":"ponygo.audit/1","command":"audit","tier":"%s","hits":%s,"total":%s,"level":%s,"ladder":{"verdict":"%s","fails":[%s]},"gates":{"local":"%s","remote":"%s"},"gaps":[%s],"exit":%s}\n' \
@@ -3415,17 +3463,26 @@ audit_json_line() { # <exit code> → 单行 JSON
     "$(gates_local_state)" "$(gates_remote_state)" \
     "$(json_id_list "${AUDIT_GAP_IDS:-}")" "$1"
 }
-status_json_line() { # <exit code> → 单行 JSON
-  printf '{"schema":"ponygo.status/1","command":"status","level":%s,"skeleton":{"missing_dirs":%s,"missing_files":%s,"drift":%s},"gates":{"local":"%s","remote":"%s"},"ladder":{"verdict":"%s","fails":[%s]},"exit":%s}\n' \
-    "${STATUS_LEVEL_INT:--1}" "${STATUS_MISSING_DIRS:-0}" "${STATUS_MISSING_FILES:-0}" "${STATUS_DRIFT:-0}" \
+status_json_line() { # <exit code> → 单行 JSON（W9-B2：skeleton 三字段是**仓库相对路径数组**，非计数）
+  printf '{"schema":"ponygo.status/1","command":"status","level":%s,"skeleton":{"missing_dirs":[%s],"missing_files":[%s],"drift":[%s]},"gates":{"local":"%s","remote":"%s"},"ladder":{"verdict":"%s","fails":[%s]},"exit":%s}\n' \
+    "${STATUS_LEVEL_INT:--1}" "$(json_path_list "${STATUS_MISSING_DIRS:-}")" \
+    "$(json_path_list "${STATUS_MISSING_FILES:-}")" "$(json_path_list "${STATUS_DRIFT:-}")" \
     "$(gates_local_state)" "$(gates_remote_state)" \
     "${VL_VERDICT:-unverified}" "$(json_id_list "${VL_FAIL_IDS:-}")" "$1"
 }
+json_verdict_fallback() { # <exit code>：ladder 未落 verdict 时的兜底（W9-A3）
+  # 未跑 ladder 不代表「证据不足」：进程以硬失败退出（非 0）时必须报 fail，不得把失败洗成 unverified。
+  if [ -z "${VL_VERDICT:-}" ]; then
+    if [ "$1" != "0" ]; then VL_VERDICT="fail"; else VL_VERDICT="unverified"; fi
+  fi
+}
 audit_done() { # <exit code>：JSON 模式先把单行 JSON 送到原 stdout（fd 3），再按真实码退出
+  json_verdict_fallback "$1"
   if [ "${AUDIT_JSON:-0}" = "1" ]; then audit_json_line "$1" >&3; fi
   exit "$1"
 }
 status_done() { # <exit code>
+  json_verdict_fallback "$1"
   if [ "${STATUS_JSON:-0}" = "1" ]; then status_json_line "$1" >&3; fi
   exit "$1"
 }
@@ -3434,6 +3491,8 @@ cmd_audit() {
   # 自适应深度选择：探测重型信号 → M 档；全轻 → S 档
   local heavy=0 reasons="" spec_rc=0
   # F8：--json 机读面。人类报告整体改道 stderr，fd 3 保留原 stdout 只给单行 JSON。
+  # W9-8：fd 3 是 JSON 通道，绝不能让**仓库脚本**（*.spec.sh，任意代码执行面）继承——
+  # 否则它往 fd3 写一行就会破坏「stdout 恰一行 JSON」；故 run_gate_specs 的每次调用都 `3>&-`。
   AUDIT_JSON="${OBSERVE_JSON:-0}"; AUDIT_GAP_IDS=""; VL_VERDICT=""; VL_FAIL_IDS=""
   if [ "$AUDIT_JSON" = "1" ]; then exec 3>&1 1>&2; fi
   # 信号1：贡献者数 >= 3
@@ -3660,7 +3719,9 @@ cmd_status() {
   lv=$(read_level)
   # F8：--json 机读面（人类报告改道 stderr；fd 3 只给单行 JSON）
   STATUS_JSON="${OBSERVE_JSON:-0}"; STATUS_LEVEL_INT="$(level_as_int "$lv")"
-  STATUS_MISSING_DIRS=0; STATUS_MISSING_FILES=0; STATUS_DRIFT=0; VL_VERDICT=""; VL_FAIL_IDS=""
+  # W9-B2/B3：JSON 的 skeleton 与人类清单**同源**——三者都存「仓库相对路径列表」，
+  # 计数由列表长度派生（禁两套口径：数组与「骨架文件缺口：N」必须同数）。
+  STATUS_MISSING_DIRS=""; STATUS_MISSING_FILES=""; STATUS_DRIFT=""; VL_VERDICT=""; VL_FAIL_IDS=""
   if [ "$STATUS_JSON" = "1" ]; then exec 3>&1 1>&2; fi
   echo "===== ponygo status ====="
   echo "治理级：$(fmt_level "$lv")"
@@ -3671,9 +3732,11 @@ cmd_status() {
   echo "骨架完整度："
   local missing=0
   for d in "$META_DIR" "$META_DIR/constitution" "$META_DIR/gates" "$META_DIR/docs-tier" "$AGENTS_RUNTIME_DIR" "$DECISIONS_DIR" "$SKILLS_DIR"; do
-    if [ -d "$d" ]; then printf '  [ok]  %s\n' "$d"; else printf '  [缺]  %s\n' "$d"; missing=$((missing+1)); STATUS_MISSING_DIRS=$((STATUS_MISSING_DIRS+1)); fi
+    if [ -d "$d" ]; then printf '  [ok]  %s\n' "$d"; else printf '  [缺]  %s\n' "$d"; missing=$((missing+1)); STATUS_MISSING_DIRS="${STATUS_MISSING_DIRS}${STATUS_MISSING_DIRS:+ }$d"; fi
   done
-  [ -f "$META_YAML" ] && printf '  [ok]  %s\n' "$META_YAML" || { printf '  [缺]  %s\n' "$META_YAML"; missing=$((missing+1)); STATUS_MISSING_FILES=$((STATUS_MISSING_FILES+1)); }
+  # meta.yaml 不属 skeleton.missing_files（W9-B3：该字段 = UPGRADE_UNIVERSE 十三文件口径）；
+  # 它缺失由「骨架完整度」行 + 级自洽 0.2 判据表达，退出码照旧非零。
+  [ -f "$META_YAML" ] && printf '  [ok]  %s\n' "$META_YAML" || { printf '  [缺]  %s\n' "$META_YAML"; missing=$((missing+1)); }
 
   # ---- 骨架文件口径（F4：与 'ponygo upgrade' 同一 UPGRADE_UNIVERSE 十三文件）----
   # 只判**存在性**（不读模板、不执行任何脚本——只读命令的边界不变）。缺口数必须与 upgrade
@@ -3685,7 +3748,7 @@ cmd_status() {
     sf_n=$((sf_n+1))
     sf_list="$sf_list $sf"
   done
-  STATUS_MISSING_FILES=$((STATUS_MISSING_FILES+sf_n))
+  STATUS_MISSING_FILES="$sf_list"
   if [ "$sf_n" -gt 0 ]; then
     printf '骨架文件缺口：%s\n' "$sf_n"
     for sf in $sf_list; do printf '  [缺]  %s\n' "$sf"; done
@@ -3696,7 +3759,7 @@ cmd_status() {
     # 后 status 仍 rc=0 且称「一致」，而 upgrade 报 drift）。这里**真的**比：
     # 与 'ponygo upgrade' 同一模板基准（write_skeleton 0）+ EOL 归一逐字节；docs-tier 已激活实例
     # 豁免该文件（激活必改写 → 恒漂移，与 upgrade 的 dt_skip 同口径）。漂移是**观察**，不改退出码。
-    local st_drift=0 st_dt=0 st_cmp=0 stf
+    local st_drift=0 st_dt=0 st_cmp=0 stf ST_DRIFT_LIST=""
     local st_trap_exit="" st_trap_int="" st_trap_term=""
     # W7-1：临时目录**三钩**收口（EXIT/INT/TERM，与 cmd_upgrade / repair_skeleton_gaps 同款）——
     # 只挂 EXIT 时 SIGTERM/SIGINT 落在基准树生成/比对窗口会残留 ~200K 的 13 文件基准树。
@@ -3716,11 +3779,13 @@ cmd_status() {
         for stf in $UPGRADE_UNIVERSE; do
           [ "$st_dt" = "1" ] && [ "$stf" = ".meta/docs-tier/README.md" ] && continue
           [ -f "$STATUS_TMP/$stf" ] || continue
-          cmp -s <(tr -d '\r' < "$stf") <(tr -d '\r' < "$STATUS_TMP/$stf") || st_drift=$((st_drift+1))
+          if ! cmp -s <(tr -d '\r' < "$stf") <(tr -d '\r' < "$STATUS_TMP/$stf"); then
+            st_drift=$((st_drift+1)); ST_DRIFT_LIST="${ST_DRIFT_LIST}${ST_DRIFT_LIST:+ }$stf"
+          fi
         done
       fi
     fi
-    STATUS_DRIFT="$st_drift"
+    STATUS_DRIFT="$ST_DRIFT_LIST"
     status_tmp_cleanup
     if [ -n "$st_trap_exit" ]; then eval "$st_trap_exit"; else trap - EXIT; fi
     if [ -n "$st_trap_int" ]; then eval "$st_trap_int"; else trap - INT; fi
@@ -5127,14 +5192,28 @@ EOF
 #   2) endpoint/服务名可显式给，但都不写进任何文件（本命令只读）；
 #   3) 探针不是判定：成功只说明「管道可达」，判定仍由 'ponygo observe audit' 做（输出指引等待窗口）。
 # 退出码：0 = 投递成功；1 = 用法/缺参；2 = 工具或网络/HTTP 非 2xx（含超时）——不复用 3（证据不足属 audit）。
+# probe 的 curl 配置文件（含 Authorization 头）——token 严禁进 argv；文件级状态 + 三钩清理
+PROBE_CURL_CONF=""; PROBE_ERR_FILE=""
+probe_conf_cleanup() {
+  if [ -n "${PROBE_CURL_CONF:-}" ]; then rm -f "${PROBE_CURL_CONF}" 2>/dev/null || true; PROBE_CURL_CONF=""; fi
+  if [ -n "${PROBE_ERR_FILE:-}" ]; then rm -f "${PROBE_ERR_FILE}" 2>/dev/null || true; PROBE_ERR_FILE=""; fi
+  return 0
+}
+
 observe_probe() {
   local dry="${DRY_RUN:-0}" endpoint="" tok="" svc="" envn="" tos="" decl="" url="" code="" payload="" now_ns="" tid="" sid=""
+  local req_rc=0 tok_conf="" trap_exit="" trap_int="" trap_term="" old_umask="" why="" errtxt=""
   endpoint="${OBS_ENDPOINT:-}"
   [ -n "$endpoint" ] || endpoint="${PONYGO_OTEL_ENDPOINT:-}"
   tok="${PONYGO_OTEL_TOKEN:-}"
   envn="${OBS_ENV:-local}"
-  tos="${OBS_TIMEOUT:-5}"
-  # 服务名：--service > 声明的 service > 缺省 unknown_service
+  # W9-B5：--timeout 只接受**正整数**（0 等于取消预算，与「有上限」的声明矛盾）；默认 10s（OPEN-D2）。
+  tos="${OBS_TIMEOUT:-10}"
+  case "$tos" in
+    ''|*[!0-9]*) printf 'ponygo: observe probe：--timeout 只接受正整数秒（收到：%s，0 等于取消预算）\n' "$tos" >&2; return 1 ;;
+  esac
+  [ "$tos" -gt 0 ] 2>/dev/null || { printf 'ponygo: observe probe：--timeout 只接受正整数秒（收到：%s，0 等于取消预算）\n' "$tos" >&2; return 1; }
+  # 服务名：--service > 声明的 service（W9-B4：两者皆缺 → 用法错 exit 1，不再静默兜底 unknown_service）
   svc="${OBS_SERVICE:-}"
   if [ -z "$svc" ]; then
     decl=$(observe_decl_path)
@@ -5142,29 +5221,35 @@ observe_probe() {
       svc=$(sed -n 's/^service:[[:space:]]*//p' "$decl" 2>/dev/null | head -n1 | tr -d '\r' | sed 's/[[:space:]]*$//')
     fi
   fi
-  [ -n "$svc" ] || svc="unknown_service"
-  case "$tos" in
-    ''|*[!0-9]*) printf 'ponygo: observe probe：--timeout 只接受正整数秒（收到：%s）\n' "$tos" >&2; return 1 ;;
-  esac
+  if [ -z "$svc" ]; then
+    printf 'ponygo: observe probe：缺 service——用 --service <name> 指定，或先跑 ponygo observe init 声明（--kind/--service）\n' >&2
+    return 1
+  fi
   if [ -z "$endpoint" ]; then
     printf 'ponygo: observe probe：缺 endpoint——用 --endpoint <url> 或 env PONYGO_OTEL_ENDPOINT\n' >&2
     return 1
   fi
+  # W9-A1：endpoint 形状校验（用法错 → exit 1，不是网络错 2）
+  case "$endpoint" in
+    http://?*|https://?*) : ;;
+    *) printf 'ponygo: observe probe：--endpoint 必须以 http:// 或 https:// 开头（收到：%s）\n' "$endpoint" >&2; return 1 ;;
+  esac
   if [ -z "$tok" ]; then
     printf 'ponygo: observe probe：缺 token——只从 env PONYGO_OTEL_TOKEN 读取（不落盘、不回显）\n' >&2
     return 1
   fi
   url="${endpoint%/}/v1/traces"
-  # OTLP/HTTP JSON：resource attrs 必须自证来源（ponygo.probe / version），span 名固定 ponygo.probe
+  # OTLP/HTTP JSON：resource attrs 必须自证来源（ponygo.probe / version），span 名固定 ponygo.probe。
+  # W9-B7：进入 JSON 的字符串一律 json_escape（`"`、`\`、控制字符严格转义，非 ASCII 原样保留）。
   now_ns=$(date +%s 2>/dev/null || echo 0)000000000
   tid=$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n'); [ -n "$tid" ] || tid="00000000000000000000000000000000"
   sid=$(od -An -N8 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n');  [ -n "$sid" ] || sid="0000000000000000"
   payload=$(printf '{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"%s"}},{"key":"deployment.environment","value":{"stringValue":"%s"}},{"key":"ponygo.probe","value":{"boolValue":true}},{"key":"ponygo.probe.version","value":{"intValue":"1"}}]},"scopeSpans":[{"scope":{"name":"ponygo.probe"},"spans":[{"traceId":"%s","spanId":"%s","name":"ponygo.probe","kind":1,"startTimeUnixNano":"%s","endTimeUnixNano":"%s","status":{"code":1}}]}]}]}' \
-    "$svc" "$envn" "$tid" "$sid" "$now_ns" "$now_ns")
+    "$(json_escape "$svc")" "$(json_escape "$envn")" "$tid" "$sid" "$now_ns" "$now_ns")
   if [ "$dry" = "1" ]; then
     info "[dry-run] 目标 endpoint：$url（AUTHORIZATION: Bearer <redacted>）"
     info "[dry-run] service.name=$svc deployment.environment=$envn ponygo.probe=true ponygo.probe.version=1 span=ponygo.probe"
-    info "[dry-run] 未发送任何请求（零网络）——去掉 --dry-run 才投递"
+    info "[dry-run] 未发送任何请求（零网络，超时预算 ${tos}s）——去掉 --dry-run 才投递"
     info "探针之后：等待 10 秒后执行 ponygo observe audit（判定仍由 audit 做）"
     return 0
   fi
@@ -5172,11 +5257,60 @@ observe_probe() {
     printf 'ponygo: observe probe：本环境无 curl，无法投递 OTLP/HTTP（工具缺失，未发送任何请求）\n' >&2
     return 2
   fi
-  code=$(printf '%s' "$payload" | curl -sS -o /dev/null -w '%{http_code}' --max-time "$tos" \
-    -X POST -H 'Content-Type: application/json' -H "Authorization: Bearer $tok" \
-    --data-binary @- "$url" 2>/dev/null)
-  if [ $? -ne 0 ] || [ -z "$code" ] || [ "$code" = "000" ]; then
-    printf 'ponygo: observe probe：投递失败（网络不可达/超时）→ %s（凭证 <redacted>，未写入任何文件）\n' "$url" >&2
+  # W9-B6：token 严禁出现在 argv（/proc/<pid>/cmdline 对同用户可读）——写 600 权限的 curl 配置文件、
+  # 用 `curl -K <file>` 读入 `header = "Authorization: Bearer …"`；文件用 mktemp 生成，EXIT/INT/TERM 三钩清理。
+  # （若某平台 curl 不支持 -K 内 header 行，等价手段是 `--header @file`；此处按 -K 实现并显式声明。）
+  trap_exit=$(trap -p EXIT); trap_int=$(trap -p INT); trap_term=$(trap -p TERM)
+  trap 'probe_conf_cleanup' EXIT
+  trap 'probe_conf_cleanup; observe_tmp_cleanup; trap - EXIT INT TERM; exit 130' INT
+  trap 'probe_conf_cleanup; observe_tmp_cleanup; trap - EXIT INT TERM; exit 143' TERM
+  old_umask=$(umask); umask 077
+  PROBE_CURL_CONF=$(mktemp "${TMPDIR:-/tmp}/.ponygo-probe.XXXXXX" 2>/dev/null) || PROBE_CURL_CONF=""
+  umask "$old_umask"
+  if [ -z "$PROBE_CURL_CONF" ]; then
+    printf 'ponygo: observe probe：无法创建 curl 配置文件（凭证不得进 argv，故不降级发送）\n' >&2
+    probe_conf_cleanup
+    if [ -n "$trap_exit" ]; then eval "$trap_exit"; else trap - EXIT; fi
+    if [ -n "$trap_int" ]; then eval "$trap_int"; else trap - INT; fi
+    if [ -n "$trap_term" ]; then eval "$trap_term"; else trap - TERM; fi
+    return 2
+  fi
+  chmod 600 "$PROBE_CURL_CONF" 2>/dev/null || true
+  tok_conf="${tok//\\/\\\\}"; tok_conf="${tok_conf//\"/\\\"}"
+  {
+    printf 'header = "Content-Type: application/json"\n'
+    printf 'header = "Authorization: Bearer %s"\n' "$tok_conf"
+  } > "$PROBE_CURL_CONF"
+  # W9-9：curl 的 stderr 不能吞——连接被拒/超时/TLS 失败都要给一行可读诊断（仍 exit 2）；
+  # 诊断文本先脱敏（token 字面 → <redacted>），且 URL 不含凭据（token 只在 -K 配置文件里）。
+  PROBE_ERR_FILE=$(mktemp "${TMPDIR:-/tmp}/.ponygo-probe-err.XXXXXX" 2>/dev/null) || PROBE_ERR_FILE=""
+  code=$(printf '%s' "$payload" | curl -sS -K "$PROBE_CURL_CONF" -o /dev/null -w '%{http_code}' \
+    --max-time "$tos" -X POST --data-binary @- "$url" 2>"${PROBE_ERR_FILE:-/dev/null}")
+  req_rc=$?
+  errtxt=$(head -n 2 "${PROBE_ERR_FILE:-/dev/null}" 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+  # 脱敏（防御纵深）：curl 的诊断不回显 header 值，这里只对**足够长**的 token 做逐字替换——
+  # 过短的 token（如 1-2 字符）会把诊断文本打成马赛克，反而毁掉可读性。
+  if [ "${#tok}" -ge 8 ]; then errtxt=${errtxt//"$tok"/<redacted>}; fi
+  probe_conf_cleanup
+  if [ -n "$trap_exit" ]; then eval "$trap_exit"; else trap - EXIT; fi
+  if [ -n "$trap_int" ]; then eval "$trap_int"; else trap - INT; fi
+  if [ -n "$trap_term" ]; then eval "$trap_term"; else trap - TERM; fi
+  if [ "$req_rc" -ne 0 ] || [ -z "$code" ] || [ "$code" = "000" ]; then
+    case "$req_rc" in
+      0)  why="接收端无 HTTP 应答" ;;
+      6)  why="DNS 解析失败" ;;
+      7)  why="连接被拒或不可达" ;;
+      28) why="超时（--max-time ${tos}s 用尽）" ;;
+      35|51|53|54|58|59|60|64|66|77|80|83|90|91)
+          why="TLS/证书校验失败（curl=$req_rc）" ;;
+      52) why="接收端空响应" ;;
+      55) why="发送失败（连接被对端重置）" ;;
+      56) why="接收数据失败（连接被重置）" ;;
+      *)  why="curl 退出码 $req_rc" ;;
+    esac
+    printf 'ponygo: observe probe：投递失败（%s）→ %s%s\n' "$why" "$url" \
+      "${errtxt:+（curl: $errtxt）}" >&2
+    printf 'ponygo: 排查：① endpoint 是否可达/端口是否正确 ② 是否需要出网代理 ③ 加大 --timeout（当前 %ss）；凭证始终 <redacted>\n' "$tos" >&2
     return 2
   fi
   case "$code" in
@@ -5188,6 +5322,7 @@ observe_probe() {
   info "等待 10 秒后执行 ponygo observe audit（判定仍由 audit 做；探针只证明管道可达）"
   return 0
 }
+
 
 observe_upgrade() {
   local d ver min compat
@@ -5231,7 +5366,7 @@ observe —— 可观测性治理维度（判定 ob0/ob1/ob2；ob3 仅为目标�
 observe 选项（仅 observe 接受，其余命令拒绝）：
   --level ob0|ob1|ob2  判定目标档（ob3 是成本与 SLO 的目标画像，不参与判定，显式拒绝）
   --strict             严格模式：存在任一缺口均非零退出（audit 专用）
-  --json               固定词表 JSON 输出（仅 status|audit；供 CI 解析，不含自由文本）
+  --json               固定词表 JSON 输出（仅 observe status|audit；顶层 audit/status 同样接受；供 CI 解析）
   --skill-dir <dir>    skill 安装目录（等价 env PONYGO_SKILL_DIR）
   --mapping <file>     覆盖嵌入映射数据块（等价 env PONYGO_OBSERVE_MAPPING）
 
@@ -5268,17 +5403,19 @@ ponygo —— 项目工程化治理元框架命令行（单文件、零依赖）
 
 用法：
   ponygo init     [--dry-run] [--repair-skeleton]  建立/注入 .agents/ + .meta/ 治理骨架（自判新/旧项目；既有 .meta 下按 UPGRADE_UNIVERSE 只补缺失骨架文件）
-  ponygo audit    [--level S|M] [--run-specs]  自适应体检：打分 + 缺口 + 最小改进动作（判据不符 exit 1）
-  ponygo status                          查看成熟度级与骨架完整度（骨架缺口或声明级判据不符 exit 1）
+  ponygo audit    [--level S|M] [--run-specs] [--json]  自适应体检：打分 + 缺口 + 最小改进动作（判据不符 exit 1）
+  ponygo status   [--json]               查看成熟度级与骨架完整度（骨架缺口或声明级判据不符 exit 1）
   ponygo upgrade  [--check]              骨架漂移报告（宇宙=s14 十文件；默认 exit 0；--check 漂移非零供 CI）
   ponygo sync                            把 constitution 投影到 AGENTS.md / CLAUDE.md（模板态投影初始引导）
   ponygo retire   --level <N|off>        退级 / 整体退场（停止线执行器）
-  ponygo observe  status|init|audit|upgrade  可观测性治理维度（ob0/ob1/ob2 判定；详见 'ponygo observe --help'）
+  ponygo observe  status|init|audit|upgrade|probe  可观测性治理维度（ob0/ob1/ob2 判定；详见 'ponygo observe --help'）
 
 选项：
   --dry-run   只打印将执行的动作，不落盘（唯一预览手段）
   --level S|M 强制指定审计深度档（默认按项目特征自适应）
   --run-specs 执行 gates/ 下 *.spec.sh 负样本自检（opt-in；默认不执行仓库脚本）
+  --json      固定词表单行 JSON（接受面：audit / status / observe status|audit；其余命令拒绝）
+              人类报告改走 stderr，stdout 只留一行 JSON；exit 字段 == 真实退出码
   --repair-skeleton  ponygo init 专用：按 UPGRADE_UNIVERSE 十三文件只补缺失骨架文件
               （绝不覆盖既有文件；配 --dry-run 只打印计划、零落盘）
   --check     ponygo upgrade 专用：存在漂移 → exit 非零（供 CI；与 --dry-run 互斥）

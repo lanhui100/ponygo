@@ -44,6 +44,8 @@ assert_not_matches() { if printf '%s\n' "$2" | grep -Eq -- "$3"; then bad "$1（
 assert_no_crash() {
   assert_not_matches "$1" "$2" 'syntax error|command not found|unbound variable|integer expression expected|bad substitution|Traceback \(most recent call last\)'
 }
+# 结论行（status/audit 内嵌级自洽验证的唯一结论面）
+conclusion_of() { printf '%s\n' "$1" | grep '^级自洽验证：' | head -n1; }
 md5_of() { if [ -f "$1" ]; then md5sum "$1" 2>/dev/null | awk '{print $1}'; else printf 'MISSING'; fi; }
 
 # ---------- 调用 ponygo ----------
@@ -137,15 +139,63 @@ PY
   if [ "$rc" -eq 0 ]; then ok "$desc"; else bad "$desc（$out）"; fi
 }
 
+# 写一份带 service 的最小归属声明（probe 可从中取 service.name）
+write_decl_with_service() { # <dir> [service]
+  local dir="$1" svc="${2:-svc-a}"
+  mkdir -p "$dir/docs"
+  cat > "$dir/docs/observability.yaml" <<DECLEOF
+service: ${svc}
+kind: cli
+dimensions:
+  metrics:
+    applicable: false
+    reason: 指标由 k8s 侧采集
+  tracing:
+    applicable: false
+    reason: 由网关统一接入
+  logs:
+    applicable: false
+    reason: 走集群采集
+  issues:
+    applicable: false
+    reason: 无前端
+DECLEOF
+}
+
+# 取 JSON 里的数组/标量（dotted path；数组逐行输出）
+json_list() { # <json 文本> <dotted.path>
+  JSON_TEXT="$1" python3 - "$2" <<'PY'
+import json, os, sys
+try:
+    cur = json.loads(os.environ.get("JSON_TEXT", ""))
+except Exception:
+    sys.exit(1)
+for part in sys.argv[1].split("."):
+    if isinstance(cur, dict) and part in cur:
+        cur = cur[part]
+    else:
+        cur = None
+        break
+if isinstance(cur, list):
+    for item in cur:
+        print(item)
+elif cur is not None:
+    print(cur)
+PY
+}
+
 # ---------- 本地 OTLP 探针接收器（零外网；FIFO 就绪同步，无 sleep 轮询）----------
-PROBE_PID=""; PROBE_PORT=""; PROBE_CAP=""; PROBE_FIFO=""; PROBE_ERR=""
-start_probe_server() { # <case-dir> [http_status]
-  local dir="$1" st="${2:-200}"
+PROBE_PID=""; PROBE_PORT=""; PROBE_CAP=""; PROBE_FIFO=""; PROBE_ERR=""; PROBE_NOTIFY=""
+start_probe_server() { # <case-dir> [http_status] [delay_seconds]
+  local dir="$1" st="${2:-200}" delay="${3:-0}"
   PROBE_CAP="$dir/.probe-capture.txt"; : > "$PROBE_CAP"
   PROBE_FIFO="$dir/.probe-port.fifo"; rm -f "$PROBE_FIFO"
   if ! mkfifo "$PROBE_FIFO" 2>/dev/null; then bad "夹具失败：无法创建 FIFO（$PROBE_FIFO）"; return 1; fi
+  PROBE_NOTIFY="$dir/.probe-notify.fifo"; rm -f "$PROBE_NOTIFY"
+  if ! mkfifo "$PROBE_NOTIFY" 2>/dev/null; then bad "夹具失败：无法创建 notify FIFO"; return 1; fi
   PROBE_ERR="$dir/.probe-server.err"; : > "$PROBE_ERR"
-  STUB_HTTP_STATUS="$st" python3 "$PROBE_SERVER" "$PROBE_FIFO" "$PROBE_CAP" 2>"$PROBE_ERR" &
+  STUB_HTTP_STATUS="$st" STUB_DELAY_SECONDS="$delay" \
+    python3 "$PROBE_SERVER" "$PROBE_FIFO" "$PROBE_CAP" "$PROBE_NOTIFY" 2>"$PROBE_ERR" &
   PROBE_PID=$!
   # 阻塞读：服务端绑定端口后写入端口号（就绪即返回），不是轮询
   read -r PROBE_PORT < "$PROBE_FIFO" || PROBE_PORT=""
@@ -153,15 +203,21 @@ start_probe_server() { # <case-dir> [http_status]
     bad "夹具失败：探针服务未报告端口（见 $PROBE_ERR）"
     return 1
   fi
+  exec 9<>"$PROBE_NOTIFY"  # 读写方式打开：FIFO 的 read-only open 会阻塞到有写者，故用 <>
   return 0
 }
+# 阻塞等待「接收器已收到一个请求」（read -t 超时兜底，不是 sleep 轮询）
+probe_wait_request() { read -r -t 30 -u 9 _ 2>/dev/null; }
 stop_probe_server() {
+  { exec 9<&-; } 2>/dev/null || true
   if [ -n "${PROBE_PID:-}" ]; then
     kill "$PROBE_PID" 2>/dev/null || true
     wait "$PROBE_PID" 2>/dev/null || true
     PROBE_PID=""
   fi
-  if [ -n "${PROBE_FIFO:-}" ]; then rm -f "$PROBE_FIFO"; PROBE_FIFO=""; fi
+  [ -n "${PROBE_FIFO:-}" ] && rm -f "$PROBE_FIFO"
+  [ -n "${PROBE_NOTIFY:-}" ] && rm -f "$PROBE_NOTIFY"
+  PROBE_FIFO=""; PROBE_NOTIFY=""
 }
 probe_requests() { # → 抓到的请求数
   if [ ! -f "${PROBE_CAP:-}" ]; then printf '0'; return 0; fi

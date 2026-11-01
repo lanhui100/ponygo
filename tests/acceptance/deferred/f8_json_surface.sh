@@ -103,24 +103,81 @@ for cmdline in "init" "sync" "retire --level off" "upgrade" "observe init --kind
   assert_matches "F8-3 --json 对「$cmdline」给出「仅适用于」类文案" "$R_OUT" '仅适用于|仅适用'
 done
 
-# ================= F8-4 人类输出不受影响（与 HEAD 版逐字节相同） =================
+# ================= F8-4 同一二进制：不带旗标不得改变人类输出（CE-7 / L3DEF-12）=================
+# 基线自证：不再拿 `git show HEAD:ponygo` 当对照（那对当前二进制是恒等式），改为**同一二进制**
+# 的「带/不带 --json」对比；夹具用 level 2 + 已 sync（覆盖 2.6 判据分支）。
 T=$(new_case)
-gov_repo "$T" 1
-HEADP="$SBASE/ponygo-head"
-if git -C "$ROOT" show HEAD:ponygo > "$HEADP" 2>/dev/null && [ -s "$HEADP" ]; then
-  OUT_HEAD=$( cd "$T" && bash "$HEADP" audit 2>&1 ); RC_HEAD=$?
-  OUT_CUR=$( cd "$T" && bash "$ROOT/ponygo" audit 2>&1 ); RC_CUR=$?
-  assert_eq "F8-4 人类输出退出码与 HEAD 版相同（HEAD=$RC_HEAD / 当前=$RC_CUR）" "$RC_HEAD" "$RC_CUR"
-  if [ "$OUT_HEAD" = "$OUT_CUR" ]; then
-    ok "F8-4 GO：不带 --json 的人类输出与 HEAD 版逐字节相同"
-  else
-    bad "F8-4 人类输出与 HEAD 版不同（$(printf '%s\n' "$OUT_HEAD" > "$SBASE/h.txt"; printf '%s\n' "$OUT_CUR" > "$SBASE/c.txt"; diff "$SBASE/h.txt" "$SBASE/c.txt" | head -5 | tr '\n' ';')）"
-  fi
+gov_repo "$T" 2
+run_in "$T" sync
+assert_zero "F8-4 夹具：ponygo sync exit 0（2.6 走 PASS 分支）" "$R_RC"
+
+ERRF=$(mktemp "$SBASE/err.XXXXXX")
+A_OUT=$( cd "$T" && bash "$ROOT/ponygo" audit 2>/dev/null ); A_RC=$?
+B_OUT=$( cd "$T" && bash "$ROOT/ponygo" audit 2>/dev/null ); B_RC=$?
+assert_eq "F8-4 无旗标两次调用退出码一致" "$A_RC" "$B_RC"
+if [ "$A_OUT" = "$B_OUT" ]; then
+  ok "F8-4 GO：无旗标两次调用 stdout 逐字节一致（人类输出无抖动）"
 else
-  bad "F8-4 无法取得 HEAD 版 ponygo（git show HEAD:ponygo 失败）——无法做逐字节对照"
+  bad "F8-4 无旗标两次调用 stdout 不同（人类输出不稳定）"
 fi
-assert_contains "F8-4 GO：人类输出仍含审计结果头" "$OUT_HUMAN" "===== ponygo 审计结果"
-assert_contains "F8-4 GO：人类输出仍含命中行" "$OUT_HUMAN" "命中"
-assert_contains "F8-4 GO：人类输出仍含级自洽结论行" "$OUT_HUMAN" "级自洽验证"
+
+J_OUT=$( cd "$T" && bash "$ROOT/ponygo" audit --json 2>"$ERRF" ); J_RC=$?
+J_ERR=$(cat "$ERRF" 2>/dev/null)
+assert_eq "F8-4 --json 与无旗标退出码一致（$A_RC / $J_RC）" "$A_RC" "$J_RC"
+assert_eq "F8-4 GO：--json 时 stdout 只有一行" 1 "$(printf '%s\n' "$J_OUT" | grep -c '')"
+assert_matches "F8-4 GO：--json 的 stdout 是 JSON" "$J_OUT" '^\{'
+assert_not_contains "F8-4 NOGO：--json 的 stdout 不得含人类文案" "$J_OUT" "===== ponygo 审计结果"
+assert_contains "F8-4 GO：--json 时人类文案改走 stderr" "$J_ERR" "===== ponygo 审计结果"
+
+assert_contains "F8-4 GO：无旗标时人类文案在 stdout" "$A_OUT" "===== ponygo 审计结果"
+assert_contains "F8-4 GO：人类输出仍含命中行" "$A_OUT" "命中"
+assert_contains "F8-4 GO：人类输出仍含级自洽结论行" "$A_OUT" "级自洽验证"
+printf '%s' "$J_OUT" | python3 -m json.tool >/dev/null 2>&1
+assert_zero "F8-4 GO：--json stdout 仍可被 json.tool 解析" "$?"
+
+# ================= F8-5 status --json 的 skeleton 数组口径（L3 终审新增）=================
+# 契约：skeleton.missing_dirs / missing_files / drift 必须是**数组**且元素为仓库相对路径；
+#       missing_files 不得含 .meta/meta.yaml；missing_files 长度 == 人类输出「骨架文件缺口：N」。
+T=$(new_case)
+gov_repo "$T" 2
+rm -f "$T/.agents/notes/README.md" "$T/.agents/skills/README.md"
+rm -rf "$T/.meta/docs-tier"
+assert_missing "F8-5 夹具：已删 2 个骨架文件 + 1 个骨架目录" "$T/.meta/docs-tier"
+
+HUMAN_OUT=$( cd "$T" && bash "$ROOT/ponygo" status 2>&1 )
+N_HUMAN=$(printf '%s\n' "$HUMAN_OUT" | sed -n 's/.*骨架文件缺口：\([0-9][0-9]*\).*/\1/p' | head -n1)
+assert_matches "F8-5 夹具：人类输出给出「骨架文件缺口：N」（实得 [$N_HUMAN]）" "$N_HUMAN" '^[0-9]+$'
+
+R_OUT=$( cd "$T" && bash "$ROOT/ponygo" status --json 2>/dev/null )
+json_assert "F8-5 GO：skeleton 三个字段均为数组" "$R_OUT" '
+sk = d.get("skeleton") or {}
+for k in ("missing_dirs","missing_files","drift"):
+    if not isinstance(sk.get(k), list): fail.append("%s 不是数组: %r" % (k, sk.get(k)))
+'
+DIRS=$(json_list "$R_OUT" "skeleton.missing_dirs")
+FILES=$(json_list "$R_OUT" "skeleton.missing_files")
+DRIFT=$(json_list "$R_OUT" "skeleton.drift")
+assert_contains "F8-5 GO：missing_dirs 含被删目录 .meta/docs-tier" "$DIRS" ".meta/docs-tier"
+assert_contains "F8-5 GO：missing_files 含被删文件 .agents/notes/README.md" "$FILES" ".agents/notes/README.md"
+assert_not_contains "F8-5 NOGO：missing_files 不得含 .meta/meta.yaml（值文件不是骨架文件）" "$FILES" ".meta/meta.yaml"
+assert_eq "F8-5 GO：missing_files 长度 == 人类输出「骨架文件缺口：N」" "$N_HUMAN" "$(printf '%s\n' "$FILES" | grep -c .)"
+assert_eq "F8-5 GO：missing_dirs 长度 == 1（只删了 .meta/docs-tier）" 1 "$(printf '%s\n' "$DIRS" | grep -c .)"
+assert_eq "F8-5 取证：本夹具 drift 为空数组" "" "$DRIFT"
+
+# 元素必须是仓库相对路径且确实不存在
+BAD_ABS=""
+while IFS= read -r rel; do
+  [ -n "$rel" ] || continue
+  case "$rel" in /*|~*) BAD_ABS="$BAD_ABS $rel"; continue ;; esac
+  [ -e "$T/$rel" ] && BAD_ABS="$BAD_ABS ${rel}(存在)"
+done <<EOF
+$DIRS
+$FILES
+EOF
+if [ -z "$BAD_ABS" ]; then
+  ok "F8-5 GO：missing_dirs/missing_files 元素均为仓库相对路径且确实不存在"
+else
+  bad "F8-5 skeleton 数组元素不合规：$BAD_ABS"
+fi
 
 finish

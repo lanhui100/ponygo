@@ -182,7 +182,7 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
 | ob1 | 声明与现实一致：skill 的 `check-declaration.sh` 退出码 0 | `declaration_inconsistent`（rc=2）/ `evidence_insufficient`（rc=3）/ `tool_error`（rc=4） |
 | ob2 | 声明有真实收口点 + 挂载载体里真有 `audit-diff` 调用 + 其退出码 0 | `enforcement_points_missing` / `mount_missing` / `diff_warn`（rc=1）/ `enforcement_violation`（rc=2） |
 
-四条子命令（与 `ponygo observe --help` 逐字一致）：
+五条子命令（与 `ponygo observe --help` 逐字一致）：
 
 ```
   ponygo observe status                           静态报告（不判定）：声明在场/占位残留/skill 在场与版本；只读，exit 0
@@ -191,6 +191,8 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
                                                   落地四维归属声明（唯一写命令；已存在声明需 --force）
   ponygo observe audit  [--level ob0|ob1|ob2] [--base <rev>] [--strict] [--json]
                                                   判定是否达到目标级（缺口仅作 backlog；--strict 时任一缺口非零）
+  ponygo observe probe  [--endpoint <url>] [--service <s>] [--env <e>] [--timeout <s>] [--dry-run]
+                                                  受控探针：往 OTLP 端点发一条带 provenance 的 span（token 只读 env PONYGO_OTEL_TOKEN，永不落盘）
   ponygo observe upgrade [--check]                与技能契约的版本兼容门（CI 用 --check）
 ```
 

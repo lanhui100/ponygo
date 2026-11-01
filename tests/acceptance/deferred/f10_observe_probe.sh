@@ -18,6 +18,7 @@ fi
 
 T=$(new_case)
 gov_repo "$T" 1
+write_decl_with_service "$T" svc-a     # 声明里有 service → 允许省略 --service
 
 # ================= F10-1 成功路径 =================
 if start_probe_server "$T" 200; then
@@ -95,6 +96,7 @@ fi
 # ================= F10-2 失败路径 =================
 T=$(new_case)
 gov_repo "$T" 1
+write_decl_with_service "$T" svc-a
 
 run_in "$T" PONYGO_OTEL_ENDPOINT="http://127.0.0.1:1" observe probe
 assert_rc_is "F10-2 缺 token → exit 1" 1 "$R_RC"
@@ -117,6 +119,7 @@ fi
 # ================= F10-3 --dry-run 零网络 =================
 T=$(new_case)
 gov_repo "$T" 1
+write_decl_with_service "$T" svc-a
 if start_probe_server "$T" 200; then
   EP="http://127.0.0.1:$PROBE_PORT"
   run_in "$T" PONYGO_OTEL_ENDPOINT="$EP" PONYGO_OTEL_TOKEN=test-token observe probe --dry-run
@@ -126,5 +129,100 @@ if start_probe_server "$T" 200; then
   assert_not_contains "F10-3 NOGO：--dry-run 输出不得含 token 明文" "$R_OUT" "test-token"
   stop_probe_server
 fi
+
+# ================= F10-4 缺 --service 且声明无 service（L3 终审新增）=================
+T=$(new_case)
+gov_repo "$T" 1
+mkdir -p "$T/docs"
+cat > "$T/docs/observability.yaml" <<'DECLEOF'
+# 归属声明：刻意不含 service 字段（probe 不得静默用 unknown_service 顶包）
+kind: cli
+dimensions:
+  metrics:
+    applicable: false
+    reason: 指标由 k8s 侧采集
+  tracing:
+    applicable: false
+    reason: 由网关统一接入
+  logs:
+    applicable: false
+    reason: 走集群采集
+  issues:
+    applicable: false
+    reason: 无前端
+DECLEOF
+if start_probe_server "$T" 200; then
+  EP="http://127.0.0.1:$PROBE_PORT"
+  run_in "$T" PONYGO_OTEL_ENDPOINT="$EP" PONYGO_OTEL_TOKEN=test-token observe probe
+  assert_rc_is "F10-4 缺 --service 且声明无 service → exit 1" 1 "$R_RC"
+  assert_eq "F10-4 GO：用法错时不得发出任何请求" 0 "$(probe_requests)"
+  assert_not_contains "F10-4 NOGO：payload/输出不得出现 unknown_service" "$(cat "$PROBE_CAP" 2>/dev/null)$R_OUT" "unknown_service"
+  stop_probe_server
+fi
+
+# ================= F10-5 --timeout 校验 + 缺省档 10s（L3 终审新增）=================
+T=$(new_case)
+gov_repo "$T" 1
+if start_probe_server "$T" 200 6; then     # 慢后端 6s：只有缺省档（10s）才可能成功
+  EP="http://127.0.0.1:$PROBE_PORT"
+  run_in "$T" PONYGO_OTEL_ENDPOINT="$EP" PONYGO_OTEL_TOKEN=test-token observe probe --timeout 0
+  assert_rc_is "F10-5 --timeout 0 → exit 1（用法错）" 1 "$R_RC"
+  run_in "$T" PONYGO_OTEL_ENDPOINT="$EP" PONYGO_OTEL_TOKEN=test-token observe probe --timeout abc
+  assert_rc_is "F10-5 --timeout abc → exit 1（用法错）" 1 "$R_RC"
+  run_in "$T" PONYGO_OTEL_ENDPOINT="$EP" PONYGO_OTEL_TOKEN=test-token observe probe --service svc-a
+  assert_zero "F10-5 GO：缺省 timeout（10s）能覆盖 6s 慢后端 → exit 0" "$R_RC"
+  stop_probe_server
+fi
+
+# ================= F10-6 token 不得出现在 argv（L3 终审新增）=================
+T=$(new_case)
+gov_repo "$T" 1
+if start_probe_server "$T" 200 6; then
+  EP="http://127.0.0.1:$PROBE_PORT"
+  ( cd "$T" && PONYGO_OTEL_ENDPOINT="$EP" PONYGO_OTEL_TOKEN=test-token \
+      bash "$ROOT/ponygo" observe probe --service svc-a > "$T/.probe-bg.out" 2>&1 ) &
+  BG=$!
+  probe_wait_request    # 阻塞直到接收器确实收到请求（此时探针正等响应）
+  ARGV=$({ for pc in /proc/[0-9]*/cmdline; do { tr '\0' ' ' < "$pc"; } 2>/dev/null || true; printf '\n'; done; } | grep 'observe prob[e]' || true)
+  assert_contains "F10-6 夹具：argv 取样窗口有效（存在 observe probe 进程）" "$ARGV" "ponygo"
+  assert_not_contains "F10-6 NOGO：token 不得出现在 argv（/proc cmdline / ps）" "$ARGV" "test-token"
+  wait "$BG"; assert_zero "F10-6 慢后端下 probe 仍成功（取窗口不影响结论）" "$?"
+  stop_probe_server
+fi
+assert_not_contains "F10-6 NOGO：错误信息也不得回显 token" "$(cat "$T/.probe-bg.out" 2>/dev/null || :)" "test-token"
+
+# ================= F10-7 --service 取值含引号 → payload 仍是合法 JSON（L3 终审新增）=================
+T=$(new_case)
+gov_repo "$T" 1
+if start_probe_server "$T" 200; then
+  EP="http://127.0.0.1:$PROBE_PORT"
+  run_in "$T" PONYGO_OTEL_ENDPOINT="$EP" PONYGO_OTEL_TOKEN=test-token observe probe --service 'x","y'
+  assert_zero "F10-7 --service 'x\",\"y' → exit 0" "$R_RC"
+  SVC=$(CAP_FILE="$PROBE_CAP" python3 - <<'PY2' 2>&1
+import json, os
+raw = open(os.environ["CAP_FILE"], encoding="utf-8", errors="replace").read()
+body = raw.split("---REQ---")[0].strip()
+try:
+    d = json.loads(body)
+except Exception as exc:
+    print("PAYLOAD-NOT-JSON: %s" % exc)
+    raise SystemExit(1)
+attrs = {}
+for rs in d.get("resourceSpans") or []:
+    for a in ((rs.get("resource") or {}).get("attributes") or []):
+        v = a.get("value") or {}
+        attrs[a.get("key")] = v.get("stringValue", v.get("boolValue", v.get("intValue")))
+print(attrs.get("service.name"))
+PY2
+)
+  assert_eq "F10-7 GO：payload 合法 JSON 且 service.name 原样保留（含引号）" 'x","y' "$SVC"
+  stop_probe_server
+fi
+
+# ================= F10-8 --endpoint 非 URL → exit 1（用法错，不是 2）=================
+T=$(new_case)
+gov_repo "$T" 1
+run_in "$T" PONYGO_OTEL_ENDPOINT=not-a-url PONYGO_OTEL_TOKEN=test-token observe probe --service svc-a
+assert_rc_is "F10-8 --endpoint 非 URL（not-a-url）→ exit 1" 1 "$R_RC"
 
 finish
