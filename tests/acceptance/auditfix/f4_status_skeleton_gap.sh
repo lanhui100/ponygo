@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # F4（P1-4）：status 增「骨架文件」口径（与 upgrade 同一 UPGRADE_UNIVERSE），消除
 # 「status 绿 / upgrade 缺口」的结论分裂。
-#   F4-1 有缺失 → `骨架文件缺口：N` + `ponygo repair` 指引 + exit 1；NOGO `^骨架完整。$`
+#   F4-1 有缺失 → `骨架文件缺口：N` + `ponygo init --repair-skeleton` 指引 + exit 1；NOGO `^骨架完整。$`
 #   F4-2 N 与 upgrade 缺口行数逐一相等（同仓交叉判定，防口径分裂复发）
 #   F4-3 无缺失 → `骨架文件与模板一致` + 维持现有退出语义（exit 0）
 #   F4-4 骨架文件齐但级自洽 FAIL → 仍 exit 1（新口径不得把 FAIL 洗成 0）
@@ -24,7 +24,7 @@ if gov_repo "$T" 1; then
   assert_rc_is "F4-1 缺骨架文件 → status exit 1" 1 "$R_RC"
   assert_contains "F4-1 GO：打印「骨架文件缺口：N」" "$R_OUT" "骨架文件缺口："
   assert_matches "F4-1 GO：缺口数为十进制无前导零" "$R_OUT" '骨架文件缺口：[1-9][0-9]*'
-  assert_contains "F4-1 GO：给出 ponygo repair 指引" "$R_OUT" "ponygo repair"
+  assert_contains "F4-1 GO：给出 init --repair-skeleton 指引" "$R_OUT" "--repair-skeleton"
   assert_contains "F4-1 GO：缺口行点名具体文件 .agents/notes/README.md" "$R_OUT" ".agents/notes/README.md"
   assert_not_contains "F4-1 NOGO：不得再打印「骨架完整。」（与 upgrade 结论相反）" "$R_OUT" "骨架完整。"
 
