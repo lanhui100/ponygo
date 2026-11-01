@@ -184,6 +184,13 @@ elif cur is not None:
 PY
 }
 
+# 进程 argv 快照（读 /proc/*/cmdline，避免 ps args 截断）；可带过滤正则
+proc_argv_snapshot() { # [过滤正则]
+  local pat="${1:-.}"
+  { for pc in /proc/[0-9]*/cmdline; do { tr '\0' ' ' < "$pc"; } 2>/dev/null || true; printf '\n'; done; } \
+    | grep -E "$pat" || true
+}
+
 # ---------- 本地 OTLP 探针接收器（零外网；FIFO 就绪同步，无 sleep 轮询）----------
 PROBE_PID=""; PROBE_PORT=""; PROBE_CAP=""; PROBE_FIFO=""; PROBE_ERR=""; PROBE_NOTIFY=""
 start_probe_server() { # <case-dir> [http_status] [delay_seconds]

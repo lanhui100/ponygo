@@ -145,4 +145,25 @@ assert_zero "F9-⑦b 反向对照：正常一对 BEGIN/END → exit 0（2.6 PASS
 assert_contains "F9-⑦b GO：结论行为「级自洽验证：通过」" "$R_OUT" "级自洽验证：通过"
 assert_not_matches "F9-⑦b NOGO：不得把 2.6 判成 FAIL" "$R_OUT" '2\.6[^\n]*(FAIL|未通过)'
 
+# ================= ⑦c 2.6 重复 END（Wave-11 回归缺口）=================
+# 契约对称性：一个 BEGIN 配**两个** END 同样不是有效投影（块结构不唯一）→ 2.6 FAIL + exit 1；
+# 反向对照沿用 F9-⑦b（正常一对 BEGIN/END → PASS）。
+T=$(new_case)
+gov_repo "$T" 2
+printf 'level: 2\nai-surface: on\n' > "$T/.meta/meta.yaml"
+cat > "$T/AGENTS.md" <<'AGEOF'
+# AGENTS.md（一个 BEGIN 配两个 END：块结构不唯一）
+
+文档标准 → docs/AGENTS.md
+
+<!-- BEGIN constitution -->
+真实命约内容
+<!-- END constitution -->
+<!-- END constitution -->
+AGEOF
+run_in "$T" audit
+assert_rc_is "F9-⑦c 重复 END（一个 BEGIN + 两个 END）→ exit 1" 1 "$R_RC"
+assert_contains "F9-⑦c GO：判定点是 2.6" "$R_OUT" "2.6"
+assert_contains "F9-⑦c GO：给出补救命令 ponygo sync" "$R_OUT" "ponygo sync"
+
 finish

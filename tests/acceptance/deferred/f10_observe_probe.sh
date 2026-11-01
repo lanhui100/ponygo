@@ -182,10 +182,20 @@ if start_probe_server "$T" 200 6; then
   ( cd "$T" && PONYGO_OTEL_ENDPOINT="$EP" PONYGO_OTEL_TOKEN=test-token \
       bash "$ROOT/ponygo" observe probe --service svc-a > "$T/.probe-bg.out" 2>&1 ) &
   BG=$!
-  probe_wait_request    # 阻塞直到接收器确实收到请求（此时探针正等响应）
-  ARGV=$({ for pc in /proc/[0-9]*/cmdline; do { tr '\0' ' ' < "$pc"; } 2>/dev/null || true; printf '\n'; done; } | grep 'observe prob[e]' || true)
-  assert_contains "F10-6 夹具：argv 取样窗口有效（存在 observe probe 进程）" "$ARGV" "ponygo"
-  assert_not_contains "F10-6 NOGO：token 不得出现在 argv（/proc cmdline / ps）" "$ARGV" "test-token"
+  probe_wait_request    # 阻塞直到接收器确实收到请求（此时探针正等 6s 慢后端响应）
+  # 窗口内取证：扫全部进程 argv（/proc cmdline），断言 token 不出现在**任何** argv 里。
+  # 有界重试（read -t 1 作时间片，非盲 sleep）：覆盖「探针可能派生短命子进程」的实现形态。
+  ARGV=$(proc_argv_snapshot 'ponygo|127\.0\.0\.1')
+  LEAK=$(proc_argv_snapshot 'test-token')
+  tries=0
+  while [ -z "$ARGV" ] && [ "$tries" -lt 2 ]; do
+    read -r -t 1 -u 9 _ 2>/dev/null || true
+    ARGV=$(proc_argv_snapshot 'ponygo|127\.0\.0\.1')
+    LEAK="$LEAK$(proc_argv_snapshot 'test-token')"
+    tries=$((tries+1))
+  done
+  assert_eq "F10-6 取证：探针在窗口内确实发出了 1 个请求" 1 "$(probe_requests)"
+  assert_not_contains "F10-6 NOGO：token 不得出现在任何进程 argv" "$LEAK" "test-token"
   wait "$BG"; assert_zero "F10-6 慢后端下 probe 仍成功（取窗口不影响结论）" "$?"
   stop_probe_server
 fi
@@ -224,5 +234,65 @@ T=$(new_case)
 gov_repo "$T" 1
 run_in "$T" PONYGO_OTEL_ENDPOINT=not-a-url PONYGO_OTEL_TOKEN=test-token observe probe --service svc-a
 assert_rc_is "F10-8 --endpoint 非 URL（not-a-url）→ exit 1" 1 "$R_RC"
+
+# ================= F10-9 token 含控制字符（Wave-11）=================
+# 契约：token 含换行等控制字符 → 用法错 exit 1，且**零请求**、不落临时文件、输出点明「非法控制字符」；
+#      反向：单行 token → exit 0。
+T=$(new_case)
+gov_repo "$T" 1
+write_decl_with_service "$T" svc-a
+TMPD="$T/.tmpd"; mkdir -p "$TMPD"
+if start_probe_server "$T" 200; then
+  EP="http://127.0.0.1:$PROBE_PORT"
+  run_in "$T" TMPDIR="$TMPD" PONYGO_OTEL_ENDPOINT="$EP" PONYGO_OTEL_TOKEN=$'ab\ncd' observe probe
+  assert_rc_is "F10-9 token 含换行（控制字符）→ exit 1" 1 "$R_RC"
+  assert_contains "F10-9 GO：文案点明「非法控制字符」" "$R_OUT" "非法控制字符"
+  assert_eq "F10-9 GO：控制字符 token 不得发出任何请求" 0 "$(probe_requests)"
+  assert_eq "F10-9 GO：控制字符 token 不得在 TMPDIR 落文件" "" \
+    "$(find "$TMPD" -mindepth 1 -print -quit 2>/dev/null)"
+
+  run_in "$T" TMPDIR="$TMPD" PONYGO_OTEL_ENDPOINT="$EP" PONYGO_OTEL_TOKEN=test-token observe probe
+  assert_zero "F10-9 反向对照：单行 token → exit 0" "$R_RC"
+  stop_probe_server
+fi
+
+# ================= F10-10 --service 纯空白（Wave-11）=================
+# 契约：--service ' ' 与「缺 service」同一判定同一文案（逐字相同）。夹具用无 service 的声明。
+T=$(new_case)
+gov_repo "$T" 1
+mkdir -p "$T/docs"
+cat > "$T/docs/observability.yaml" <<'DECLEOF'
+kind: cli
+dimensions:
+  metrics: { applicable: false, reason: 指标由 k8s 侧采集 }
+  tracing: { applicable: false, reason: 由网关统一接入 }
+  logs: { applicable: false, reason: 走集群采集 }
+  issues: { applicable: false, reason: 无前端 }
+DECLEOF
+if start_probe_server "$T" 200; then
+  EP="http://127.0.0.1:$PROBE_PORT"
+  run_in "$T" PONYGO_OTEL_ENDPOINT="$EP" PONYGO_OTEL_TOKEN=test-token observe probe
+  OUT_MISSING="$R_OUT"; RC_MISSING=$R_RC
+  run_in "$T" PONYGO_OTEL_ENDPOINT="$EP" PONYGO_OTEL_TOKEN=test-token observe probe --service ' '
+  OUT_BLANK="$R_OUT"; RC_BLANK=$R_RC
+  assert_rc_is "F10-10 缺 service → exit 1" 1 "$RC_MISSING"
+  assert_rc_is "F10-10 --service 纯空白 → exit 1" 1 "$RC_BLANK"
+  if [ "$OUT_MISSING" = "$OUT_BLANK" ]; then
+    ok "F10-10 GO：--service 纯空白的文案与「缺 service」逐字相同"
+  else
+    bad "F10-10 --service 纯空白与「缺 service」文案不同"
+  fi
+  assert_eq "F10-10 取证：两种用法错均不得发出请求" 0 "$(probe_requests)"
+  stop_probe_server
+fi
+
+# ================= F10-11 失败路径不得泄漏 curl 双前缀（Wave-11）=================
+T=$(new_case)
+gov_repo "$T" 1
+write_decl_with_service "$T" svc-a
+run_split "$T" PONYGO_OTEL_ENDPOINT="http://127.0.0.1:1" PONYGO_OTEL_TOKEN=test-token observe probe
+assert_nonzero "F10-11 endpoint 未监听 → 非零退出" "$R_RC"
+CURL_DUP=$(printf '%s\n' "$R_ERR" | grep -oF 'curl: curl:' | wc -l | tr -d ' ')
+assert_eq "F10-11 NOGO：stderr 中「curl: curl:」出现 0 次（不得双前缀泄漏）" 0 "$CURL_DUP"
 
 finish
