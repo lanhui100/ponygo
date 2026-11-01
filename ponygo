@@ -1149,8 +1149,8 @@ do_sync() {
     return 0
   fi
   [ -f "$CONSTITUTION" ] || die "无 $CONSTITUTION，无法投影"
-  local begin='<!-- BEGIN constitution -->'
-  local end='<!-- END constitution -->'
+  local begin="$SYNC_BEGIN"
+  local end="$SYNC_END"
   local body
   # 对整个 constitution 文件判 TODO（不能只判截断后的 body——槽位在「## 常载命约」之前）：
   # 模板态不再拒绝投影，而是投影初始引导（bootstrap）——AI agent 进场即有指引（见
@@ -1321,17 +1321,37 @@ warn_meta_violations() {
   printf '%s\n' "$bad" | sed 's/^/ponygo: WARN   /' >&2
 }
 
+# 投影哨兵（单一真值，F9）：do_sync 写入/替换标记区、verify_ladder 的 2.6 判据、observe 的替代形态
+# 文案共用同一对常量——**禁止**在别处重抄字面量（第二真值 = 判据与实现漂移的源头）。
+SYNC_BEGIN='<!-- BEGIN constitution -->'
+SYNC_END='<!-- END constitution -->'
+
 # ---------- 级自洽验证（status 调用；判据唯一真源：maturity-ladder.md §5） ----------
 # 验级基准：无条件验 min(声明级,2) 及以下全部判据；声明 L3+ 的自证提示由 cmd_status 保留输出。
 VL_FAILS=""
-vl_fail() { VL_FAILS="${VL_FAILS}  - $1"$'\n'; }
+# F8：JSON 只收**稳定 id**（判据号，如 2.4 / 1.10），不收自由文本；无编号的老文案归 "other"。
+VL_FAIL_IDS=""
+vl_fail() { # <文案>
+  VL_FAILS="${VL_FAILS}  - $1"$'\n'
+  local _id=""
+  _id=$(printf '%s' "$1" | sed -n 's/^\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -n1)
+  [ -n "$_id" ] || _id="other"
+  case " ${VL_FAIL_IDS} " in
+    *" $_id "*) : ;;                        # 去重：同一判据号只出现一次
+    *) VL_FAIL_IDS="${VL_FAIL_IDS}${VL_FAIL_IDS:+ }$_id" ;;
+  esac
+}
 
 verify_ladder() {
   local lv="$1"
   VL_FAILS=""
+  VL_FAIL_IDS=""
   # 2.5 条件判据状态（Q1=A）：DT_OFF=1 → 结论行改写为"2.1–2.4 PASS；2.5 未启用"；
   # DT_SKIP=1 → 未声明 docs-tier（2.5 不计入 PASS，WARN 催声明）。
   DT_OFF=0; DT_SKIP=0
+  # 2.6 条件判据状态（F9，完全仿 2.5）：AS_OFF=1 → 显式 opt-out（结论禁写「全部 PASS」）；
+  # AS_SKIP=1 → 未声明 ai-surface（2.6 不计入 PASS，WARN 催声明）。
+  AS_OFF=0; AS_SKIP=0
   # 归一后不匹配 ^[0-5]$ → 只验 L0、报 0.4 FAIL、跳过 L1/L2（不对未验证值做算术比较）
   local validated=0
   case "$lv" in
@@ -1556,11 +1576,42 @@ verify_ladder() {
           fi
           ;;
       esac
+
+      # 2.6 AI 常载命约已投影（F9；完全仿 2.5 的三态条件判据）：
+      #   undeclared → SKIP + WARN（不计入 PASS，退出码不变——既有实例不得转红）
+      #   off        → 显式 opt-out（结论行禁写「全部 PASS」）
+      #   on         → 校验根 AGENTS.md 含**成对**投影哨兵块；常量共用 SYNC_BEGIN/SYNC_END
+      #                （= do_sync 写标记区用的同一真值，禁第二副本）。本判据只读、不投影。
+      local ai_raw="" ai_state="undeclared" ai_proj=0
+      ai_raw=$(sed -n 's/^ai-surface:[[:space:]]*//p' "$META_YAML" 2>/dev/null | head -n1 | tr -d '\r')
+      case "$ai_raw" in
+        on)  ai_state="on" ;;
+        off) ai_state="off" ;;
+        *)   ai_state="undeclared" ;;  # 缺键/空/畸形值（含引号/大小写变体）→ 按未声明处理
+      esac
+      case "$ai_state" in
+        on)
+          if [ -f "AGENTS.md" ] && grep -qxF "$SYNC_BEGIN" "AGENTS.md" 2>/dev/null \
+             && grep -qxF "$SYNC_END" "AGENTS.md" 2>/dev/null; then
+            ai_proj=1
+          fi
+          [ "$ai_proj" = "1" ] || vl_fail "2.6 已声明 ai-surface: on 但根 AGENTS.md 缺成对投影哨兵块（$SYNC_BEGIN … $SYNC_END——未投影或哨兵被删）→ 补救：bash ponygo sync"
+          ;;
+        off)
+          # 显式 opt-out：不判 FAIL；结论行由 AS_OFF 改写（不得出现「全部 PASS」）
+          AS_OFF=1
+          ;;
+        *)
+          printf 'ponygo: WARN 未声明 ai-surface（meta.yaml 缺 ai-surface: on|off）→ 2.6 SKIPPED 不计入 PASS；想启用 AI 常载命约请加 ai-surface: on\n' >&2
+          AS_SKIP=1
+          ;;
+      esac
     fi
 
   fi
 
   if [ -n "$VL_FAILS" ]; then
+    VL_VERDICT="fail"
     echo ""
     echo "级自洽验证：未通过（声明 $(fmt_level "$lv")）——以下判据 FAIL："
     printf '%s' "$VL_FAILS"
@@ -1571,12 +1622,14 @@ verify_ladder() {
   # 证据不足（0 spec / 全部自报 SKIPPED / 递归护栏拦截）时，结论行**不得**出现「机械判据全部 PASS」
   # （SKIPPED 不计入 PASS 是硬契约），故整行改为「未判定」并显式标注未验证（调用方据此 exit 3）。
   if [ "${SPEC_UNVERIFIED:-0}" = "1" ]; then
+    VL_VERDICT="unverified"
     echo ""
     # A：有 spec 自报 SKIPPED 时必须显式给「N 真跑通过 / M 未验证（SKIPPED）」；
     # 只有全部 spec 都真跑通过（SPEC_VERIFIED=1）时结论行才可写「已真跑并通过」。
     if [ "${SPEC_RUN_SKIP:-0}" -gt 0 ]; then
       echo "级自洽验证：未判定（机械判据无 FAIL 项；2.3 执行判据 ${SPEC_RUN_PASS:-0} 真跑通过 / ${SPEC_RUN_SKIP} 未验证（SKIPPED），不计入 PASS；证据不足 → exit 3）"
     elif [ "$lv" = "0" ]; then
+      VL_VERDICT="unverified"
       echo "级自洽验证：未判定（纯 L0 长驻；机械判据无 FAIL 项；2.3 执行判据 SKIPPED——本次未验证，不计入 PASS；证据不足 → exit 3）"
     else
       echo "级自洽验证：未判定（机械判据无 FAIL 项；2.3 执行判据 SKIPPED——本次未验证，不计入 PASS；证据不足 → exit 3）"
@@ -1588,16 +1641,23 @@ verify_ladder() {
   if [ "${SPEC_VERIFIED:-0}" = "1" ]; then
     spec_note="；2.3 执行判据 已真跑并通过"
   fi
-  # 2.5 条件判据结论行（Q1=A）：off → 整体改写为"2.1–2.4 PASS；2.5 未启用"，禁写"全部 PASS"；
-  # 未声明且未激活 → 2.5 SKIPPED 不计入 PASS（WARN 已在 2.5 分支输出）。
-  local pass_txt=""
-  if [ "${DT_OFF:-0}" = "1" ]; then
-    pass_txt="级自洽验证：通过（2.1–2.4 PASS；2.5 未启用${spec_note}）"
-  elif [ "${DT_SKIP:-0}" = "1" ]; then
-    pass_txt="级自洽验证：通过（${verified_range} 机械判据全部 PASS；2.5 SKIPPED——未声明 docs-tier，不计入 PASS${spec_note}）"
+  # 2.5/2.6 条件判据结论行（Q1=A + F9）：
+  #   任一条件判据 off（显式 opt-out）→ 基线改写为"2.1–2.4 PASS"并逐条列「未启用」，**禁写「全部 PASS」**；
+  #   任一未声明 → 该判据 SKIPPED 不计入 PASS（WARN 已在对应分支输出）；
+  #   三者皆无 → 保持原文案「${verified_range} 机械判据全部 PASS」（既有断言逐字节不变）。
+  local base_txt="" cond_txt="" cond_off="" cond_skip=""
+  if [ "${DT_OFF:-0}" = "1" ]; then cond_off="${cond_off}；2.5 未启用"; fi
+  if [ "${AS_OFF:-0}" = "1" ]; then cond_off="${cond_off}；2.6 未启用"; fi
+  if [ "${DT_SKIP:-0}" = "1" ]; then cond_skip="${cond_skip}；2.5 SKIPPED——未声明 docs-tier，不计入 PASS"; fi
+  if [ "${AS_SKIP:-0}" = "1" ]; then cond_skip="${cond_skip}；2.6 SKIPPED——未声明 ai-surface，不计入 PASS"; fi
+  if [ -n "$cond_off" ]; then
+    base_txt="2.1–2.4 PASS"; cond_txt="${cond_off}${cond_skip}"
   else
-    pass_txt="级自洽验证：通过（${verified_range} 机械判据全部 PASS${spec_note}）"
+    base_txt="${verified_range} 机械判据全部 PASS"; cond_txt="${cond_skip}"
   fi
+  local pass_txt=""
+  VL_VERDICT="pass"
+  pass_txt="级自洽验证：通过（${base_txt}${cond_txt}${spec_note}）"
   echo ""
   if [ "$lv" = "0" ]; then
     echo "级自洽验证：通过（纯 L0 长驻：合法终态）"
@@ -3319,9 +3379,63 @@ cmd_init() {
   info "完成。当前 level=$(read_level)。下一步：ponygo status 查看骨架完整度。"
 }
 
+# ---------- F8：机读面（--json）——固定词表、禁自由文本、exit 字段 == 真实退出码 ----------
+# 人类报告在 JSON 模式下整体改道 stderr（cmd_audit / cmd_status 入口 `exec 3>&1 1>&2`），
+# stdout 只留**单行** JSON；WARN 本来就走 stderr，不混入机器通道。
+# fails / gaps 只收**稳定 id**（判据号或固定枚举），绝不塞自由文本——词表变了先改契约。
+level_as_int() { # <read_level 的原始值> → 整数；非法/缺失 → -1（JSON 只接受整数，不塞字符串）
+  local lv="$1"
+  case "$lv" in
+    ''|*[!0-9]*) printf -- '-1' ;;
+    *) printf '%s' "$lv" ;;
+  esac
+}
+gates_local_state() { # → wired|not_wired|skipped（与 2.4 / gate_wiring_report 同一 probe，禁第二口径）
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { printf 'skipped'; return 0; }
+  if gate_24_probe; then printf 'wired'; else printf 'not_wired'; fi
+}
+gates_remote_state() { # → wired|missing|none|other（只按 forge 证据形状判定）
+  local p=""
+  p=$(ci_provider)
+  case "$p" in
+    none)   printf 'none' ;;
+    github) if [ -f .github/workflows/ponygo-governance.yml ]; then printf 'wired'; else printf 'missing'; fi ;;
+    *)      printf 'other' ;;
+  esac
+}
+json_id_list() { # <空格分隔的 id 列表> → "a","b"（空输入 → 空）
+  local v out=""
+  for v in $1; do out="${out}${out:+,}\"${v}\""; done
+  printf '%s' "$out"
+}
+audit_json_line() { # <exit code> → 单行 JSON
+  printf '{"schema":"ponygo.audit/1","command":"audit","tier":"%s","hits":%s,"total":%s,"level":%s,"ladder":{"verdict":"%s","fails":[%s]},"gates":{"local":"%s","remote":"%s"},"gaps":[%s],"exit":%s}\n' \
+    "${AUDIT_TIER:-S}" "${AUDIT_HIT:-0}" "${AUDIT_TOTAL:-0}" "${AUDIT_LEVEL_INT:--1}" \
+    "${VL_VERDICT:-unverified}" "$(json_id_list "${VL_FAIL_IDS:-}")" \
+    "$(gates_local_state)" "$(gates_remote_state)" \
+    "$(json_id_list "${AUDIT_GAP_IDS:-}")" "$1"
+}
+status_json_line() { # <exit code> → 单行 JSON
+  printf '{"schema":"ponygo.status/1","command":"status","level":%s,"skeleton":{"missing_dirs":%s,"missing_files":%s,"drift":%s},"gates":{"local":"%s","remote":"%s"},"ladder":{"verdict":"%s","fails":[%s]},"exit":%s}\n' \
+    "${STATUS_LEVEL_INT:--1}" "${STATUS_MISSING_DIRS:-0}" "${STATUS_MISSING_FILES:-0}" "${STATUS_DRIFT:-0}" \
+    "$(gates_local_state)" "$(gates_remote_state)" \
+    "${VL_VERDICT:-unverified}" "$(json_id_list "${VL_FAIL_IDS:-}")" "$1"
+}
+audit_done() { # <exit code>：JSON 模式先把单行 JSON 送到原 stdout（fd 3），再按真实码退出
+  if [ "${AUDIT_JSON:-0}" = "1" ]; then audit_json_line "$1" >&3; fi
+  exit "$1"
+}
+status_done() { # <exit code>
+  if [ "${STATUS_JSON:-0}" = "1" ]; then status_json_line "$1" >&3; fi
+  exit "$1"
+}
+
 cmd_audit() {
   # 自适应深度选择：探测重型信号 → M 档；全轻 → S 档
   local heavy=0 reasons="" spec_rc=0
+  # F8：--json 机读面。人类报告整体改道 stderr，fd 3 保留原 stdout 只给单行 JSON。
+  AUDIT_JSON="${OBSERVE_JSON:-0}"; AUDIT_GAP_IDS=""; VL_VERDICT=""; VL_FAIL_IDS=""
+  if [ "$AUDIT_JSON" = "1" ]; then exec 3>&1 1>&2; fi
   # 信号1：贡献者数 >= 3
   local contrib=0
   if [ -d .git ] && git rev-parse --verify HEAD >/dev/null 2>&1; then contrib=$(git shortlog -sne HEAD 2>/dev/null | wc -l | tr -d ' '); fi
@@ -3360,6 +3474,8 @@ cmd_audit() {
     *) die "审计深度档仅支持 S|M，收到：$LEVEL_CHOICE" ;;
   esac
 
+  AUDIT_TIER="$LEVEL_CHOICE"
+  AUDIT_LEVEL_INT="$(level_as_int "$(read_level)")"
   info "审计深度：${LEVEL_CHOICE} 档${reasons:+（触发:$reasons）}"
   [ "${LEVEL_CHOICE}" = "M" ] || { info "S 档——骨架层判定（判「有没有」）。"; }
   [ "${LEVEL_CHOICE}" = "M" ] && { info "M 档——机制层判定（判「对不对」）。"; }
@@ -3444,6 +3560,7 @@ cmd_audit() {
   [ -d "$DECISIONS_DIR/archived" ] && hit=$((hit+1))
 
   # ---- 输出 ----
+  AUDIT_HIT="$hit"; AUDIT_TOTAL="$total"
   echo ""
   echo "===== ponygo 审计结果（${LEVEL_CHOICE} 档）====="
   echo "命中 $hit / $total 项"
@@ -3455,13 +3572,16 @@ cmd_audit() {
   local gap_txt=""
   if [ ! -f "$META_YAML" ]; then
     gap_txt="${gap_txt}  - 无 .meta/meta.yaml → 跑 'ponygo init' 或手工建 level: 0"$'\n'
+    AUDIT_GAP_IDS="${AUDIT_GAP_IDS}${AUDIT_GAP_IDS:+ }meta_yaml_missing"
   fi
   local lv="$(read_level)"
   if [ -d "$DECISIONS_DIR" ] && [ "${n_dec:-0}" -eq 0 ]; then
     gap_txt="${gap_txt}  - notes/ 无任何决策 → 写第一篇 ADR，落 proposed/ 或 implemented/"$'\n'
+    AUDIT_GAP_IDS="${AUDIT_GAP_IDS}${AUDIT_GAP_IDS:+ }no_decisions"
   fi
   if [ -z "${hook_path:-}" ] && [ ! -f .githooks/pre-commit ]; then
     gap_txt="${gap_txt}  - 无本地钩子（core.hooksPath 未设）→ 这是「强制层」缺口，优先补（放大器）"$'\n'
+    AUDIT_GAP_IDS="${AUDIT_GAP_IDS}${AUDIT_GAP_IDS:+ }no_local_hook"
   fi
   echo ""
   if [ -n "$gap_txt" ]; then
@@ -3502,7 +3622,7 @@ cmd_audit() {
         2) SPEC_UNVERIFIED=1
            # W3-C：这里**不得**预先承诺退出码——同屏若有级自洽 FAIL，下面走的是 exit 1（FAIL 优先）。
            printf 'ponygo: 2.3 执行判据 SKIPPED（证据不足——本次未验证门是否仍会拒绝非法样本）；SKIPPED 不计入 PASS，按 fail-closed 处理。\n' >&2 ;;
-        *) exit 1 ;;
+        *) audit_done 1 ;;
       esac
     fi
   fi
@@ -3512,7 +3632,7 @@ cmd_audit() {
   if [ -f "$META_YAML" ]; then
     echo ""
     if ! verify_ladder "$(read_level)"; then
-      exit 1
+      audit_done 1
     fi
   else
     echo ""
@@ -3523,8 +3643,9 @@ cmd_audit() {
   if [ "${SPEC_UNVERIFIED:-0}" = "1" ]; then
     # W3-C：只有走到这里才真的 exit 3（上方 ladder FAIL 分支已 exit 1）
     printf 'ponygo: 判据证据不足（2.3 执行判据未真正验证）→ exit 3\n' >&2
-    exit 3
+    audit_done 3
   fi
+  audit_done 0
 }
 
 # status 模板比对的临时基准树（W7-1）：文件级状态 + 幂等清理，供 EXIT/INT/TERM 三钩共用
@@ -3537,6 +3658,10 @@ status_tmp_cleanup() {
 cmd_status() {
   local lv
   lv=$(read_level)
+  # F8：--json 机读面（人类报告改道 stderr；fd 3 只给单行 JSON）
+  STATUS_JSON="${OBSERVE_JSON:-0}"; STATUS_LEVEL_INT="$(level_as_int "$lv")"
+  STATUS_MISSING_DIRS=0; STATUS_MISSING_FILES=0; STATUS_DRIFT=0; VL_VERDICT=""; VL_FAIL_IDS=""
+  if [ "$STATUS_JSON" = "1" ]; then exec 3>&1 1>&2; fi
   echo "===== ponygo status ====="
   echo "治理级：$(fmt_level "$lv")"
   warn_meta_violations
@@ -3546,9 +3671,9 @@ cmd_status() {
   echo "骨架完整度："
   local missing=0
   for d in "$META_DIR" "$META_DIR/constitution" "$META_DIR/gates" "$META_DIR/docs-tier" "$AGENTS_RUNTIME_DIR" "$DECISIONS_DIR" "$SKILLS_DIR"; do
-    if [ -d "$d" ]; then printf '  [ok]  %s\n' "$d"; else printf '  [缺]  %s\n' "$d"; missing=$((missing+1)); fi
+    if [ -d "$d" ]; then printf '  [ok]  %s\n' "$d"; else printf '  [缺]  %s\n' "$d"; missing=$((missing+1)); STATUS_MISSING_DIRS=$((STATUS_MISSING_DIRS+1)); fi
   done
-  [ -f "$META_YAML" ] && printf '  [ok]  %s\n' "$META_YAML" || { printf '  [缺]  %s\n' "$META_YAML"; missing=$((missing+1)); }
+  [ -f "$META_YAML" ] && printf '  [ok]  %s\n' "$META_YAML" || { printf '  [缺]  %s\n' "$META_YAML"; missing=$((missing+1)); STATUS_MISSING_FILES=$((STATUS_MISSING_FILES+1)); }
 
   # ---- 骨架文件口径（F4：与 'ponygo upgrade' 同一 UPGRADE_UNIVERSE 十三文件）----
   # 只判**存在性**（不读模板、不执行任何脚本——只读命令的边界不变）。缺口数必须与 upgrade
@@ -3560,6 +3685,7 @@ cmd_status() {
     sf_n=$((sf_n+1))
     sf_list="$sf_list $sf"
   done
+  STATUS_MISSING_FILES=$((STATUS_MISSING_FILES+sf_n))
   if [ "$sf_n" -gt 0 ]; then
     printf '骨架文件缺口：%s\n' "$sf_n"
     for sf in $sf_list; do printf '  [缺]  %s\n' "$sf"; done
@@ -3594,6 +3720,7 @@ cmd_status() {
         done
       fi
     fi
+    STATUS_DRIFT="$st_drift"
     status_tmp_cleanup
     if [ -n "$st_trap_exit" ]; then eval "$st_trap_exit"; else trap - EXIT; fi
     if [ -n "$st_trap_int" ]; then eval "$st_trap_int"; else trap - INT; fi
@@ -3618,17 +3745,18 @@ cmd_status() {
     echo "下一步（去下一级 / 补缺口）："
     [ ! -f "$META_YAML" ] && echo "  - 补 $META_YAML（level: 0）"
     echo "  骨架不完整，exit 1（机器可查的缺口 = 非零退出）。"
-    exit 1
+    status_done 1
   else
     echo "骨架完整。"
     # 级自洽验证：失败项输出取代"去下一级"建议文本（不叠床架屋）
-    if ! verify_ladder "$lv"; then exit 1; fi
+    if ! verify_ladder "$lv"; then status_done 1; fi
     case "$lv" in
       0|1) echo "去 L$((lv+1))：见 https://github.com/lanhui100/ponygo/blob/main/maturity-ladder.md 对应级退出标准与布尔检查项。" ;;
       2)   echo "已达机械判定的上限。L3+ 为「靠 review」的目标画像，按需选装。" ;;
       *)   echo "已声明 $(fmt_level "$lv")，但 L3-L5 属目标画像：请对照 https://github.com/lanhui100/ponygo/blob/main/maturity-ladder.md §2 的依赖清单自证，否则视为散文（P6 诚实条款）。" ;;
     esac
   fi
+  status_done 0
 }
 
 # ---------- upgrade 漂移报告（v2.4：Q2=A） ----------
@@ -4992,6 +5120,75 @@ EOF
 }
 
 # 本地版本兼容门：不联网、不调集群、不调 check-drift；--check 时兼容=0/不兼容=2，否则恒 0
+# ---------- F10：受控探针（ponygo observe probe） ----------
+# 由 ponygo 自己投递一个带 provenance 的 OTLP/HTTP span，用来证明「链路真的通」而不是「声明看起来对」。
+# 三条硬约束：
+#   1) 凭证只从 env 读（PONYGO_OTEL_TOKEN），**永不打印/落盘**——dry-run 与错误信息一律 <redacted>；
+#   2) endpoint/服务名可显式给，但都不写进任何文件（本命令只读）；
+#   3) 探针不是判定：成功只说明「管道可达」，判定仍由 'ponygo observe audit' 做（输出指引等待窗口）。
+# 退出码：0 = 投递成功；1 = 用法/缺参；2 = 工具或网络/HTTP 非 2xx（含超时）——不复用 3（证据不足属 audit）。
+observe_probe() {
+  local dry="${DRY_RUN:-0}" endpoint="" tok="" svc="" envn="" tos="" decl="" url="" code="" payload="" now_ns="" tid="" sid=""
+  endpoint="${OBS_ENDPOINT:-}"
+  [ -n "$endpoint" ] || endpoint="${PONYGO_OTEL_ENDPOINT:-}"
+  tok="${PONYGO_OTEL_TOKEN:-}"
+  envn="${OBS_ENV:-local}"
+  tos="${OBS_TIMEOUT:-5}"
+  # 服务名：--service > 声明的 service > 缺省 unknown_service
+  svc="${OBS_SERVICE:-}"
+  if [ -z "$svc" ]; then
+    decl=$(observe_decl_path)
+    if [ -n "$decl" ] && [ -f "$decl" ]; then
+      svc=$(sed -n 's/^service:[[:space:]]*//p' "$decl" 2>/dev/null | head -n1 | tr -d '\r' | sed 's/[[:space:]]*$//')
+    fi
+  fi
+  [ -n "$svc" ] || svc="unknown_service"
+  case "$tos" in
+    ''|*[!0-9]*) printf 'ponygo: observe probe：--timeout 只接受正整数秒（收到：%s）\n' "$tos" >&2; return 1 ;;
+  esac
+  if [ -z "$endpoint" ]; then
+    printf 'ponygo: observe probe：缺 endpoint——用 --endpoint <url> 或 env PONYGO_OTEL_ENDPOINT\n' >&2
+    return 1
+  fi
+  if [ -z "$tok" ]; then
+    printf 'ponygo: observe probe：缺 token——只从 env PONYGO_OTEL_TOKEN 读取（不落盘、不回显）\n' >&2
+    return 1
+  fi
+  url="${endpoint%/}/v1/traces"
+  # OTLP/HTTP JSON：resource attrs 必须自证来源（ponygo.probe / version），span 名固定 ponygo.probe
+  now_ns=$(date +%s 2>/dev/null || echo 0)000000000
+  tid=$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n'); [ -n "$tid" ] || tid="00000000000000000000000000000000"
+  sid=$(od -An -N8 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n');  [ -n "$sid" ] || sid="0000000000000000"
+  payload=$(printf '{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"%s"}},{"key":"deployment.environment","value":{"stringValue":"%s"}},{"key":"ponygo.probe","value":{"boolValue":true}},{"key":"ponygo.probe.version","value":{"intValue":"1"}}]},"scopeSpans":[{"scope":{"name":"ponygo.probe"},"spans":[{"traceId":"%s","spanId":"%s","name":"ponygo.probe","kind":1,"startTimeUnixNano":"%s","endTimeUnixNano":"%s","status":{"code":1}}]}]}]}' \
+    "$svc" "$envn" "$tid" "$sid" "$now_ns" "$now_ns")
+  if [ "$dry" = "1" ]; then
+    info "[dry-run] 目标 endpoint：$url（AUTHORIZATION: Bearer <redacted>）"
+    info "[dry-run] service.name=$svc deployment.environment=$envn ponygo.probe=true ponygo.probe.version=1 span=ponygo.probe"
+    info "[dry-run] 未发送任何请求（零网络）——去掉 --dry-run 才投递"
+    info "探针之后：等待 10 秒后执行 ponygo observe audit（判定仍由 audit 做）"
+    return 0
+  fi
+  if ! command -v curl >/dev/null 2>&1; then
+    printf 'ponygo: observe probe：本环境无 curl，无法投递 OTLP/HTTP（工具缺失，未发送任何请求）\n' >&2
+    return 2
+  fi
+  code=$(printf '%s' "$payload" | curl -sS -o /dev/null -w '%{http_code}' --max-time "$tos" \
+    -X POST -H 'Content-Type: application/json' -H "Authorization: Bearer $tok" \
+    --data-binary @- "$url" 2>/dev/null)
+  if [ $? -ne 0 ] || [ -z "$code" ] || [ "$code" = "000" ]; then
+    printf 'ponygo: observe probe：投递失败（网络不可达/超时）→ %s（凭证 <redacted>，未写入任何文件）\n' "$url" >&2
+    return 2
+  fi
+  case "$code" in
+    2[0-9][0-9]) : ;;
+    *) printf 'ponygo: observe probe：OTLP 接收端返回 HTTP %s（非 2xx = 投递失败）→ %s（凭证 <redacted>）\n' "$code" "$url" >&2
+       return 2 ;;
+  esac
+  info "已投递探针 span：service.name=$svc deployment.environment=$envn span=ponygo.probe → HTTP $code"
+  info "等待 10 秒后执行 ponygo observe audit（判定仍由 audit 做；探针只证明管道可达）"
+  return 0
+}
+
 observe_upgrade() {
   local d ver min compat
   observe_require_keys
@@ -5026,6 +5223,9 @@ observe —— 可观测性治理维度（判定 ob0/ob1/ob2；ob3 仅为目标�
   ponygo observe audit  [--level ob0|ob1|ob2] [--base <rev>] [--strict] [--json]
                                                   判定是否达到目标级（缺口仅作 backlog；--strict 时任一缺口非零）
   ponygo observe upgrade [--check]                与技能契约的版本兼容门（CI 用 --check）
+  ponygo observe probe [--dry-run] [--endpoint <url>] [--service <s>] [--env <e>] [--timeout <s>]
+                                                  受控探针：投递带 provenance 的 OTLP span（凭证只读 env
+                                                  PONYGO_OTEL_TOKEN，永不回显；--dry-run 零网络）
   ponygo observe --help | -h                      本段帮助
 
 observe 选项（仅 observe 接受，其余命令拒绝）：
@@ -5096,6 +5296,8 @@ DRY_RUN=0; LEVEL=""; CMD=""; RETIRE_LEVEL=""; RUN_SPECS=0; UPGRADE_CHECK=0; REPA
 OBSERVE_SUB=""; OBSERVE_LEVEL=""; OBSERVE_JSON=0; OBSERVE_SKILL_DIR=""; OBSERVE_MAPPING_FILE=""; OBSERVE_STRICT=0
 # observe init/audit 旗标族（值型：--kind/--service/--dims/--anchor-<dim>/--reason-<dim>/--base）
 OBS_KIND=""; OBS_SERVICE=""; OBS_DIMS=""; OBS_FORCE=0; OBSERVE_BASE=""
+# F10 observe probe 旗标族（endpoint 只进内存，不落盘；token 只从 env 读）
+OBS_ENDPOINT=""; OBS_ENV=""; OBS_TIMEOUT=""
 OBS_ANCHOR_METRICS=""; OBS_ANCHOR_TRACING=""; OBS_ANCHOR_LOGS=""; OBS_ANCHOR_ISSUES=""
 OBS_REASON_METRICS=""; OBS_REASON_TRACING=""; OBS_REASON_LOGS=""; OBS_REASON_ISSUES=""
 # 惰性求值的探测缓存（映射数据块校验 / `timeout` 语义探针 + 一次性 WARN 旗标）
@@ -5132,6 +5334,9 @@ while [ $# -gt 0 ]; do
     --kind) [ $# -ge 2 ] || die "--kind 需要取值（如 --kind desktop；枚举见映射 kind_enum）"; shift; OBS_KIND="$1" ;;
     --service) [ $# -ge 2 ] || die "--service 需要取值（如 --service checkout-api）"; shift; OBS_SERVICE="$1" ;;
     --dims) [ $# -ge 2 ] || die "--dims 需要取值（如 --dims metrics,tracing）"; shift; OBS_DIMS="$1" ;;
+    --endpoint) [ $# -ge 2 ] || die "--endpoint 需要取值（如 --endpoint http://127.0.0.1:4318）"; shift; OBS_ENDPOINT="$1" ;;
+    --env) [ $# -ge 2 ] || die "--env 需要取值（如 --env staging；缺省 local）"; shift; OBS_ENV="$1" ;;
+    --timeout) [ $# -ge 2 ] || die "--timeout 需要正整数秒（如 --timeout 5）"; shift; OBS_TIMEOUT="$1" ;;
     --anchor-metrics) [ $# -ge 2 ] || die "--anchor-metrics 需要取值（如 --anchor-metrics src/metrics.ts）"; shift; OBS_ANCHOR_METRICS="$1" ;;
     --anchor-tracing) [ $# -ge 2 ] || die "--anchor-tracing 需要取值（如 --anchor-tracing src/tracing.ts）"; shift; OBS_ANCHOR_TRACING="$1" ;;
     --anchor-logs) [ $# -ge 2 ] || die "--anchor-logs 需要取值（如 --anchor-logs src/log.ts）"; shift; OBS_ANCHOR_LOGS="$1" ;;
@@ -5153,6 +5358,15 @@ while [ $# -gt 0 ]; do
         die "子命令位置非法：'$CMD' 后不接受 'observe'（见 'ponygo --help'）"
       fi
       CMD=observe
+      ;;
+    probe)
+      # F10：probe 只作 observe 的子命令存在——命令面固定六条，不得新增顶层命令词
+      if [ "${CMD:-}" = "observe" ]; then
+        if [ -n "${OBSERVE_SUB:-}" ]; then die "observe 后不接受第二个子命令词：$1（见 'ponygo observe --help'）"; fi
+        OBSERVE_SUB=probe
+      else
+        die "未知参数或子命令：$1（probe 是 'ponygo observe probe' 的子命令，见 'ponygo --help'）"
+      fi
       ;;
     init|audit|status|upgrade|sync|retire)
       # A1 守卫：observe 已占 CMD 时，紧随的第二个子命令词不得覆盖它（'observe status init' 不得变成 init）；
@@ -5228,10 +5442,11 @@ if [ "$OBSERVE_STRICT" = "1" ] \
    && ! { [ "${CMD:-}" = "observe" ] && [ "${OBSERVE_SUB:-}" = "audit" ]; }; then
   die "--strict 仅适用于 'ponygo observe audit'（严格门禁：任一缺口均非零退出）"
 fi
-# --json 只属于 'observe status|audit'（固定词表 JSON 供 CI）；其余命令拒绝，避免静默忽略
+# --json 只属于 'audit' / 'status' 与 'observe status|audit'（固定词表 JSON 供 CI）；其余命令拒绝，避免静默忽略
 if [ "$OBSERVE_JSON" = "1" ] \
-   && ! { [ "${CMD:-}" = "observe" ] && { [ "${OBSERVE_SUB:-}" = "status" ] || [ "${OBSERVE_SUB:-}" = "audit" ]; }; }; then
-  die "--json 仅适用于 'ponygo observe status|audit'（固定词表输出，供 CI 解析）"
+   && ! { [ "${CMD:-}" = "observe" ] && { [ "${OBSERVE_SUB:-}" = "status" ] || [ "${OBSERVE_SUB:-}" = "audit" ]; }; } \
+   && ! { [ "${CMD:-}" = "audit" ] || [ "${CMD:-}" = "status" ]; }; then
+  die "--json 仅适用于 'ponygo audit' / 'ponygo status' / 'ponygo observe status|audit'（固定词表输出，供 CI 解析）"
 fi
 # --skill-dir / --mapping 只属于 observe（其余命令拒绝，避免静默忽略）
 if [ -n "$OBSERVE_SKILL_DIR" ] && [ "${CMD:-}" != "observe" ]; then
@@ -5244,7 +5459,11 @@ fi
 # --base 只属 observe audit（audit-diff 比较基线）。其余命令一律拒绝，避免静默忽略。
 if [ "${CMD:-}" != "observe" ]; then
   if [ -n "${OBS_KIND:-}" ]; then die "--kind 仅适用于 'ponygo observe init'（可观测性声明种类）"; fi
-  if [ -n "${OBS_SERVICE:-}" ]; then die "--service 仅适用于 'ponygo observe init'（声明服务名）"; fi
+  if [ -n "${OBS_SERVICE:-}" ]; then
+    if ! { [ "${CMD:-}" = "observe" ] && { [ "${OBSERVE_SUB:-}" = "init" ] || [ "${OBSERVE_SUB:-}" = "probe" ]; }; }; then
+      die "--service 仅适用于 'ponygo observe init' 或 'ponygo observe probe'（服务名）"
+    fi
+  fi
   if [ -n "${OBS_DIMS:-}" ]; then die "--dims 仅适用于 'ponygo observe init'（四维适用性列表）"; fi
   if [ -n "${OBS_ANCHOR_METRICS:-}${OBS_ANCHOR_TRACING:-}${OBS_ANCHOR_LOGS:-}${OBS_ANCHOR_ISSUES:-}" ]; then
     die "--anchor-<dim> 仅适用于 'ponygo observe init'（该维唯一实现落点）"
@@ -5253,6 +5472,11 @@ if [ "${CMD:-}" != "observe" ]; then
     die "--reason-<dim> 仅适用于 'ponygo observe init'（不适用维的结构性理由）"
   fi
   if [ "${OBS_FORCE:-0}" = "1" ]; then die "--force 仅适用于 'ponygo observe init'（覆盖已存在声明）"; fi
+fi
+# F10：probe 专用旗标（endpoint/env/timeout）——其余命令一律拒绝，避免静默忽略
+if [ -n "${OBS_ENDPOINT:-}${OBS_ENV:-}${OBS_TIMEOUT:-}" ] \
+   && ! { [ "${CMD:-}" = "observe" ] && [ "${OBSERVE_SUB:-}" = "probe" ]; }; then
+  die "--endpoint / --env / --timeout 仅适用于 'ponygo observe probe'（受控探针）"
 fi
 if [ -n "${OBSERVE_BASE:-}" ] \
    && ! { [ "${CMD:-}" = "observe" ] && [ "${OBSERVE_SUB:-}" = "audit" ]; }; then
@@ -5272,6 +5496,7 @@ case "${CMD:-}" in
       init) observe_init ;;
       audit) observe_audit ;;
       upgrade) observe_upgrade ;;
+      probe) observe_probe ;;
       *) die "未知 observe 子命令：${OBSERVE_SUB:-（缺）}（见 'ponygo observe --help'）" ;;
     esac
     ;;
