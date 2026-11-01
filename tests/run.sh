@@ -1721,10 +1721,13 @@ s33_observe_stub() {
   OUT=$(cd "$T" && bash bin/ponygo observe status 2>&1); RC=$?
   assert_eq "observe 单文件自洽：副本 observe status exit 0" 0 "$RC"
 
-  # ⑧ 既有守卫不得被 observe 旗标污染（--json / --skill-dir / --mapping 只属 observe）
-  T=$(new_case); run_cli "$T" status --json
-  assert_eq "status --json → exit 1（旗标仅属 observe）" 1 "$R_RC"
-  assert_contains "status --json 报仅适用于 observe" "$R_OUT" "仅适用于 'ponygo observe status|audit'"
+  # ⑧ 既有守卫不得被 observe 旗标污染（--skill-dir / --mapping 只属 observe）
+  #    CONTRACT-EVOLUTION 第 6 条（Lead 裁定）：`--json` 原先是 observe 子域旗标，F8 起是顶层审计面的
+  #    机读契约（schema 独立、退出码不变）；旧断言固化的「机读面只有 observe」是过时假设。
+  T=$(new_case); run_cli "$T" init   # init 后 status 正常态 = exit 0（空仓 status 本身合法返回 1，JSON 的 exit 字段如实镜像）
+  run_cli "$T" status --json
+  assert_eq "status --json → exit 0（F8：机读面已扩到 status）" 0 "$R_RC"
+  assert_contains "status --json 输出固定 schema" "$R_OUT" '"schema":"ponygo.status/1"'
   run_cli "$T" status --skill-dir /tmp
   assert_eq "status --skill-dir → exit 1" 1 "$R_RC"
   assert_contains "status --skill-dir 报仅适用于 observe" "$R_OUT" "仅适用于 'ponygo observe'"
