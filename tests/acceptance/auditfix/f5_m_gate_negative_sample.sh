@@ -68,6 +68,40 @@ SPECEOF
     bad "F5 C：无法解析命中数（A=[$HIT_A] C=[$HIT_C]）"
   fi
   assert_eq "F5-3 C：总项数仍为 14" 14 "$(hits_t_of "$R_OUT")"
+
+  # ---- F5-5（Wave 6「有效内容为空」口径）：空白 / 注释-only spec 不得计分 ----
+  # D：1 字节空白 spec（printf '\n'）——有效内容为空，不是门禁负样本
+  D=$(new_case)
+  cp -a "$A"/. "$D"/
+  printf '\n' > "$D/.meta/gates/blank.spec.sh"
+  chmod +x "$D/.meta/gates/blank.spec.sh"
+  assert_eq "F5-5 夹具：blank.spec.sh 恰 1 字节" 1 "$(wc -c < "$D/.meta/gates/blank.spec.sh" | tr -d ' ')"
+  run_in "$D" audit --level M
+  HIT_D=$(hits_of "$R_OUT")
+  if [ -n "$HIT_A" ] && [ -n "$HIT_D" ]; then
+    assert_eq "F5-5 D：1 字节空白 spec 不得让 M 档命中 +1（A=$HIT_A / D=$HIT_D）" "$HIT_A" "$HIT_D"
+  else
+    bad "F5-5 D：无法解析命中数（A=[$HIT_A] D=[$HIT_D]）"
+  fi
+
+  # E：注释-only spec——同样「无有效内容」，不得计分
+  E=$(new_case)
+  cp -a "$A"/. "$E"/
+  printf '# 只有注释行，没有可执行内容\n' > "$E/.meta/gates/comment.spec.sh"
+  chmod +x "$E/.meta/gates/comment.spec.sh"
+  run_in "$E" audit --level M
+  HIT_E=$(hits_of "$R_OUT")
+  if [ -n "$HIT_A" ] && [ -n "$HIT_E" ]; then
+    assert_eq "F5-5 E：注释-only spec 不得让 M 档命中 +1（A=$HIT_A / E=$HIT_E）" "$HIT_A" "$HIT_E"
+  else
+    bad "F5-5 E：无法解析命中数（A=[$HIT_A] E=[$HIT_E]）"
+  fi
+
+  # 对照：真有内容的 spec（C）必须是唯一 +1 的那一个
+  if [ -n "$HIT_C" ] && [ -n "$HIT_D" ]; then
+    assert_eq "F5-5 对照：真有内容 spec(C) 与空白 spec(D) 命中差恰为 1（C=$HIT_C / D=$HIT_D）" \
+      "$((HIT_D + 1))" "$HIT_C"
+  fi
 fi
 
 finish

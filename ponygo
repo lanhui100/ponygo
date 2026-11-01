@@ -478,7 +478,7 @@ staged 后又在工作区改动（两个方向：暂存合法→工作区改、�
 
 运行时机：`bash .meta/gates/ci-verify.sh`（CI/本地全树）、`ponygo audit --run-specs`（opt-in，
 本 spec 会被**真跑**并断言 exit 0）、pre-commit 不跑它（秒级预算）。
-若 `audit --run-specs` 最终没有**任何** spec 被真正执行（0 个 / 全部自报 SKIPPED / 递归护栏拦截），
+若 `audit --run-specs` 存在**未被真正执行**的 spec（0 个 / 自报 SKIPPED（含部分）/ 递归护栏拦截 / 空 spec），
 `audit` 以 **exit 3（证据不足）** 结束，且结论行不得出现「机械判据全部 PASS」。
 
 ## 门禁分层的三个时间经济层（P7，dsh 实证）
@@ -521,7 +521,7 @@ bash .meta/gates/<name>.spec.sh   # CI / pre-push 层的等价写法
 
 - **自包含**：从自身路径解析仓库根（`ROOT=$(cd "$(dirname "$0")/../.." && pwd)`），不依赖调用者 cwd；
 - **只读仓库**：样本一律建在 `mktemp -d` 临时目录、退出时清理；不得改动仓库文件；
-- **秒级**：有 `timeout` 时施加 30 秒上限（挂死的 spec 不会拖死体检）；
+- **秒级**：有 `timeout` 时施加 **软 25s + KILL 兜底 5s**（最坏 30s；无视 TERM 的挂死 spec 会被强杀，不会拖死体检）；
 - **exit 0 = 自检通过**（"门确实会拒绝非法样本"）；非零 → 报 FAIL 并回显该 spec 输出尾部；
 - **防递归**：嵌套由调起方判定——`ponygo audit` 在 `PONYGO_AUDIT_SPEC_DEPTH ≥ 1` 时拒绝再跑 spec
   （该层不执行任何 spec，按 `SKIPPED` 处理并 **exit 3**）；第一层 spec **必须真跑**。
@@ -1469,10 +1469,12 @@ verify_ladder() {
     if [ "$lv" -ge 2 ]; then
       verified_range="L0-L2"
       # 2.1 gates/ 有实质文件（README/.gitkeep 占位不计分）
-      # W3-B：0 字节文件不算实质门禁（与 2.3/②/negspec 同口径——空文件不是门禁）
-      if ! find "$META_DIR/gates" -type f ! -size 0 ! -name 'README.md' ! -name '.gitkeep' -print -quit 2>/dev/null | grep -q .; then
-        vl_fail "2.1 gates/ 无实质门禁文件（README/.gitkeep 不计）→ 放第一个非零退出的门禁脚本"
-      fi
+      # W3-B/W6：无有效内容（空白行/# 注释行之外无内容）的文件不算实质门禁
+      local g21=0 g21f=""
+      while IFS= read -r -d '' g21f; do
+        if file_has_content "$g21f"; then g21=1; break; fi
+      done < <(find "$META_DIR/gates" -type f ! -name 'README.md' ! -name '.gitkeep' -print0 2>/dev/null)
+      [ "$g21" = "1" ] || vl_fail "2.1 gates/ 无实质门禁文件（README/.gitkeep 与空文件不计）→ 放第一个非零退出的门禁脚本"
       # 2.2 代理判据：*.sh 过 bash -n；真判据（--help / 空样本非零拒绝）靠人工补验
       local sh_bad=0 shf=""
       while IFS= read -r -d '' f; do
@@ -1482,11 +1484,13 @@ verify_ladder() {
       # 2.3 负样本 spec（*.spec.*）：存在性判据（形状，靠 review）。
       # 执行判据是 opt-in 的 `ponygo audit --run-specs`——只读命令不执行仓库脚本
       # （设计约束"判定优先只读"，见文件头）。
-      # W2：0 字节 `*.spec.*` 不计入（README/.gitkeep 的既有排除口径扩到「空文件」）——
-      # 空 spec 证明不了任何拒绝语义，用它占位等于把形状判据刷成假绿。
-      if ! find "$META_DIR/gates" -type f -name '*.spec.*' ! -size 0 -print -quit 2>/dev/null | grep -q .; then
-        vl_fail "2.3 gates/ 无负样本 spec（*.spec.*）→ 配一个证明门会拒绝非法样本的 spec（推荐 *.spec.sh 自检脚本，用 'ponygo audit --run-specs' 验证）"
-      fi
+      # W2/W6：无有效内容的 `*.spec.*` 不计入（README/.gitkeep 的既有排除口径扩到「空文件」，
+      # 且「空」按**有效行**判定：空白行与 # 注释行不算内容——空 spec 证明不了任何拒绝语义）。
+      local sp23=0 sp23f=""
+      while IFS= read -r -d '' sp23f; do
+        if file_has_content "$sp23f"; then sp23=1; break; fi
+      done < <(find "$META_DIR/gates" -type f -name '*.spec.*' -print0 2>/dev/null)
+      [ "$sp23" = "1" ] || vl_fail "2.3 gates/ 无负样本 spec（*.spec.*）→ 配一个证明门会拒绝非法样本的 spec（推荐 *.spec.sh 自检脚本，用 'ponygo audit --run-specs' 验证）"
       # 2.4 「本地层已接 ADR 门」六条 AND（§6.6 / §7 F1+F3+F5 / maturity-ladder.md §2.4）：
       #   ① hooksPath 已设 ② 归一化目录可达（F6：~ 展开）③ 该目录内 pre-commit 存在且可执行
       #   ④ 哨兵区间逐字节等于规范块（EOL 归一，F3）⑤ 块起始行 < 首个顶层 exit/exec 行
@@ -1622,7 +1626,7 @@ verify_ladder() {
 #   - 新入口：PONYGO_AUDIT_SPEC_DEPTH ≥ 1（本次执行由 spec 内层发起）→ 拒绝再跑，打印护栏后 exit 2。
 #     第一层**不再**向 spec 注入 PONYGO_IN_SPEC=1，只把深度 +1 传下去——故框架自带 spec（A2）
 #     在第一层是真跑，不会被自己的护栏吞成 SKIPPED（P0-1 缺陷）；
-#   - 超时：有 timeout 则 30 秒上限（挂死的 spec 不会拖死体检）；
+#   - 超时：有 timeout 时软 25s + KILL 兜底 5s（最坏 30s；无视 TERM 的挂死 spec 会被强杀）；
 #   - 聚合：报告**全部**失败 spec（不只最后一个）。
 # 返回：0 全过 / 1 有失败 / 2 跳过（无 *.spec.sh 或有护栏命中）
 run_gate_specs() {
@@ -1662,11 +1666,11 @@ run_gate_specs() {
   outfile="$SPEC_TMPFILE"
   while IFS= read -r -d '' f; do
     n=$((n+1))
-    # W2：0 字节 spec 不得真空通过——空文件不执行任何断言，`bash 空文件` 恒 exit 0 会把它
-    # 洗成「[ok] 全部自检通过」。直接判 FAIL（硬失败 → 整体 exit 1），不得计为通过。
-    if [ ! -s "$f" ]; then
+    # W2/W6：空 spec 不得真空通过——无有效内容的文件不执行任何断言，`bash 空文件`（或只有
+    # 空白行/# 注释行）恒 exit 0，会被洗成「[ok] 全部自检通过」。直接判 FAIL（硬失败 → exit 1）。
+    if ! file_has_content "$f"; then
       bad=$((bad+1))
-      printf '  [FAIL] 2.3 spec 自检失败：%s（0 字节空 spec——空文件证明不了任何拒绝语义，不得计为通过）\n' "$f"
+      printf '  [FAIL] 2.3 spec 自检失败：%s（无有效内容：去掉空白行与 # 注释行后为空——证明不了任何拒绝语义，不得计为通过）\n' "$f"
       continue
     fi
     # 输出重定向到临时文件而非命令替换：命令替换会等管道写端关闭，
@@ -2469,6 +2473,15 @@ gate_hook_wired() { # <hook 文件> → 0 = 已接线（字节规范 + 位置可
   gate_hook_bytes_ok "$1" || return 1
   gate_hook_block_before_exit "$1" || return 1
   return 0
+}
+
+# 「有效内容」判定（W6）：去掉空白行与 # 注释行后仍无任何字符 = 空文件（不是内容）。
+# 用它替代 -size 0 / -s —— `printf '\n' > x.spec.sh`、注释-only 的 spec 都能过 -s，
+# 却证明不了任何拒绝语义；三处口径（2.3 形状判据 / M 档 negspec 计分 / run_gate_specs 判 FAIL）
+# 必须同一套判定，否则「形状 PASS / 计分 +1 / 执行 [ok]」任一处都能被 1 字节刷绿。
+file_has_content() { # <文件> → 0 = 有有效内容；非 0 = 空/仅空白/仅注释/不可读
+  [ -f "$1" ] || return 1
+  grep -qvE '^[[:space:]]*(#|$)' "$1" 2>/dev/null
 }
 
 # 文件权限（八进制；GNU/BSD stat 双兼容）
@@ -3380,11 +3393,14 @@ cmd_audit() {
   # gates/ 有实例自己的实质门禁。README/.gitkeep 占位不计分；框架随 `ponygo init` 交付的
   # ADR 门资产（A1/A2/A4：adr-verify.sh / adr-verify.spec.sh / ci-verify.sh）同样不计分——
   # 那是**框架侧**证据（每个实例都有），计进来等于白送一分，四问分数就失去区分度。
-  # W2：0 字节文件同样不计分（空文件不是门禁，占位即假绿）。
-  if [ -d "$META_DIR/gates" ] && [ -n "$(find "$META_DIR/gates" -maxdepth 1 -type f ! -size 0 \
-        ! -name 'README.md' ! -name '.gitkeep' \
-        ! -name 'adr-verify.sh' ! -name 'adr-verify.spec.sh' ! -name 'ci-verify.sh' \
-        -print -quit 2>/dev/null)" ]; then hit=$((hit+1)); fi
+  # W2/W6：无有效内容的文件同样不计分（空白行/# 注释行之外无内容 = 不是门禁，占位即假绿）。
+  local g2=0 g2f=""
+  while IFS= read -r -d '' g2f; do
+    if file_has_content "$g2f"; then g2=1; break; fi
+  done < <(find "$META_DIR/gates" -maxdepth 1 -type f \
+      ! -name 'README.md' ! -name '.gitkeep' \
+      ! -name 'adr-verify.sh' ! -name 'adr-verify.spec.sh' ! -name 'ci-verify.sh' -print0 2>/dev/null)
+  [ "$g2" = "1" ] && hit=$((hit+1))
   total=$((total+1))
   # 本地钩子已挂：仅在 git 仓库内判定（非 git 目录读到的全局配置与本项目无关）
   hook_path=""
@@ -3408,9 +3424,13 @@ cmd_audit() {
     # 的证据，计进来等于白送一分（P1-6）。总项数不变（仍 14 项）。
     # 框架**随骨架交付**的 spec 资产（A2 adr-verify.spec.sh；将来随骨架交付的其它 spec 同入此清单）
     # 同样不计分——每个新实例都白有它，计进来四问就失去区分度（与上一条「框架侧证据不计分」同源）。
-    # W2：0 字节 `*.spec.*` 不计分（`> x.spec.sh` 空文件即可 +1 是纯可操纵性）。
-    negspec=$(find "$META_DIR/gates" -type f -name '*.spec.*' ! -size 0 \
-      ! -name 'adr-verify.spec.sh' -print -quit 2>/dev/null)
+    # W2/W6：无有效内容的 `*.spec.*` 不计分（`> x.spec.sh` 空文件 / `printf '\n'` / 注释-only
+    # 都能过 -s，纯可操纵性——故按有效行判定，与 2.3、run_gate_specs 同一口径）。
+    negspec=""
+    while IFS= read -r -d '' ns1; do
+      if file_has_content "$ns1"; then negspec="$ns1"; break; fi
+    done < <(find "$META_DIR/gates" -type f -name '*.spec.*' \
+        ! -name 'adr-verify.spec.sh' -print0 2>/dev/null)
     [ -n "$negspec" ] && hit=$((hit+1))
   fi
 
@@ -3538,7 +3558,37 @@ cmd_status() {
     echo "  → 跑 'ponygo init --repair-skeleton' 只补缺失骨架文件（不覆盖既有文件；--dry-run 先看计划）"
     missing=$((missing+sf_n))
   else
-    printf '骨架文件与模板一致（%s 个骨架文件齐全）\n' "$sf_total"
+    # W6-4：只判存在性却宣称「与模板一致」= 声明与实现不一致（实测：清空 .meta/gates/ci-verify.sh
+    # 后 status 仍 rc=0 且称「一致」，而 upgrade 报 drift）。这里**真的**比：
+    # 与 'ponygo upgrade' 同一模板基准（write_skeleton 0）+ EOL 归一逐字节；docs-tier 已激活实例
+    # 豁免该文件（激活必改写 → 恒漂移，与 upgrade 的 dt_skip 同口径）。漂移是**观察**，不改退出码。
+    local st_tmp="" st_drift=0 st_dt=0 st_cmp=0 st_trap="" stf
+    st_trap=$(trap -p EXIT)
+    st_tmp=$(mktemp -d 2>/dev/null) || st_tmp=""
+    if [ -n "$st_tmp" ]; then
+      trap 'rm -rf "${st_tmp:-}" 2>/dev/null || true' EXIT
+      if ( cd "$st_tmp" && write_skeleton 0 ) >/dev/null 2>&1; then
+        st_cmp=1
+        if [ -f "$META_DIR/docs-tier/README.md" ] \
+           && grep -q '## 已激活文档家清单' "$META_DIR/docs-tier/README.md" 2>/dev/null; then
+          st_dt=1
+        fi
+        for stf in $UPGRADE_UNIVERSE; do
+          [ "$st_dt" = "1" ] && [ "$stf" = ".meta/docs-tier/README.md" ] && continue
+          [ -f "$st_tmp/$stf" ] || continue
+          cmp -s <(tr -d '\r' < "$stf") <(tr -d '\r' < "$st_tmp/$stf") || st_drift=$((st_drift+1))
+        done
+      fi
+      rm -rf "$st_tmp"; st_tmp=""
+      if [ -n "$st_trap" ]; then eval "$st_trap"; else trap - EXIT; fi
+    fi
+    if [ "$st_cmp" != "1" ]; then
+      printf '骨架文件齐全（%s 个；内容未比对：模板基准不可得——用 '\''ponygo upgrade'\'' 看漂移）\n' "$sf_total"
+    elif [ "$st_drift" -gt 0 ]; then
+      printf '骨架文件齐全（%s 个），但内容漂移 %s 处（逐字节比对，见 '\''ponygo upgrade'\''）\n' "$sf_total" "$st_drift"
+    else
+      printf '骨架文件与模板一致（%s 个骨架文件齐全，逐字节比对）\n' "$sf_total"
+    fi
   fi
 
   local n_dec=0
@@ -3622,6 +3672,9 @@ repair_skeleton_gaps() { # <dry:0|1>
       if exec 8>>"$lockfile"; then
         REPAIR_LOCKFILE="$lockfile"
         flock -w 10 8 || warn "骨架补齐锁等待超时（10s，$lockfile）→ 继续；写入仍为 mktemp+mv 原子替换"
+      else
+        # W6-2：打开锁失败不得静默降级（装配路径同样 WARN）——本次无锁继续，但必须说出来
+        warn "无法打开骨架补齐锁文件（$lockfile）→ 本次无锁继续；写入仍为 mktemp+mv 原子替换"
       fi
     else
       lk="$lockfile.d"
@@ -3748,10 +3801,16 @@ cmd_upgrade() {
       # 缺骨架文件（实例侧缺失）：gates/README 是"仅空目录时生成"的条件写入口——
       # gates 目录已有实质门禁时缺 README 报"缺口"（缺骨架文件）而非"漂移"（D2 边界）
       missing_n=$((missing_n+1))
-      # W3-B：同口径——0 字节文件不算「已有实质门禁」（否则空文件即可把该缺口判成 README 分支）
-      if [ "$f" = ".meta/gates/README.md" ] && [ -d "$META_DIR/gates" ] \
-         && [ -n "$(find "$META_DIR/gates" -maxdepth 1 -type f ! -size 0 \
-              ! -name 'README.md' ! -name '.gitkeep' -print -quit 2>/dev/null)" ]; then
+      # W3-B/W6：同口径——无有效内容的文件不算「已有实质门禁」
+      # （否则空文件/注释-only 文件即可把该缺口判成 README 分支）
+      local gu=0 guf=""
+      if [ "$f" = ".meta/gates/README.md" ] && [ -d "$META_DIR/gates" ]; then
+        while IFS= read -r -d '' guf; do
+          if file_has_content "$guf"; then gu=1; break; fi
+        done < <(find "$META_DIR/gates" -maxdepth 1 -type f \
+            ! -name 'README.md' ! -name '.gitkeep' -print0 2>/dev/null)
+      fi
+      if [ "$f" = ".meta/gates/README.md" ] && [ "$gu" = "1" ]; then
         echo "缺口: $f（gates/ 已有实质门禁但缺 README——跑 'ponygo init --repair-skeleton' 只补缺失，或手建）"
       else
         echo "缺口: $f（缺骨架文件——跑 'ponygo init --repair-skeleton' 补全后再跟随升级）"

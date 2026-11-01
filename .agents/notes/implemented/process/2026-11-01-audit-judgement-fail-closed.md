@@ -54,9 +54,14 @@ Status: implemented
 7. **`init --repair-skeleton` 只做骨架补缺**：不触发电缆装配（`ensure_gate_wiring`）、
    不写适配任务书、不投影 AI 常载命约——否则"只补不覆盖"的承诺会被随后的
    `gate_asset_put` 自愈覆盖推翻（实例加固过的 A1/A2 被静默回滚），且输出自相矛盾。
-8. **0 字节 `*.spec.*` 不计入任何判据**：既不计 2.3 形状、不计 M 档负样本分、不计
-   「gates/ 有实质门禁」，`--run-specs` 对 0 字节 spec 直接判 FAIL——空文件证明不了任何
-   拒绝语义，把它当通过正是本次要消灭的"未验证即通过"。
+8. **空 spec 不计入任何判据**：判据是「**是否有有效内容**」（去掉空白行与 `#` 注释行后
+   仍有字符），而不是 `-size 0`——1 字节换行或注释-only 的 spec 同样不计 2.3 形状、不计
+   M 档负样本分、不计「gates/ 有实质门禁」，`--run-specs` 直接判 FAIL。理由：空文件证明不了
+   任何拒绝语义；只判 0 字节会被 1 字节绕过，等于把 fail-closed 留给攻击者自己选。
+9. **`status` 的「骨架文件」判据做真比对**：与 `upgrade` 同一模板基准（`write_skeleton`）+
+   EOL 归一逐字节 `cmp`，docs-tier 已激活实例豁免同款；漂移仍只观察、不改退出码。
+   仅判存在性却宣称"与模板一致"就是本次要修的缺陷类（实测：清空 `.meta/gates/ci-verify.sh`
+   后 status 仍 rc=0 且称一致，而 upgrade 报 `drift:`）。
 
 ## Alternatives considered
 

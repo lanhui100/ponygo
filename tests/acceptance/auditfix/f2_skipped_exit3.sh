@@ -176,4 +176,29 @@ if gov_repo "$T" 2; then
   assert_contains "F2-8 取证：FAIL 项为 2.4 未接 ADR 门" "$R_OUT" "2.4"
 fi
 
+# ---- F2-10（Wave 6「有效内容为空」口径）：空白 / 注释-only spec 不得被当作真跑通过 ----
+# 1 字节空白（printf '\n'）与注释-only 文件的**有效内容为空**（剥空白行与 # 注释行后无字符）
+# → 判 FAIL（exit 1），不得打「[ok] 2.3 spec 自检」，也不得出现「全部自检通过」。
+for kind in blank comment; do
+  T=$(new_case)
+  gov_repo "$T" 1 || continue
+  rm -f "$T"/.meta/gates/*.spec.sh
+  if [ "$kind" = "blank" ]; then
+    printf '\n' > "$T/.meta/gates/blank.spec.sh"
+  else
+    printf '# 只有注释，没有可执行内容\n' > "$T/.meta/gates/comment.spec.sh"
+  fi
+  chmod +x "$T"/.meta/gates/*.spec.sh
+  if [ "$kind" = "blank" ]; then
+    assert_eq "F2-10($kind) 夹具：空白 spec 恰 1 字节" 1 \
+      "$(wc -c < "$T/.meta/gates/blank.spec.sh" | tr -d ' ')"
+  fi
+
+  run_in "$T" audit --run-specs
+  assert_rc_is "F2-10($kind) 有效内容为空的 spec → exit 1（判 FAIL）" 1 "$R_RC"
+  assert_matches "F2-10($kind) 输出点明「空 spec」类文案" "$R_OUT" '空 spec|空spec|无有效内容|有效内容为空'
+  assert_not_contains "F2-10($kind) NOGO：不得出现「全部自检通过」" "$R_OUT" "全部自检通过"
+  assert_not_contains "F2-10($kind) NOGO：不得打「[ok]   2.3 spec 自检」" "$R_OUT" "[ok]   2.3 spec 自检："
+done
+
 finish
