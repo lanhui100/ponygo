@@ -1259,7 +1259,7 @@ s27_run_specs() {
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
   printf 'x\n' > "$T/.meta/gates/format.spec.md"
   run_cli "$T" audit --run-specs
-  assert_eq "无 .sh spec → exit 0（SKIPPED 非 FAIL）" 0 "$R_RC"
+  assert_eq "无 .sh spec → exit 3（SKIPPED=未验证，fail-closed；P0-2 契约演进）" 3 "$R_RC"
   assert_contains "报 SKIPPED 不计入 PASS" "$R_OUT" "SKIPPED 不计入 PASS"
   assert_contains "SKIPPED 时结论行显式提示未验证" "$R_OUT" "本次未验证门是否仍会拒绝非法样本"
   assert_contains "SKIPPED 时结论行限定范围" "$R_OUT" "2.3 执行判据 SKIPPED——本次未验证"
