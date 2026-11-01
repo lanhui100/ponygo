@@ -174,32 +174,27 @@ if start_probe_server "$T" 200 6; then     # 慢后端 6s：只有缺省档（10
   stop_probe_server
 fi
 
-# ================= F10-6 token 不得出现在 argv（L3 终审新增）=================
+# ================= F10-6 token 不得出现在 argv（观测桩，确定性）=================
+# 早先版本扫 /proc/<pid>/cmdline 取样，存在两处假阳/假阴：grep 自身 argv 命中、curl 可能在取样前退出。
+# 现行做法：PATH 前置 curl 观测桩记录「真实传给 curl 的 argv」，再断言 token 不在其中。
 T=$(new_case)
 gov_repo "$T" 1
 if start_probe_server "$T" 200 6; then
   EP="http://127.0.0.1:$PROBE_PORT"
-  ( cd "$T" && PONYGO_OTEL_ENDPOINT="$EP" PONYGO_OTEL_TOKEN=test-token \
-      bash "$ROOT/ponygo" observe probe --service svc-a > "$T/.probe-bg.out" 2>&1 ) &
-  BG=$!
-  probe_wait_request    # 阻塞直到接收器确实收到请求（此时探针正等 6s 慢后端响应）
-  # 窗口内取证：扫全部进程 argv（/proc cmdline），断言 token 不出现在**任何** argv 里。
-  # 有界重试（read -t 1 作时间片，非盲 sleep）：覆盖「探针可能派生短命子进程」的实现形态。
-  ARGV=$(proc_argv_snapshot 'ponygo|127\.0\.0\.1')
-  LEAK=$(proc_argv_snapshot 'test-token')
-  tries=0
-  while [ -z "$ARGV" ] && [ "$tries" -lt 2 ]; do
-    read -r -t 1 -u 9 _ 2>/dev/null || true
-    ARGV=$(proc_argv_snapshot 'ponygo|127\.0\.0\.1')
-    LEAK="$LEAK$(proc_argv_snapshot 'test-token')"
-    tries=$((tries+1))
-  done
-  assert_eq "F10-6 取证：探针在窗口内确实发出了 1 个请求" 1 "$(probe_requests)"
-  assert_not_contains "F10-6 NOGO：token 不得出现在任何进程 argv" "$LEAK" "test-token"
-  wait "$BG"; assert_zero "F10-6 慢后端下 probe 仍成功（取窗口不影响结论）" "$?"
+  SHIM_LOG="$T/.curl-argv.log"
+  if install_curl_shim "$T/.shim-bin" "$SHIM_LOG"; then
+    run_in "$T" PATH="$T/.shim-bin:$PATH" PONYGO_OTEL_ENDPOINT="$EP" PONYGO_OTEL_TOKEN=test-token \
+      observe probe --service svc-a
+    assert_zero "F10-6 观测桩下 probe 仍成功 → exit 0" "$R_RC"
+    assert_eq "F10-6 取证：观测桩确实记录了 curl 调用" 1 "$(grep -c 'v1/traces' "$SHIM_LOG" 2>/dev/null | tr -d ' ')"
+    assert_contains "F10-6 GO：凭据经 -K 配置文件传入（不进 argv）" "$(cat "$SHIM_LOG" 2>/dev/null || :)" "-K "
+    assert_not_contains "F10-6 NOGO：token 不得出现在任何进程 argv" "$(cat "$SHIM_LOG" 2>/dev/null || :)" "test-token"
+    assert_not_contains "F10-6 NOGO：argv 中不得出现 Authorization 头" "$(cat "$SHIM_LOG" 2>/dev/null || :)" "Authorization"
+  fi
   stop_probe_server
 fi
-assert_not_contains "F10-6 NOGO：错误信息也不得回显 token" "$(cat "$T/.probe-bg.out" 2>/dev/null || :)" "test-token"
+run_in "$T" PONYGO_OTEL_ENDPOINT="http://127.0.0.1:1" PONYGO_OTEL_TOKEN=test-token observe probe --service svc-a
+assert_not_contains "F10-6 NOGO：错误信息也不得回显 token" "$R_OUT" "test-token"
 
 # ================= F10-7 --service 取值含引号 → payload 仍是合法 JSON（L3 终审新增）=================
 T=$(new_case)

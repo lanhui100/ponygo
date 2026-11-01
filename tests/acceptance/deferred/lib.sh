@@ -185,10 +185,21 @@ PY
 }
 
 # 进程 argv 快照（读 /proc/*/cmdline，避免 ps args 截断）；可带过滤正则
+# 注意（TEST-DEFECT 修复）：正则**经文件**传给 grep（-f），不能用 `grep -E "$pat"`——
+# 否则 grep 自身的 /proc/<pid>/cmdline 里就含该字面量，扫描进程表时会把自己扫出来，
+# 让「token 不得出现在任何进程 argv」变成恒假（本仓实测：探针真未泄漏，断言却红）。
 proc_argv_snapshot() { # [过滤正则]
-  local pat="${1:-.}"
-  { for pc in /proc/[0-9]*/cmdline; do { tr '\0' ' ' < "$pc"; } 2>/dev/null || true; printf '\n'; done; } \
-    | grep -E "$pat" || true
+  local pat="${1:-.}" pf
+  pf=$(mktemp 2>/dev/null) || pf=""
+  if [ -n "$pf" ]; then
+    printf '%s\n' "$pat" > "$pf"
+    { for pc in /proc/[0-9]*/cmdline; do { tr '\0' ' ' < "$pc"; } 2>/dev/null || true; printf '\n'; done; } \
+      | grep -E -f "$pf" || true
+    rm -f "$pf"
+  else
+    { for pc in /proc/[0-9]*/cmdline; do { tr '\0' ' ' < "$pc"; } 2>/dev/null || true; printf '\n'; done; } \
+      | grep -E -- "$pat" || true
+  fi
 }
 
 # ---------- 本地 OTLP 探针接收器（零外网；FIFO 就绪同步，无 sleep 轮询）----------
@@ -226,6 +237,25 @@ stop_probe_server() {
   [ -n "${PROBE_NOTIFY:-}" ] && rm -f "$PROBE_NOTIFY"
   PROBE_FIFO=""; PROBE_NOTIFY=""
 }
+# curl argv 观测桩（TEST-DEFECT 修复）：/proc 时间窗取样不可靠（curl 可能在取样前已退出），
+# 改用 PATH 前置的 curl 包装桩——它把**自己的 argv** 追加到日志，再 exec 真 curl。
+# 这样「token 不得进 argv」是**确定性**断言，不依赖进程存活窗口。
+install_curl_shim() { # <bindir> <logfile>
+  local bindir="$1" logf="$2" real=""
+  real=$(command -v curl 2>/dev/null || true)
+  [ -n "$real" ] || { bad "夹具失败：环境无 curl（无法安装观测桩）"; return 1; }
+  mkdir -p "$bindir" || return 1
+  : > "$logf"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf '# 观测桩：记录 argv 后原样转发给真 curl（argv 是断言对象，这里不脱敏）\n'
+    printf 'printf "%%s\\n" "$*" >> %q\n' "$logf"
+    printf 'exec %q "$@"\n' "$real"
+  } > "$bindir/curl"
+  chmod +x "$bindir/curl" || return 1
+  return 0
+}
+
 probe_requests() { # → 抓到的请求数
   if [ ! -f "${PROBE_CAP:-}" ]; then printf '0'; return 0; fi
   grep -c '^---REQ---$' "$PROBE_CAP" 2>/dev/null | tr -d ' '
