@@ -478,8 +478,9 @@ staged 后又在工作区改动（两个方向：暂存合法→工作区改、�
 
 运行时机：`bash .meta/gates/ci-verify.sh`（CI/本地全树）、`ponygo audit --run-specs`（opt-in，
 本 spec 会被**真跑**并断言 exit 0）、pre-commit 不跑它（秒级预算）。
-若 `audit --run-specs` 存在**未被真正执行**的 spec（0 个 / 自报 SKIPPED（含部分）/ 递归护栏拦截 / 空 spec），
+若 `audit --run-specs` 存在**未被真正执行**的 spec（0 个 / 自报 SKIPPED（含部分）/ 递归护栏拦截），
 `audit` 以 **exit 3（证据不足）** 结束，且结论行不得出现「机械判据全部 PASS」。
+无有效内容（去掉空白行与 `#` 注释行后为空）的 spec 判 **FAIL**（exit 1，优先于 3）。
 
 ## 门禁分层的三个时间经济层（P7，dsh 实证）
 
@@ -3526,6 +3527,13 @@ cmd_audit() {
   fi
 }
 
+# status 模板比对的临时基准树（W7-1）：文件级状态 + 幂等清理，供 EXIT/INT/TERM 三钩共用
+STATUS_TMP=""
+status_tmp_cleanup() {
+  if [ -n "${STATUS_TMP:-}" ]; then rm -rf "${STATUS_TMP}" 2>/dev/null || true; STATUS_TMP=""; fi
+  return 0
+}
+
 cmd_status() {
   local lv
   lv=$(read_level)
@@ -3562,12 +3570,18 @@ cmd_status() {
     # 后 status 仍 rc=0 且称「一致」，而 upgrade 报 drift）。这里**真的**比：
     # 与 'ponygo upgrade' 同一模板基准（write_skeleton 0）+ EOL 归一逐字节；docs-tier 已激活实例
     # 豁免该文件（激活必改写 → 恒漂移，与 upgrade 的 dt_skip 同口径）。漂移是**观察**，不改退出码。
-    local st_tmp="" st_drift=0 st_dt=0 st_cmp=0 st_trap="" stf
-    st_trap=$(trap -p EXIT)
-    st_tmp=$(mktemp -d 2>/dev/null) || st_tmp=""
-    if [ -n "$st_tmp" ]; then
-      trap 'rm -rf "${st_tmp:-}" 2>/dev/null || true' EXIT
-      if ( cd "$st_tmp" && write_skeleton 0 ) >/dev/null 2>&1; then
+    local st_drift=0 st_dt=0 st_cmp=0 stf
+    local st_trap_exit="" st_trap_int="" st_trap_term=""
+    # W7-1：临时目录**三钩**收口（EXIT/INT/TERM，与 cmd_upgrade / repair_skeleton_gaps 同款）——
+    # 只挂 EXIT 时 SIGTERM/SIGINT 落在基准树生成/比对窗口会残留 ~200K 的 13 文件基准树。
+    # INT/TERM 保留入口层既有语义（observe 临时文件清理 + 130/143 退出码）。
+    st_trap_exit=$(trap -p EXIT); st_trap_int=$(trap -p INT); st_trap_term=$(trap -p TERM)
+    trap 'status_tmp_cleanup' EXIT
+    trap 'status_tmp_cleanup; observe_tmp_cleanup; trap - EXIT INT TERM; exit 130' INT
+    trap 'status_tmp_cleanup; observe_tmp_cleanup; trap - EXIT INT TERM; exit 143' TERM
+    STATUS_TMP=$(mktemp -d 2>/dev/null) || STATUS_TMP=""
+    if [ -n "$STATUS_TMP" ]; then
+      if ( cd "$STATUS_TMP" && write_skeleton 0 ) >/dev/null 2>&1; then
         st_cmp=1
         if [ -f "$META_DIR/docs-tier/README.md" ] \
            && grep -q '## 已激活文档家清单' "$META_DIR/docs-tier/README.md" 2>/dev/null; then
@@ -3575,13 +3589,15 @@ cmd_status() {
         fi
         for stf in $UPGRADE_UNIVERSE; do
           [ "$st_dt" = "1" ] && [ "$stf" = ".meta/docs-tier/README.md" ] && continue
-          [ -f "$st_tmp/$stf" ] || continue
-          cmp -s <(tr -d '\r' < "$stf") <(tr -d '\r' < "$st_tmp/$stf") || st_drift=$((st_drift+1))
+          [ -f "$STATUS_TMP/$stf" ] || continue
+          cmp -s <(tr -d '\r' < "$stf") <(tr -d '\r' < "$STATUS_TMP/$stf") || st_drift=$((st_drift+1))
         done
       fi
-      rm -rf "$st_tmp"; st_tmp=""
-      if [ -n "$st_trap" ]; then eval "$st_trap"; else trap - EXIT; fi
     fi
+    status_tmp_cleanup
+    if [ -n "$st_trap_exit" ]; then eval "$st_trap_exit"; else trap - EXIT; fi
+    if [ -n "$st_trap_int" ]; then eval "$st_trap_int"; else trap - INT; fi
+    if [ -n "$st_trap_term" ]; then eval "$st_trap_term"; else trap - TERM; fi
     if [ "$st_cmp" != "1" ]; then
       printf '骨架文件齐全（%s 个；内容未比对：模板基准不可得——用 '\''ponygo upgrade'\'' 看漂移）\n' "$sf_total"
     elif [ "$st_drift" -gt 0 ]; then

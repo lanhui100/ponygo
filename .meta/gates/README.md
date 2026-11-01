@@ -97,8 +97,9 @@ staged 后又在工作区改动（两个方向：暂存合法→工作区改、�
 
 运行时机：`bash .meta/gates/ci-verify.sh`（CI/本地全树）、`ponygo audit --run-specs`（opt-in，
 本 spec 会被**真跑**并断言 exit 0）、pre-commit 不跑它（秒级预算）。
-若 `audit --run-specs` 存在**未被真正执行**的 spec（0 个 / 自报 SKIPPED（含部分）/ 递归护栏拦截 / 空 spec），
+若 `audit --run-specs` 存在**未被真正执行**的 spec（0 个 / 自报 SKIPPED（含部分）/ 递归护栏拦截），
 `audit` 以 **exit 3（证据不足）** 结束，且结论行不得出现「机械判据全部 PASS」。
+无有效内容（去掉空白行与 `#` 注释行后为空）的 spec 判 **FAIL**（exit 1，优先于 3）。
 
 ## 门禁分层的三个时间经济层（P7，dsh 实证）
 

@@ -85,7 +85,7 @@ git clone https://github.com/lanhui100/ponygo.git && export PATH="$PWD/ponygo:$P
 
 ```bash
 ponygo init      # 新项目：在仓库根生成 .agents/ + .meta/ 治理骨架 + meta.yaml（level: 0）；既有实例上加 --repair-skeleton 只补缺失骨架文件（绝不覆盖已存在文件）
-ponygo audit     # 旧项目改造（或随时体检）：按自适应审计打分，输出缺口与最小改进动作；有治理根时内嵌级自洽验证，判据不符 exit 1。加 --run-specs 执行 gates/*.spec.sh 负样本自检（opt-in，默认不执行仓库脚本）；若存在未被真正执行的 spec（0 个 / 自报 SKIPPED（含部分）/ 递归护栏拦截 / 空 spec）→ exit 3（证据不足，禁止当"验证通过"）；任一 spec 失败则 exit 1（优先于 3）
+ponygo audit     # 旧项目改造（或随时体检）：按自适应审计打分，输出缺口与最小改进动作；有治理根时内嵌级自洽验证，判据不符 exit 1。加 --run-specs 执行 gates/*.spec.sh 负样本自检（opt-in，默认不执行仓库脚本）；若存在未被真正执行的 spec（0 个 / 自报 SKIPPED（含部分）/ 递归护栏拦截）→ exit 3（证据不足，禁止当"验证通过"）；任一 spec 失败或 spec 无有效内容（去掉空白行与 `#` 注释行后为空）→ exit 1（优先于 3）
 ponygo status    # 查看当前成熟度级（L0-L5）与骨架完整性（含骨架文件缺口，与 upgrade 同口径），并对声明级（L0-L2）判据逐项机械验证，不符即非零退出
 ponygo upgrade   # 跟随框架升级：把本仓库新版 ponygo 的命令面/判据同步进已有治理根
 ponygo sync      # 把 constitution 投影到根 AGENTS.md / CLAUDE.md（生成物，勿手编；槽位未填的模板态投影初始引导 bootstrap）
