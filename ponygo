@@ -3451,11 +3451,6 @@ json_path_list() { # <空格分隔的仓库相对路径> → "a","b"（空 → �
   for v in $1; do out="${out}${out:+,}\"$(json_escape "$v")\""; done
   printf '%s' "$out"
 }
-count_words() { # <空格分隔列表> → 元素个数（0 表示空）
-  local n=0 v
-  for v in $1; do n=$((n+1)); done
-  printf '%s' "$n"
-}
 audit_json_line() { # <exit code> → 单行 JSON
   printf '{"schema":"ponygo.audit/1","command":"audit","tier":"%s","hits":%s,"total":%s,"level":%s,"ladder":{"verdict":"%s","fails":[%s]},"gates":{"local":"%s","remote":"%s"},"gaps":[%s],"exit":%s}\n' \
     "${AUDIT_TIER:-S}" "${AUDIT_HIT:-0}" "${AUDIT_TOTAL:-0}" "${AUDIT_LEVEL_INT:--1}" \
@@ -5188,7 +5183,8 @@ EOF
 # ---------- F10：受控探针（ponygo observe probe） ----------
 # 由 ponygo 自己投递一个带 provenance 的 OTLP/HTTP span，用来证明「链路真的通」而不是「声明看起来对」。
 # 三条硬约束：
-#   1) 凭证只从 env 读（PONYGO_OTEL_TOKEN），**永不打印/落盘**——dry-run 与错误信息一律 <redacted>；
+#   1) 凭证只从 env 读（PONYGO_OTEL_TOKEN），**永不回显明文**；凭据仅经 `0600` 临时配置文件传给
+#      curl（-K），用后即删；**不出现在 argv / 日志**；dry-run 与错误信息一律 <redacted>；
 #   2) endpoint/服务名可显式给，但都不写进任何文件（本命令只读）；
 #   3) 探针不是判定：成功只说明「管道可达」，判定仍由 'ponygo observe audit' 做（输出指引等待窗口）。
 # 退出码：0 = 投递成功；1 = 用法/缺参；2 = 工具或网络/HTTP 非 2xx（含超时）——不复用 3（证据不足属 audit）。
@@ -5221,6 +5217,11 @@ observe_probe() {
       svc=$(sed -n 's/^service:[[:space:]]*//p' "$decl" 2>/dev/null | head -n1 | tr -d '\r' | sed 's/[[:space:]]*$//')
     fi
   fi
+  # W10-2：纯空白不算给了 service——trim 后再判空（与「缺 service」同一文案）
+  case "$svc" in
+    *[![:space:]]*) : ;;
+    *) svc="" ;;
+  esac
   if [ -z "$svc" ]; then
     printf 'ponygo: observe probe：缺 service——用 --service <name> 指定，或先跑 ponygo observe init 声明（--kind/--service）\n' >&2
     return 1
@@ -5235,9 +5236,17 @@ observe_probe() {
     *) printf 'ponygo: observe probe：--endpoint 必须以 http:// 或 https:// 开头（收到：%s）\n' "$endpoint" >&2; return 1 ;;
   esac
   if [ -z "$tok" ]; then
-    printf 'ponygo: observe probe：缺 token——只从 env PONYGO_OTEL_TOKEN 读取（不落盘、不回显）\n' >&2
+    printf 'ponygo: observe probe：缺 token——只从 env PONYGO_OTEL_TOKEN 读取（不回显明文）\n' >&2
     return 1
   fi
+  # W10-1：token 必须是**单行可打印**——含 CR/LF/NUL/其它控制字符时，`header = "…"` 会被截断、
+  # 甚至折行注入下一条 curl 配置指令（实测服务端只会收到 "Bearer ab"）。直接判用法错，
+  # 绝不把这类 token 写进配置文件，也不发起任何请求。
+  case "$tok" in
+    *[[:cntrl:]]*)
+      printf 'ponygo: observe probe：token 含非法控制字符（换行/回车/制表符或其它不可打印字节）——只接受单行可打印 token（未写入文件、未发送请求）\n' >&2
+      return 1 ;;
+  esac
   url="${endpoint%/}/v1/traces"
   # OTLP/HTTP JSON：resource attrs 必须自证来源（ponygo.probe / version），span 名固定 ponygo.probe。
   # W9-B7：进入 JSON 的字符串一律 json_escape（`"`、`\`、控制字符严格转义，非 ASCII 原样保留）。
@@ -5276,6 +5285,7 @@ observe_probe() {
     return 2
   fi
   chmod 600 "$PROBE_CURL_CONF" 2>/dev/null || true
+  # 配置文件只接受**单行** token（上面已拒绝含控制字符的 token）；此处只转义 `\` 与 `"`。
   tok_conf="${tok//\\/\\\\}"; tok_conf="${tok_conf//\"/\\\"}"
   {
     printf 'header = "Content-Type: application/json"\n'
@@ -5309,7 +5319,7 @@ observe_probe() {
       *)  why="curl 退出码 $req_rc" ;;
     esac
     printf 'ponygo: observe probe：投递失败（%s）→ %s%s\n' "$why" "$url" \
-      "${errtxt:+（curl: $errtxt）}" >&2
+      "${errtxt:+（$errtxt）}" >&2
     printf 'ponygo: 排查：① endpoint 是否可达/端口是否正确 ② 是否需要出网代理 ③ 加大 --timeout（当前 %ss）；凭证始终 <redacted>\n' "$tos" >&2
     return 2
   fi

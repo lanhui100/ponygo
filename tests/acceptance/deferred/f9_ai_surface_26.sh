@@ -106,4 +106,43 @@ run_in "$T" audit
 assert_rc_is "F9-⑥b 哨兵成对但块内为空 → exit 1" 1 "$R_RC"
 assert_contains "F9-⑥b GO：判定点是 2.6" "$R_OUT" "2.6"
 
+# ================= ⑦ 2.6 重复 BEGIN（Wave-10 回归缺口补齐）=================
+# 契约：两个 <!-- BEGIN constitution --> 配一个 END 不是有效投影（块结构不唯一）→ 2.6 FAIL + exit 1；
+# 反向对照：正常一对 BEGIN/END → PASS（exit 0）。
+T=$(new_case)
+gov_repo "$T" 2
+printf 'level: 2\nai-surface: on\n' > "$T/.meta/meta.yaml"
+cat > "$T/AGENTS.md" <<'AGEOF'
+# AGENTS.md（两个 BEGIN 配一个 END：块结构不唯一）
+
+文档标准 → docs/AGENTS.md
+
+<!-- BEGIN constitution -->
+第一块内容
+<!-- BEGIN constitution -->
+第二块内容
+<!-- END constitution -->
+AGEOF
+run_in "$T" audit
+assert_rc_is "F9-⑦a 重复 BEGIN（两个 BEGIN + 一个 END）→ exit 1" 1 "$R_RC"
+assert_contains "F9-⑦a GO：判定点是 2.6" "$R_OUT" "2.6"
+assert_contains "F9-⑦a GO：给出补救命令 bash ponygo sync" "$R_OUT" "ponygo sync"
+
+T=$(new_case)
+gov_repo "$T" 2
+printf 'level: 2\nai-surface: on\n' > "$T/.meta/meta.yaml"
+cat > "$T/AGENTS.md" <<'AGEOF'
+# AGENTS.md（正常一对哨兵）
+
+文档标准 → docs/AGENTS.md
+
+<!-- BEGIN constitution -->
+真实命约内容（唯一块）
+<!-- END constitution -->
+AGEOF
+run_in "$T" audit
+assert_zero "F9-⑦b 反向对照：正常一对 BEGIN/END → exit 0（2.6 PASS）" "$R_RC"
+assert_contains "F9-⑦b GO：结论行为「级自洽验证：通过」" "$R_OUT" "级自洽验证：通过"
+assert_not_matches "F9-⑦b NOGO：不得把 2.6 判成 FAIL" "$R_OUT" '2\.6[^\n]*(FAIL|未通过)'
+
 finish
