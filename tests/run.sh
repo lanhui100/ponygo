@@ -1218,13 +1218,21 @@ s27_run_specs() {
   [ -f "$T/.meta/gates/WITNESS.txt" ] && ok "--run-specs 确实执行了 spec" || bad "--run-specs 未执行 spec"
 
   # ②b 护栏变量必须真导出给子进程（删掉导出前缀则此断言红——护栏不得静默失效）
+  # 三次 CONTRACT-EVOLUTION（Lead 裁定）：PONYGO_IN_SPEC=1 的意思是「已在 spec 内」，audit 作为父进程
+  # 并不在 spec 内；旧断言固化的正是 P0-1（框架 A2 被自家护栏吞成 SKIPPED）。护栏语义迁移到深度变量
+  # PONYGO_AUDIT_SPEC_DEPTH，「真递归」改由 audit 侧 depth≥1 拒绝。
   T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
-  printf '#!/usr/bin/env bash\n[ "${PONYGO_IN_SPEC:-0}" = "1" ] || { echo "missing guard env" >&2; exit 3; }\nexit 0\n' \
+  printf '#!/usr/bin/env bash\n[ "${PONYGO_AUDIT_SPEC_DEPTH:-0}" -ge 1 ] || { echo "missing guard env" >&2; exit 3; }\nprintf "%%s\\n" "${PONYGO_IN_SPEC:-unset}" > "$(cd "$(dirname "$0")" && pwd)/ENV_WITNESS.txt"\nexit 0\n' \
     > "$T/.meta/gates/env.spec.sh"
   run_cli "$T" audit --run-specs
-  assert_eq "护栏变量已导出给 spec → exit 0" 0 "$R_RC"
+  assert_eq "深度护栏变量已导出给 spec → exit 0" 0 "$R_RC"
+  assert_exists "第一层 spec 确实执行（ENV_WITNESS 落盘）" "$T/.meta/gates/ENV_WITNESS.txt"
+  # 防退化：第一层不得被谎报为「已在 spec 内」（PONYGO_IN_SPEC 不得为 1）
+  assert_not_contains "第一层 spec 不得收到 PONYGO_IN_SPEC=1" \
+    "PONYGO_IN_SPEC=$(cat "$T/.meta/gates/ENV_WITNESS.txt" 2>/dev/null || printf 'MISSING')" \
+    "PONYGO_IN_SPEC=1"
 
   # ③ 有 spec 自检失败 → exit 1；多个失败必须全部报出（聚合，不只最后一个）；exit>1 也算失败
   printf '#!/usr/bin/env bash\necho "bad sample accepted" >&2\nexit 1\n' > "$T/.meta/gates/y.spec.sh"
