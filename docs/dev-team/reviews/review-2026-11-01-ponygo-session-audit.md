@@ -91,3 +91,32 @@ T4（`dynamic`）判据实际是「存在任意一条到达 Tempo 的 span」。
 - ponygo 在两次会话里**没有给出错误结论**（A 的 ob0→ob2、B 的 7/14→14/14 都真实发生了状态变化），但有两处 P0 级「判定与声明不一致」：`--run-specs` 永远空转、SKIPPED 不影响任何结论；以及一处 P1 级可旁路：`observe` 的动态证据不溯源，一次伪造 span 就能刷绿。
 - 全面性上，L2 满级不判 AI 常载命约投影、`status` 与 `upgrade` 骨架口径分裂、审计结果不可机读——这三条使「14/14 + 骨架完整 + 级自洽通过」这套绿灯的证据强度低于其表面。
 - 最大效率黑洞不是缺判据，而是缺「explain / repair / probe」三个动作面：agent 被迫读 skill 的 shell 脚本、读 CLI 源码、手工伪造探针，合计吃掉两会话约一半的工具调用。
+
+---
+
+## 6. 修复状态（2026-11-01，dev-team B 级闭环）
+
+修复提交 `e3fd9d8`（tag `wave-1-auditfix`），决策记录见 ADR
+`.agents/notes/implemented/process/2026-11-01-audit-judgement-fail-closed.md`。
+
+| 缺陷 | 状态 | 落点 |
+|---|---|---|
+| P0-1 `--run-specs` 空转 | 已修 | 深度护栏 `PONYGO_AUDIT_SPEC_DEPTH`，框架 A2 spec 现真实执行 |
+| P0-2 SKIPPED 无判定后果 | 已修 | 0 spec / 全 SKIPPED / **部分 SKIPPED** / 护栏 → exit 3；FAIL(1) 优先；0 字节 spec 判 FAIL |
+| P1-3 upgrade→init 死循环 | 已修 | 新增 `init --repair-skeleton`（只补缺失、绝不覆盖、失败非零） |
+| P1-4 status/upgrade 骨架口径相反 | 已修 | `status` 增骨架文件缺口口径（缺口 N + 指引 + exit 1） |
+| P1-6 M 档负样本把单测算分 | 已修 | 判据收窄到 `.meta/gates/*.spec.*`，框架交付 spec 与 0 字节文件不计分 |
+| P2-7 `below_target` 误导 | 已修 | 仅随显式 `--level` 产生 |
+| P2-8 dry-run 承诺 chmod | 已修 | hp 空分支按「已存在/可执行/不可执行」分流 |
+| P2-9 零缺口空标题 | 已修 | 无缺口不打印缺口标题 |
+| P2-11 审计不可机读 | 未做 | 延后（非本轮判据修复必需） |
+| P2-12 悬空文档引用 | 已修 | 实例侧输出改为框架仓 URL 形态 |
+| P2-13 缺 explain/probe 面 | 部分 | `init --repair-skeleton` 消除病灶；`observe probe` 延后另立项 |
+| P1-5 observe 动态证据不溯源 | 未做 | 延后（需动 observability-onboarding 契约，另立项） |
+| P1-10 AI 常载命约不判 | 未做 | 延后（新增 L2 判据会打断既有实例，需跨仓灰度） |
+
+附带修复（复审期发现的既有缺陷）：`gate_hook_write_block` 在 0 字节/纯残块钩子上"声称重写却永不愈合"，
+且会静默清空残块——`init` 现在会真正写出规范块并保持块外字节零删除。
+
+交付验证：`tests/run.sh` 896/0；`tests/acceptance/auditfix` 11 文件 276 断言 0 fail；
+adversarial 35/0；`ponygo audit` / `audit --run-specs` / `status` / `ci-verify.sh` 全 exit 0。
