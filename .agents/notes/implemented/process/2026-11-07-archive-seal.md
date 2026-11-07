@@ -21,7 +21,8 @@ DSH 系列第 2 篇把 `archived/` 定义为「永久冷冻 + 哈希封印」：
 
 语义：
 - `check` 做 manifest 与 `archived/` 下 `.md`（排除 `README.md` / `AGENTS.md`）的双向一致：
-  哈希不符、归档件未封印、manifest 条目指向不存在文件、重复条目、`*.md` **符号链接** → exit 1；
+  哈希不符、归档件未封印、manifest 条目指向不存在文件、重复条目、归档区**任何符号链接**
+  （含目录链接与归档根本身）→ exit 1；
   无归档或空 → exit 0。读取 manifest 时容忍 CRLF（写回恒为 LF）。
 - `seal` 先校验既有条目未被改动（append-only），只追加缺失条目；新条目要求 `Status:`
   首词 ∈ {`implemented`, `archived`}（来源代理判据），既有行内容绝不重写。写入是

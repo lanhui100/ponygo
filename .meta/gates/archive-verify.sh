@@ -12,8 +12,9 @@
 #   `<64hex><空格><空格><仓库相对路径>`（= `sha256sum` 原生格式；十六进制必须小写）。
 #
 # check（只读）：manifest 登记集 ↔ 归档实体集（`archived/` 下**递归** `*.md`，排除
-#   basename 为 `README.md` / `AGENTS.md` 的文件；`*.md` **符号链接**一律拒绝——它绕开
-#   `find -type f`，会让"被校验的字节"指向仓库外）双向一致：
+#   basename 为 `README.md` / `AGENTS.md` 的文件；归档区内**任何符号链接**（含**目录**符号链接）
+#   与 `$ARCH` 自身是符号链接的情形一律拒绝——目录 symlink 会让 `find` 完全看不见其中的 `.md`，
+#   文件 symlink 会换掉被校验的字节来源）双向一致：
 #     - 归档件哈希不符（封印后被改一字节）/ 归档件未封印（manifest 缺条目）/
 #       孤儿条目（manifest 有、磁盘无）/ 重复条目 / 行格式非法（含注释行）→ exit 1；
 #     - 无 archived 目录、空目录、空 manifest → exit 0（门禁只对"真的归档了"负责，
@@ -91,20 +92,27 @@ list_archived() {
     LC_ALL=C sort
 }
 
-# 归档实体集 B 里的**符号链接**（-type l，同样排除 README.md / AGENTS.md）：
-# 符号链接会让"被校验的字节"指向仓库外/别处，`find -type f` 看不见它 → 封印可被绕过。
-# 故 check 与 seal 都显式扫描并拒绝（C3/F9 同源的诚实边界）。
+# `$ARCH` 下的**所有**符号链接（-type l，不按名字过滤——**目录**符号链接同样致命）：
+# 归档区的语义是"冻结的普通文件树"。任何符号链接都会让"被校验的字节/被枚举的集合"指向
+# 仓库外或别处：文件 symlink 换掉内容来源；**目录 symlink** 更狠——`find` 默认不跟随，
+# 于是 `find -type f -name '*.md'` 完全看不见链接目录里的 `.md`（未封印件凭空隐身），
+# 而它们的可见性又随目标目录变化。故一律拒绝（C3 / F9 同源的诚实边界）。
 list_archived_symlinks() {
   [ -d "$ARCH" ] || return 0
-  find "$ARCH" -type l -name '*.md' ! -name 'README.md' ! -name 'AGENTS.md' -print 2>/dev/null |
-    LC_ALL=C sort
+  find "$ARCH" -type l -print 2>/dev/null | LC_ALL=C sort
 }
 
 scan_symlinks() {
-  local f rc=0
+  local f rc=0 kind=""
+  # 归档根本身是符号链接：整个判定面都在仓库外 → 直接拒绝（dir/file 都不放行）
+  if [ -L "$ARCH" ]; then
+    fail "归档目录是符号链接（拒绝：判定面被指向仓库外，'$ARCH' 必须是仓库内的普通目录）→ 换回普通目录后重跑"
+    return 1
+  fi
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    fail "归档件是符号链接（拒绝：链接目标可被换掉，被校验的字节不是仓库内内容）→ 换成普通文件后重跑：$f"
+    if [ -d "$f" ]; then kind="目录"; else kind="文件"; fi
+    fail "归档区含符号链接（$kind 链接；拒绝：链接目标可被换掉，被校验/枚举的字节不是仓库内内容）→ 换成真实$kind后重跑：$f"
     rc=1
   done < <(list_archived_symlinks)
   return "$rc"
@@ -205,7 +213,17 @@ scan_unsealed() {
 do_check() {
   printf '== 归档封印校验（%s）==\n' "$MANIFEST_REL"
   local rc=0
+  if [ -L "$ARCH" ]; then
+    fail "归档目录是符号链接（拒绝：判定面被指向仓库外，'$ARCH' 必须是仓库内的普通目录）→ 换回普通目录后重跑"
+    printf '[%s] 拒绝：归档目录是符号链接（见上）→ 恢复为仓库内普通目录后重跑 check\n' "$PROG" >&2
+    exit 1
+  fi
   if [ ! -d "$ARCH" ]; then
+    if arch_deleted_vs_head; then
+      fail "归档目录被删除（HEAD 有归档内容、工作区 ${ARCH} 已不存在；拒绝：归档是冻结资产，整块删除必须显式裁决）→ 恢复该目录（git checkout -- ${ARCH}），或确有裁决时用 'git commit --no-verify' 提交该删除并同步删除 manifest"
+      printf '[%s] 拒绝：归档目录被删除（见上）→ 恢复目录后重跑 check\n' "$PROG" >&2
+      exit 1
+    fi
     printf '无归档件（目录 %s 不存在；0 条）—— 无需封印校验\n' "$ARCH"
     printf '== 归档封印：通过（无归档）==\n'
     exit 0
@@ -228,6 +246,16 @@ do_check() {
   exit 0
 }
 
+# 归档目录整体消失的检测（可选加固）：git 可用、HEAD 里确有归档内容、而工作区 `$ARCH` 已不存在
+# → 这是"整块归档被删"，不是"从没归档过"。判据只读 git（`ls-tree`），不执行仓库脚本；
+# 非 git 仓 / 新仓（HEAD 无归档记录）→ 返回 1，走"无归档 → exit 0"的老路径。
+arch_deleted_vs_head() {
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
+  git rev-parse --verify HEAD >/dev/null 2>&1 || return 1
+  [ -n "$(git ls-tree -r --name-only HEAD -- "$ARCH" 2>/dev/null)" ] && return 0
+  return 1
+}
+
 status_first_word() { # <文件> → Status: 的首词（无 Status 行则空）
   sed -n 's/^Status:[[:space:]]*//p' "$1" 2>/dev/null | head -n1 | awk '{print $1}'
 }
@@ -248,7 +276,9 @@ seal_unlock() {
     SEAL_TMP_FILE=""
   fi
   if [ -n "${SEAL_LOCK_FD:-}" ]; then
-    exec 9>&- 2>/dev/null || true
+    # 只关 fd 9，**不得**追加 `2>/dev/null`：`exec` 的重定向会永久作用于当前 shell，
+    # 之后所有诊断（含锁超时）都会被吞掉，seal 变成"返回 1 但零诊断"。
+    exec 9>&-
     SEAL_LOCK_FD=""
   fi
   if [ -n "${SEAL_LOCK_DIR:-}" ]; then
@@ -265,7 +295,7 @@ seal_lock() {
       return 1
     fi
     if ! flock -w 10 9; then
-      exec 9>&- 2>/dev/null || true
+      exec 9>&-
       printf '[%s] FAIL：等待归档封印锁超时（%s 被占用 >10s）→ 确认没有并发 seal 后重跑\n' "$PROG" "$lf" >&2
       return 1
     fi
@@ -298,7 +328,13 @@ seal_lock_traps() {
 
 do_seal() {
   printf '== 归档封印追加（%s）==\n' "$MANIFEST_REL"
-  # 0) 互斥：整段 read-modify-append 串行（并发 seal 会写出重复行 → check 判红，门禁自伤）
+  # 0a) 归档根不得是符号链接：判定面被指向仓库外时，任何"追加"都可能写进非预期目录
+  if [ -L "$ARCH" ]; then
+    fail "归档目录是符号链接（拒绝：判定面被指向仓库外，'$ARCH' 必须是仓库内的普通目录）→ 换回普通目录后重跑"
+    printf '[%s] 拒绝：归档目录是符号链接（见上）→ manifest 零写入\n' "$PROG" >&2
+    exit 1
+  fi
+  # 0b) 互斥：整段 read-modify-append 串行（并发 seal 会写出重复行 → check 判红，门禁自伤）
   if ! seal_lock; then
     exit 1
   fi
@@ -362,9 +398,11 @@ do_seal() {
     exit 1
   }
   local newf=""
-  newf=$(mktemp "$ARCH/.manifest.tmp.XXXXXX" 2>/dev/null) || newf=""
+  # 后缀必须是 `.tmp`：冻结断言的残留判据是 `-name '*.tmp'`，且 SIGKILL 残留也一眼可辨
+  # （`.manifest.XXXXXX.tmp` 同样非 `.md`，不会被归档实体集/摘要统计计入）。
+  newf=$(mktemp "$ARCH/.manifest.XXXXXX.tmp" 2>/dev/null) || newf=""
   if [ -z "$newf" ]; then
-    printf '[%s] FAIL：无法创建临时文件（%s/.manifest.tmp.XXXXXX）——本次未写入 manifest\n' "$PROG" "$ARCH" >&2
+    printf '[%s] FAIL：无法创建临时文件（%s/.manifest.XXXXXX.tmp）——本次未写入 manifest\n' "$PROG" "$ARCH" >&2
     exit 1
   fi
   SEAL_TMP_FILE="$newf"
