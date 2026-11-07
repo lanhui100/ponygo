@@ -12,7 +12,8 @@
 #   `<64hex><空格><空格><仓库相对路径>`（= `sha256sum` 原生格式；十六进制必须小写）。
 #
 # check（只读）：manifest 登记集 ↔ 归档实体集（`archived/` 下**递归** `*.md`，排除
-#   basename 为 `README.md` / `AGENTS.md` 的文件）双向一致：
+#   basename 为 `README.md` / `AGENTS.md` 的文件；`*.md` **符号链接**一律拒绝——它绕开
+#   `find -type f`，会让"被校验的字节"指向仓库外）双向一致：
 #     - 归档件哈希不符（封印后被改一字节）/ 归档件未封印（manifest 缺条目）/
 #       孤儿条目（manifest 有、磁盘无）/ 重复条目 / 行格式非法（含注释行）→ exit 1；
 #     - 无 archived 目录、空目录、空 manifest → exit 0（门禁只对"真的归档了"负责，
@@ -20,12 +21,20 @@
 # seal（唯一写入）：先按 check 的**全部**判据校验既有条目（append-only：既有行绝不重写、
 #   不排序、不删除），再只为缺失条目追加新行：
 #     - 既有条目被改动（哈希不符/孤儿/重复/非法）→ 拒绝且**零写入**（不得把篡改洗白）；
-#     - 新条目要求该归档件的 `Status:` 首词 = `implemented`（**来源代理判据**：只封印
-#       已落地的决策）。已知局限：不做 git rename 溯源（只允许 implemented → archived 的
-#       `git mv`），靠 review 与该判据兜底；
+#     - 新条目要求该归档件的 `Status:` 首词 ∈ {implemented, archived}（**来源代理判据**：
+#       `archived/` 下合法的 archived 态同样可封印；proposed / rejected 仍拒）。
+#       已知局限：不做 git rename 溯源（只允许 implemented → archived 的 `git mv`），靠 review
+#       与该判据兜底；
+#     - 写入是**原子替换**（临时文件 = 旧字节前缀 + 新块，同目录 mv）：追加被截断留下半截行的
+#       死锁红在此不可能发生——要么旧 manifest 完整、要么新 manifest 完整；
 #     - 全一致态再 seal = 追加 0 条、manifest 字节不变（幂等）。
 #
 # 退出码：0 = 通过 / 已追加；1 = 拒绝。只允许 0/1。
+# 并发（A6-24 / NFR concurrency_lock）：seal 的 read→判定→append 整段在互斥锁内（flock 优先，
+#   退化为目录原子锁），获锁后重新 scan；check 只读不加锁。
+# 诚实边界（A6 的威胁模型）：封印拦的是"归档件被改动而 manifest 未同步"。若有人**同时**改归档件
+#   与 manifest 行，纯内容校验无法分辨（没有 git 前缀校验就没有历史真值）——那道防线属 review 与
+#   CI 的可追溯性，不由本脚本冒充。
 # 只读纪律（C3）：check 不写仓库任何文件、不执行任何仓库脚本（只做 sha256 比对与文本解析）；
 #   seal 只追加 manifest，中间文件走 `mktemp`（系统临时目录），仓库内不留 `.tmp` / `.new` 残留。
 # 零依赖（C4）：bash + GNU 用户态（sha256sum / find / awk / sed）；不引入 jq / python。
@@ -82,6 +91,25 @@ list_archived() {
     LC_ALL=C sort
 }
 
+# 归档实体集 B 里的**符号链接**（-type l，同样排除 README.md / AGENTS.md）：
+# 符号链接会让"被校验的字节"指向仓库外/别处，`find -type f` 看不见它 → 封印可被绕过。
+# 故 check 与 seal 都显式扫描并拒绝（C3/F9 同源的诚实边界）。
+list_archived_symlinks() {
+  [ -d "$ARCH" ] || return 0
+  find "$ARCH" -type l -name '*.md' ! -name 'README.md' ! -name 'AGENTS.md' -print 2>/dev/null |
+    LC_ALL=C sort
+}
+
+scan_symlinks() {
+  local f rc=0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    fail "归档件是符号链接（拒绝：链接目标可被换掉，被校验的字节不是仓库内内容）→ 换成普通文件后重跑：$f"
+    rc=1
+  done < <(list_archived_symlinks)
+  return "$rc"
+}
+
 sha_of() { sha256sum "$1" 2>/dev/null | awk '{print $1}'; }
 
 # 路径必须是**仓库相对**且落在归档目录内、不得越界
@@ -108,6 +136,8 @@ manifest_scan() {
   [ -f "$MANIFEST" ] || return 0
   while IFS= read -r line || [ -n "$line" ]; do
     n=$((n + 1))
+    # CRLF 容忍：core.autocrlf=true 的检出会让行尾带 \r；读取时归一，写入恒为 LF。
+    line="${line%$'\r'}"
     # 空行（含仅空白行）忽略，不参与判定（A6-8）
     case "$line" in
       *[![:space:]]*) ;;
@@ -181,6 +211,7 @@ do_check() {
     exit 0
   fi
   manifest_scan || rc=1
+  scan_symlinks || rc=1
   scan_unsealed || rc=1
   if [ "$rc" -ne 0 ] || [ "$FAILS" -ne 0 ]; then
     printf '[%s] 拒绝：归档封印不自洽（见上方 FAIL 行）→ 归档件被改动则恢复原字节；未封印件则跑 bash .meta/gates/archive-verify.sh seal\n' "$PROG" >&2
@@ -201,8 +232,77 @@ status_first_word() { # <文件> → Status: 的首词（无 Status 行则空）
   sed -n 's/^Status:[[:space:]]*//p' "$1" 2>/dev/null | head -n1 | awk '{print $1}'
 }
 
+# ---------- seal 的互斥锁（read → 判定 → append 必须串行） ----------
+# 两个并发 seal 会各自读到"未登记"并各追加同一行 → manifest 重复条目，随后 check 报重复
+# （门禁自伤：封印门被自己的写路径弄红）。故整个「scan → 判定 → append」段落在锁内完成，且
+# **获锁后重新 scan**（锁外读到的一切都已过期）。
+# 锁位置优先级：① `flock`（可用且有 .git）→ `.git/ponygo-seal.lock`（不进工作区、不进版本库）；
+#               ② 否则 `$ARCH/.manifest.lock` **目录原子锁**（mkdir 的原子性）+ 超时 + trap 清理。
+# check 不加锁（只读，不加锁也就不会被锁拖慢/被残留锁卡住）。
+SEAL_LOCK_FD=""
+SEAL_LOCK_DIR=""
+SEAL_TMP_FILE=""
+seal_unlock() {
+  if [ -n "${SEAL_TMP_FILE:-}" ]; then
+    rm -f "$SEAL_TMP_FILE" 2>/dev/null || true
+    SEAL_TMP_FILE=""
+  fi
+  if [ -n "${SEAL_LOCK_FD:-}" ]; then
+    exec 9>&- 2>/dev/null || true
+    SEAL_LOCK_FD=""
+  fi
+  if [ -n "${SEAL_LOCK_DIR:-}" ]; then
+    rmdir "$SEAL_LOCK_DIR" 2>/dev/null || rm -rf "$SEAL_LOCK_DIR" 2>/dev/null || true
+    SEAL_LOCK_DIR=""
+  fi
+  return 0
+}
+seal_lock() {
+  local lf="$ROOT/.git/ponygo-seal.lock" i=0
+  if command -v flock >/dev/null 2>&1 && [ -d "$ROOT/.git" ]; then
+    if ! { exec 9>>"$lf"; } 2>/dev/null; then
+      printf '[%s] FAIL：无法创建锁文件 %s（权限/磁盘/只读挂载）→ 检查 .git 目录可写后重跑 seal\n' "$PROG" "$lf" >&2
+      return 1
+    fi
+    if ! flock -w 10 9; then
+      exec 9>&- 2>/dev/null || true
+      printf '[%s] FAIL：等待归档封印锁超时（%s 被占用 >10s）→ 确认没有并发 seal 后重跑\n' "$PROG" "$lf" >&2
+      return 1
+    fi
+    SEAL_LOCK_FD=9
+    return 0
+  fi
+  # 无 flock（或无 .git）：目录原子锁（mkdir 成功即获锁；失败即被占用）
+  SEAL_LOCK_DIR="$ARCH/.manifest.lock"
+  if [ ! -d "$ARCH" ]; then
+    # 无归档目录 = 没有任何可封印的文件；不加锁也不建目录，直接走"追加 0 条"路径
+    SEAL_LOCK_DIR=""
+    return 0
+  fi
+  while ! mkdir "$SEAL_LOCK_DIR" 2>/dev/null; do
+    i=$((i + 1))
+    if [ "$i" -ge 100 ]; then
+      SEAL_LOCK_DIR=""
+      printf '[%s] FAIL：等待归档封印锁超时（%s 被占用约 10s）→ 若无 seal 在跑，该锁目录是异常退出残留，手工删除后重跑\n' "$PROG" "$ARCH/.manifest.lock" >&2
+      return 1
+    fi
+    sleep 0.1 2>/dev/null || sleep 1
+  done
+  return 0
+}
+seal_lock_traps() {
+  trap 'seal_unlock' EXIT
+  trap 'seal_unlock; trap - EXIT INT TERM; exit 130' INT
+  trap 'seal_unlock; trap - EXIT INT TERM; exit 143' TERM
+}
+
 do_seal() {
   printf '== 归档封印追加（%s）==\n' "$MANIFEST_REL"
+  # 0) 互斥：整段 read-modify-append 串行（并发 seal 会写出重复行 → check 判红，门禁自伤）
+  if ! seal_lock; then
+    exit 1
+  fi
+  seal_lock_traps
   # 1) 既有条目必须先自洽：append-only 只允许"往后加"，不允许重写/删除/排序
   manifest_scan || {
     printf '[%s] 拒绝：既有 manifest 条目不自洽（append-only：既有行不得改动，seal 不会重写/删除它们）→ 恢复被改动的归档件，或由人工裁决后重跑\n' "$PROG" >&2
@@ -212,17 +312,27 @@ do_seal() {
     printf '[%s] 拒绝：既有 manifest 条目不自洽（append-only）→ 恢复被改动的归档件后重跑\n' "$PROG" >&2
     exit 1
   fi
+  # 1b) 符号链接不得混进封印：它绕开 `find -type f`，会让"被校验的字节"指向仓库外
+  if ! scan_symlinks; then
+    printf '[%s] 拒绝：归档目录含符号链接（见上方 FAIL 行）→ 换成普通文件后重跑 seal；manifest 零写入\n' "$PROG" >&2
+    exit 1
+  fi
   # 2) 只为缺失条目构造追加块；任一新条目不合法 → 整批拒绝且零写入
+  #    来源代理判据（放宽后）：Status 首词 ∈ {implemented, archived}——`archived/` 下合法的
+  #    archived 态（verify-note 1.7 允许）同样可封印；proposed / rejected 仍拒（未落地的决策）。
   local f st n=0 block="" h
   block=""
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     if is_seen "$f"; then continue; fi
     st=$(status_first_word "$f")
-    if [ "$st" != "implemented" ]; then
-      fail "归档件 Status 非 implemented（来源代理判据：只封印已落地的决策；当前 Status 首词：${st:-缺失}）：$f"
-      continue
-    fi
+    case "$st" in
+      implemented | archived) ;;
+      *)
+        fail "归档件 Status 非 implemented/archived（来源代理判据：只封印已落地的决策；当前 Status 首词：${st:-缺失}）：$f"
+        continue
+        ;;
+    esac
     h=$(sha_of "$f")
     if [ -z "$h" ]; then
       fail "无法计算 sha256（文件不可读）：$f"
@@ -239,42 +349,45 @@ do_seal() {
   if [ "$n" -eq 0 ]; then
     printf '追加 0 条（全一致态；manifest 字节不变）\n'
     printf '== 归档封印：通过（0 条新增）==\n'
+    seal_unlock
+    trap - EXIT INT TERM
     exit 0
   fi
-  # 3) 追加写：中间文件在系统临时目录，`cat >>` 只追加；不留仓库内中间文件
+  # 3) 原子提交：临时文件 = 既有 manifest 原字节（逐字节前缀）+ 换行分隔（若末行缺）+ 新块，
+  #    然后同目录 `mv` 原子替换。为什么不用 `cat >>`：追加被 ulimit/中断截断会留下**半截行**
+  #    （torn line），此后 regex 判定恒失败、seal 也不可自愈（死锁红）。原子替换保证
+  #    「要么旧内容完整、要么新内容完整」；既有行内容逐字节不变（append-only 在内容层成立）。
   mkdir -p "$ARCH" || {
     printf '[%s] FAIL：无法创建 %s\n' "$PROG" "$ARCH" >&2
     exit 1
   }
-  local tmp=""
-  tmp=$(mktemp 2>/dev/null) || tmp=""
-  if [ -z "$tmp" ]; then
-    printf '[%s] FAIL：无法创建中间文件（mktemp 失败）——本次未写入 manifest\n' "$PROG" >&2
+  local newf=""
+  newf=$(mktemp "$ARCH/.manifest.tmp.XXXXXX" 2>/dev/null) || newf=""
+  if [ -z "$newf" ]; then
+    printf '[%s] FAIL：无法创建临时文件（%s/.manifest.tmp.XXXXXX）——本次未写入 manifest\n' "$PROG" "$ARCH" >&2
     exit 1
   fi
-  if ! printf '%s' "$block" >"$tmp"; then
-    rm -f "$tmp" 2>/dev/null || true
-    printf '[%s] FAIL：写中间文件失败——本次未写入 manifest\n' "$PROG" >&2
-    exit 1
-  fi
-  # 既有 manifest 末尾缺换行时先补一个，避免追加行与末行拼接
-  if [ -s "$MANIFEST" ]; then
-    if [ -n "$(tail -c 1 "$MANIFEST" 2>/dev/null)" ]; then
-      printf '\n' >>"$MANIFEST" || {
-        rm -f "$tmp" 2>/dev/null || true
-        printf '[%s] FAIL：写 manifest 失败\n' "$PROG" >&2
-        exit 1
-      }
+  SEAL_TMP_FILE="$newf"
+  if ! {
+    if [ -s "$MANIFEST" ]; then
+      cat "$MANIFEST" || exit 1
+      if [ -n "$(tail -c 1 "$MANIFEST" 2>/dev/null)" ]; then printf '\n' || exit 1; fi
     fi
-  fi
-  if ! cat "$tmp" >>"$MANIFEST"; then
-    rm -f "$tmp" 2>/dev/null || true
-    printf '[%s] FAIL：追加 manifest 失败（磁盘/权限）——本次未完成封印\n' "$PROG" >&2
+    printf '%s' "$block" || exit 1
+  } >"$newf"; then
+    printf '[%s] FAIL：写临时 manifest 失败（磁盘/权限）——本次未写入，旧 manifest 保持完整\n' "$PROG" >&2
     exit 1
   fi
-  rm -f "$tmp" 2>/dev/null || true
+  chmod 644 "$newf" 2>/dev/null || true
+  if ! mv -f "$newf" "$MANIFEST" 2>/dev/null; then
+    printf '[%s] FAIL：原子替换 manifest 失败（同目录 mv 失败）——旧 manifest 保持完整\n' "$PROG" >&2
+    exit 1
+  fi
+  SEAL_TMP_FILE=""
   printf '追加 %s 条新封印（既有条目零改动）\n' "$n"
   printf '== 归档封印：通过（%s 条新增）==\n' "$n"
+  seal_unlock
+  trap - EXIT INT TERM
   exit 0
 }
 

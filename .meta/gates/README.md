@@ -16,7 +16,7 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 | A3 | `.githooks/pre-commit`（或既有钩子内追加块） | 本地层挂载点 | 转发 A1 的退出码 |
 | A4 | `.meta/gates/ci-verify.sh` | forge 无关全树门（verify-note 整树 + A2 + A6/A7，三段） | 0 放行 / 非零拒绝 |
 | A5 | `.github/workflows/ponygo-governance.yml` | GitHub 薄适配器（checkout + A4） | 同 A4 |
-| A6 | `.meta/gates/archive-verify.sh` | 归档 SHA-256 封印门：`check`（默认，只读）/ `seal`（追加封印），零旗标 | 0 通过 / 1 拒绝 |
+| A6 | `.meta/gates/archive-verify.sh` | 归档 SHA-256 封印门：`check`（默认，只读）/ `seal`（追加封印，互斥 + 原子替换），零旗标 | 0 通过 / 1 拒绝 |
 | A7 | `.meta/gates/archive-verify.spec.sh` | A6 的负样本执行判据（篡改/缺条目/孤儿/重复/非追加 → 必须拒；合法样本 → 放行） | 0 = 自检通过 |
 
 **宇宙表只登记 A1/A2/A4/A6/A7**（不可变资产）：A3/A5 是实例可编辑文件（有人会追加自己的钩子逻辑、
@@ -32,7 +32,7 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 | 全树 ADR 格式常绿 | `bash .agents/skills/write-adr/verify-note.sh` | 1.1–1.10 |
 | 门自己会拒绝非法样本 | `bash .meta/gates/adr-verify.spec.sh` | A2 |
 | 归档件冻结（改一字节即拒） | `bash .meta/gates/archive-verify.sh check`（无参等价） | A6（manifest ↔ `archived/**/*.md` 双向一致） |
-| 归档必须显式封印 | `bash .meta/gates/archive-verify.sh seal` | A6（append-only 追加；新条目要求 `Status:` 首词 = `implemented`） |
+| 归档必须显式封印 | `bash .meta/gates/archive-verify.sh seal` | A6（append-only 追加；新条目要求 `Status:` 首词 ∈ {`implemented`, `archived`}） |
 | 封印门自己会拒绝非法样本 | `bash .meta/gates/archive-verify.spec.sh` | A7（篡改/缺条目/孤儿/重复/非追加） |
 | 远端层全树兜底 | `bash .meta/gates/ci-verify.sh` | A4（= `verify-note.sh` 整树 + A2 + A6/A7，三段） |
 
@@ -41,8 +41,13 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 把一个决策移进 `.agents/notes/archived/` 之后、提交之前，跑一次
 `bash .meta/gates/archive-verify.sh seal`：它只为**尚未登记**的归档件追加
 `.agents/notes/archived/manifest.sha256` 行（`<64hex><空格><空格><仓库相对路径>`），
-既有行一个字节都不改（append-only）。忘了跑 → A1（暂存区）与 A4（全树）都会以
-「未封印」拒绝，CI 不会放行。封印之后归档件即冻结：任何字节改动都由 `check` 报「哈希不符」。
+既有行一个字节都不改（内容层 append-only；写入是「临时文件 + 同目录原子替换」，中断也不会留半截行）。
+忘了跑 → A1（暂存区，**在任何跳过分支之前**评估）与 A4（全树）都会以「未封印」拒绝，CI 不会放行。
+
+**封印的边界（诚实条款）**：归档件改一个字节而 manifest 未同步 → `check` 报「哈希不符」；manifest 自身
+的 append-only（既有行不被重写）由 `seal` 保证，`check` 另拒格式非法 / 重复 / 孤儿条目 / `*.md` 符号链接。
+但若有人**同时**改归档件与其 manifest 行，纯内容校验分辨不出来（没有 git 历史真值可对）——那道防线属
+review 与 CI 的可追溯性，本门不冒充。
 **seal 是唯一写路径**，pre-commit 只 `check`——钩子不在提交窗口里偷偷改工作区/暂存区。
 
 ### 本地层与远端层：互补，**不等价**（B5 实测结论）
