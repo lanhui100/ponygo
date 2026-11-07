@@ -3842,6 +3842,47 @@ s77_gate_chain_alternatives() {
   assert_eq "⑥ 补齐后同一 ADR 提交成功（正向控制）" 0 "$C_RC"
 }
 
+# ============================================================
+# Wave13 验收（s78）—— Test Agent 冻结，实现方只读
+#
+# 契约真源：.dev-team/contract-matrix-wave13.md（冻结，含 revision+1 六项裁决）。
+# 结构：7 个用例文件在**独立进程**内跑（各自 mktemp 隔离仓、零依赖、零外网），
+#       本场景只做编排 + 汇总：每个文件的 ##CASE 行把 pass/fail 汇入全局计数，
+#       失败行（FAIL ...）原样回显以便红相定位。
+# 覆盖面：f1 A6 封印门 · f2 A7 自检 · f3 接线（A1/A4/init/repair/双写/只读）
+#         · f4 coverage 诚实化 · f5 audit 漂移 · f6 gates README · f7 status 环境行。
+# 铁律：禁止把「子进程 exit 0」当作全部通过——必须解析 ##CASE 的 fail 计数，
+#       无 ##CASE 行 = 子进程异常退出 = 判红（防「跑挂即跳过」）。
+# ============================================================
+s78_wave13_acceptance() {
+  echo "--- 场景78：Wave13 验收套件（归档封印 A6/A7 · coverage · drift · README · 环境行）"
+  local dir f out rc p n base
+  dir="$ROOT/tests/acceptance/wave13"
+  if [ ! -d "$dir" ]; then
+    bad "场景78 验收目录缺失（$dir）"
+    return 0
+  fi
+  for f in "$dir"/f[0-9]*.sh; do
+    [ -f "$f" ] || continue
+    base=$(basename "$f")
+    out=$(bash "$f" 2>&1); rc=$?
+    # 失败行 + 汇总行回显（绿行不回显，避免 300+ 行噪音）
+    printf '%s\n' "$out" | grep -E '^(FAIL |##CASE )' || true
+    p=$(printf '%s\n' "$out" | sed -n 's/^##CASE .* pass=\([0-9][0-9]*\) fail=\([0-9][0-9]*\)$/\1/p' | tail -n1)
+    n=$(printf '%s\n' "$out" | sed -n 's/^##CASE .* pass=\([0-9][0-9]*\) fail=\([0-9][0-9]*\)$/\2/p' | tail -n1)
+    if [ -z "${p:-}" ] || [ -z "${n:-}" ]; then
+      bad "场景78 $base 未产出 ##CASE 汇总行（子进程异常退出 rc=$rc）"
+      continue
+    fi
+    PASS=$((PASS + p)); FAIL=$((FAIL + n))
+    if [ "$rc" -ne 0 ] || [ "$n" -ne 0 ]; then
+      printf '  RED  %s（rc=%s pass=%s fail=%s）\n' "$base" "$rc" "$p" "$n"
+    else
+      printf '  ok   %s（pass=%s）\n' "$base" "$p"
+    fi
+  done
+}
+
 s42_observe_monorepo_subcomponents
 s43_observe_pipeline_awareness
 s44_observe_subcomponent_blocking
@@ -3878,6 +3919,7 @@ s74_retire_no_confirmation
 s75_alternatives_110_reject
 s76_alternatives_exemptions
 s77_gate_chain_alternatives
+s78_wave13_acceptance
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
 [ "$FAIL" -eq 0 ] || exit 1

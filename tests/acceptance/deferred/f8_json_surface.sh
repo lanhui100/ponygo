@@ -2,9 +2,16 @@
 # F8（ponygo audit/status --json）：机读审计面。
 #   契约（Lead 裁决）：
 #     * `audit --json`：stdout **单行** JSON，可被 `python3 -m json.tool` 解析；
-#       字段词表固定 schema/command/tier/hits/total/level/ladder{verdict,fails[]}/gates{local,remote}/gaps[]/exit，
-#       schema=ponygo.audit/1；`exit` 必须等于进程真实退出码；stdout 不得混入任何非 JSON 文本。
-#     * `status --json`：ponygo.status/1 + level/skeleton{missing_dirs,missing_files,drift}/gates/ladder/exit。
+#       字段词表固定 schema/command/tier/hits/total/level/ladder{verdict,fails[]}/gates{local,remote}/
+#       coverage/drift/gaps[]/exit，schema=ponygo.audit/1；`exit` 必须等于进程真实退出码；
+#       stdout 不得混入任何非 JSON 文本。
+#     * `status --json`：ponygo.status/1 + level/skeleton{missing_dirs,missing_files,drift}/gates/ladder/coverage/exit。
+#
+# 契约演进（Wave13 contract-matrix-wave13.md COV-J1~J6 / DR-J1~J5，Lead 裁定 2026-11-07）：
+#   Wave13 新增两个固定词表字段——status/audit 均增 `coverage`，audit 另增 `drift`。
+#   本文件原「顶层字段词表固定（多/少皆 FAIL）」断言按新契约**更新**词表并保留其强度
+#   （仍是集合相等，多/少皆红）；另补 coverage/drift 的**形状**断言。
+#   注意：契约只冻结字段**存在性与值**，不冻结键序——故断言用 set 比较，不锚定顺序。
 #     * 反向：--json 对 init|sync|retire|upgrade|observe init|observe upgrade 必须 die（非零 + 「仅适用于」）。
 #     * 等价性：同一仓 `audit` 与 `audit --json` 退出码相同；不带 --json 的人类输出与 HEAD 版逐字节相同。
 # 冻结契约来源：Lead 裁决（task-5 · F8）。
@@ -44,7 +51,7 @@ if d.get("schema") != "ponygo.audit/1": fail.append("schema=%r" % d.get("schema"
 if d.get("command") != "audit": fail.append("command=%r" % d.get("command"))
 '
 json_assert "F8-1 GO：顶层字段词表固定（多/少皆 FAIL）" "$R_OUT" '
-want = {"schema","command","tier","hits","total","level","ladder","gates","gaps","exit"}
+want = {"schema","command","tier","hits","total","level","ladder","gates","coverage","drift","gaps","exit"}
 got = set(d.keys())
 if got != want: fail.append("缺 %s / 多 %s" % (sorted(want-got), sorted(got-want)))
 '
@@ -54,6 +61,25 @@ if not isinstance(lad, dict): fail.append("ladder 不是对象")
 else:
     if set(lad.keys()) != {"verdict","fails"}: fail.append("ladder keys=%s" % sorted(lad.keys()))
     if not isinstance(lad.get("fails"), list): fail.append("ladder.fails 不是数组")
+'
+json_assert "F8-1 GO：coverage 固定词表（verified/unverified/reason）" "$R_OUT" '
+c = d.get("coverage")
+if not isinstance(c, dict): fail.append("coverage 不是对象")
+else:
+    if c.get("verified") != ["1.1-1.9"]: fail.append("coverage.verified=%r" % (c.get("verified"),))
+    if c.get("unverified") != ["1.10"]: fail.append("coverage.unverified=%r" % (c.get("unverified"),))
+    if c.get("reason") != "readonly-no-repo-exec": fail.append("coverage.reason=%r" % (c.get("reason"),))
+if set(d.get("coverage", {}).keys()) != {"verified","unverified","reason"}:
+    fail.append("coverage keys=%s" % sorted(d.get("coverage", {}).keys()))
+'
+json_assert "F8-1 GO：drift{count,files[]} 形状固定" "$R_OUT" '
+dr = d.get("drift")
+if not isinstance(dr, dict): fail.append("drift 不是对象")
+else:
+    if set(dr.keys()) != {"count","files"}: fail.append("drift keys=%s" % sorted(dr.keys()))
+    if not isinstance(dr.get("count"), int): fail.append("drift.count 不是整数: %r" % (dr.get("count"),))
+    if not isinstance(dr.get("files"), list): fail.append("drift.files 不是数组")
+    if len(dr.get("files") or []) != dr.get("count"): fail.append("drift.count 与 files 长度不一致")
 '
 json_assert "F8-1 GO：gates{local,remote} 词表固定" "$R_OUT" '
 g = d.get("gates")
@@ -80,8 +106,8 @@ assert_zero "F8-2 GO：status --json 可被 json.tool 解析" "$?"
 json_assert "F8-2 GO：schema=ponygo.status/1" "$R_OUT" '
 if d.get("schema") != "ponygo.status/1": fail.append("schema=%r" % d.get("schema"))
 '
-json_assert "F8-2 GO：status 字段（level/skeleton{missing_dirs,missing_files,drift}/gates/ladder/exit）齐备" "$R_OUT" '
-for k in ("level","skeleton","gates","ladder","exit"):
+json_assert "F8-2 GO：status 字段（level/skeleton{...}/gates/ladder/coverage/exit）齐备" "$R_OUT" '
+for k in ("level","skeleton","gates","ladder","coverage","exit"):
     if k not in d: fail.append("缺字段 %s" % k)
 sk = d.get("skeleton") or {}
 if not isinstance(sk, dict): fail.append("skeleton 不是对象")
