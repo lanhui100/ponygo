@@ -309,6 +309,108 @@ assert_eq "A6-SYM [GO] 移除 symlink 后 check 回到 exit 0（反向控制）"
 a6 "$T" seal
 assert_eq "A6-SYM [GO] 移除 symlink 后 seal 回到 exit 0" 0 "$S_RC"
 
+# ============ A6-SYM-DIR：目录 symlink 与归档根 symlink 绕过（L3 B2 回归，task-12）============
+# 缺陷形态 1：`archived/process/linked-dir -> /tmp/ext` —— 目录 symlink 名字不含 `.md`，
+#   旧实现只扫 `-type l -name '*.md'`，既漏判链接本身，`find -type f` 也不会下钻外部目录，
+#   等于把未封印的 `.md` 藏进链接目标（check/seal 双双 rc=0）。
+# 缺陷形态 2：`$ARCH`（.agents/notes/archived）本身被换成 symlink —— 整个判定面指向仓库外。
+# 判定：两种形态下 check 与 seal 均 exit 1 且文案含「符号链接」，且拒绝时**零写入**
+#       （manifest 不变、链接目标目录不被写）；移除链接后恢复 exit 0。
+T=$(new_case); gov_repo "$T" 2 || finish
+stage_archived_adr "$T" "testing/2026-01-02-dirlink-legit.md"
+a6 "$T" seal
+assert_eq "A6-SYM-DIR 夹具：合法封印 exit 0" 0 "$S_RC"
+EXT="$SBASE/ext.dir"; rm -rf "$EXT"; mkdir -p "$EXT"
+cat > "$EXT/2026-01-02-hidden.md" <<'HIDEOF'
+# Agent Note: hidden in linked dir
+
+Status: implemented
+
+## Problem
+
+外部目录里的未封印归档件（验证目录 symlink 不被枚举）。
+
+## Decision
+
+用于回归。
+
+## Alternatives considered
+
+- 不测：绕过无法被发现。
+HIDEOF
+ln -s "$EXT" "$T/$ARCHIVED_REL/process" || bad "A6-SYM-DIR 夹具失败：无法创建目录 symlink"
+if [ -L "$T/$ARCHIVED_REL/process" ]; then
+  ok "A6-SYM-DIR 取证：目录 symlink 已放入归档目录（archived/process -> $EXT）"
+else
+  bad "A6-SYM-DIR 夹具失败：目录 symlink 未创建"
+fi
+MAN_DIR=$(sha_of "$T/$MANIFEST_REL")
+EXT_SNAP=$(find "$EXT" -type f | LC_ALL=C sort | md5sum | awk '{print $1}')
+a6 "$T" check
+assert_eq "A6-SYM-DIR [GO] 归档目录内目录 symlink → check exit 1" 1 "$S_RC"
+assert_contains "A6-SYM-DIR [GO] check 文案含「符号链接」" "$S_OUT" "符号链接"
+assert_contains "A6-SYM-DIR [GO] check 点名该目录 symlink" "$S_OUT" "process"
+a6 "$T" seal
+assert_eq "A6-SYM-DIR [GO] 归档目录内目录 symlink → seal exit 1" 1 "$S_RC"
+assert_contains "A6-SYM-DIR [GO] seal 文案含「符号链接」" "$S_OUT" "符号链接"
+assert_eq "A6-SYM-DIR [NOGO] seal 拒绝时 manifest 零写入" "$MAN_DIR" "$(sha_of "$T/$MANIFEST_REL")"
+assert_eq "A6-SYM-DIR [NOGO] 拒绝时不得写进链接目标目录" \
+  "$EXT_SNAP" "$(find "$EXT" -type f | LC_ALL=C sort | md5sum | awk '{print $1}')"
+# 反向控制：移除目录 symlink 后回到 0
+rm -f "$T/$ARCHIVED_REL/process"
+a6 "$T" check
+assert_eq "A6-SYM-DIR [GO] 移除目录 symlink 后 check 恢复 exit 0（反向控制）" 0 "$S_RC"
+a6 "$T" seal
+assert_eq "A6-SYM-DIR [GO] 移除目录 symlink 后 seal 恢复 exit 0" 0 "$S_RC"
+
+# 形态 2：归档根 $ARCH 本身是 symlink
+T=$(new_case); gov_repo "$T" 2 || finish
+EXT2="$SBASE/ext.arch"; rm -rf "$EXT2"; mkdir -p "$EXT2/testing"
+cp "$T/AGENTS.md" "$EXT2/AGENTS.md" 2>/dev/null || printf '# agents\n' > "$EXT2/AGENTS.md"
+cat > "$EXT2/testing/2026-01-02-ok.md" <<'ARCHEOF'
+# Agent Note: archived via linked root
+
+Status: archived
+
+## Problem
+
+归档根被换成 symlink 时的绕过样本。
+
+## Decision
+
+用于回归。
+
+## Alternatives considered
+
+- 不测：判定面指向仓库外。
+ARCHEOF
+rm -rf "$T/$ARCHIVED_REL"
+ln -s "$EXT2" "$T/$ARCHIVED_REL" || bad "A6-SYM-DIR 夹具失败：无法把 $ARCHIVED_REL 换成 symlink"
+if [ -L "$T/$ARCHIVED_REL" ]; then
+  ok "A6-SYM-DIR 取证：归档根已替换为 symlink（$ARCHIVED_REL -> $EXT2）"
+else
+  bad "A6-SYM-DIR 夹具失败：归档根 symlink 未创建"
+fi
+EXT2_SNAP=$(find "$EXT2" -type f | LC_ALL=C sort | md5sum | awk '{print $1}')
+a6 "$T" check
+assert_eq "A6-SYM-DIR [GO] 归档根是 symlink → check exit 1" 1 "$S_RC"
+assert_contains "A6-SYM-DIR [GO] 归档根 symlink 文案含「符号链接」" "$S_OUT" "符号链接"
+a6 "$T" seal
+assert_eq "A6-SYM-DIR [GO] 归档根是 symlink → seal exit 1" 1 "$S_RC"
+assert_contains "A6-SYM-DIR [GO] seal 文案含「符号链接」" "$S_OUT" "符号链接"
+assert_missing "A6-SYM-DIR [NOGO] 拒绝时不得把 manifest 写进链接目标" "$EXT2/manifest.sha256"
+assert_eq "A6-SYM-DIR [NOGO] 拒绝时链接目标目录零写入" \
+  "$EXT2_SNAP" "$(find "$EXT2" -type f | LC_ALL=C sort | md5sum | awk '{print $1}')"
+# 反向控制：恢复真实目录 + 合法归档件 → 0
+rm -f "$T/$ARCHIVED_REL"
+mkdir -p "$T/$ARCHIVED_REL"
+printf '# agents\n' > "$T/$ARCHIVED_REL/AGENTS.md"
+stage_archived_adr "$T" "testing/2026-01-02-after-restore.md"
+a6 "$T" seal
+assert_eq "A6-SYM-DIR [GO] 恢复真实归档目录后 seal exit 0（反向控制）" 0 "$S_RC"
+a6 "$T" check
+assert_eq "A6-SYM-DIR [GO] 恢复真实归档目录后 check exit 0" 0 "$S_RC"
+
 # ============ A6-STA：Status: archived 来源代理判据（L3 ADVISORY 回归，task-10）============
 # 缺陷形态：seal 只认 Status 首词 == implemented → 已按 1.7 迁到 archived/ 的冻结件
 # （Status: archived）永远封印不了，等于「归档目录里的合法终态被锁死」。
