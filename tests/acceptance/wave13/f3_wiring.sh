@@ -205,4 +205,56 @@ assert_contains "RO-2 [GO] A7 被真实执行（点名 archive-verify.spec.sh）
 assert_not_contains "RO-2 [NOGO] A7 不得在 --run-specs 下被 SKIPPED" \
   "$R_OUT" "skipped] 2.3 spec 自检：.meta/gates/archive-verify.spec.sh"
 
+# ============ W-DEL：删除归档件绕过（L3 BLOCKING 回归，task-10）============
+# 缺陷形态：A1 以「无暂存 ADR 变更（exit 0）」提前返回，而 `git rm` 归档件属于 D（删除）态、
+# 被 `--diff-filter=ACMR` 过滤掉 → 删掉已封印的归档件可以静默提交，封印形同虚设。
+# 判定：封印后 `git rm` 归档件 → A1 exit 1 且提交被拒；恢复后放行（正向控制）。
+T=$(new_case); gov_repo "$T" 2 || finish
+stage_archived_adr "$T" "testing/2026-01-02-del.md"
+write_adr "$T" "implemented/feature/2026-01-02-delbase.md"
+run_script "$T" "$A6_REL" seal
+assert_eq "W-DEL 夹具：归档封印 exit 0" 0 "$S_RC"
+git_at "$T" add -A >/dev/null 2>&1
+git_commit "$T" "base with sealed archive"
+assert_eq "W-DEL 夹具：基线提交成功（封印件已入库）" 0 "$C_RC"
+# 删除已封印的归档件（只删归档，不动 ADR）
+git_at "$T" rm -q .agents/notes/archived/testing/2026-01-02-del.md >/dev/null 2>&1
+assert_missing "W-DEL 取证：归档件已从工作区删除" "$T/.agents/notes/archived/testing/2026-01-02-del.md"
+run_script "$T" .meta/gates/adr-verify.sh
+assert_eq "W-DEL [GO] 删除已封印归档件 → A1 exit 1" 1 "$S_RC"
+if printf '%s\n' "$S_OUT" | grep -qE '归档封印|孤儿|未封印'; then
+  ok "W-DEL [GO] A1 诊断指向归档封印面（孤儿/未封印）"
+else
+  bad "W-DEL [GO] A1 拒绝但诊断未指向归档封印面（实得：$(printf '%s' "$S_OUT" | head -n2 | tr '\n' ' ')）"
+fi
+git_commit "$T" "must be rejected: delete sealed archive"
+assert_nonzero "W-DEL [GO] 删除已封印归档件的提交被 pre-commit 拒绝" "$C_RC"
+# 正向控制：恢复归档件 → A1 放行、提交成功
+git_at "$T" reset -q >/dev/null 2>&1
+git_at "$T" checkout -- .agents/notes/archived/testing/2026-01-02-del.md >/dev/null 2>&1
+assert_exists "W-DEL 取证：归档件已恢复" "$T/.agents/notes/archived/testing/2026-01-02-del.md"
+run_script "$T" .meta/gates/adr-verify.sh
+assert_eq "W-DEL [GO] 恢复归档件后 A1 exit 0（反向控制）" 0 "$S_RC"
+# 恢复后要有**真实变更**才提交（空提交 rc=1 反映的「无变更」而非门禁拒绝）
+write_adr "$T" "implemented/feature/2026-01-02-delbase2.md"
+git_at "$T" add -A >/dev/null 2>&1
+assert_nonzero "W-DEL 取证：恢复后确有暂存变更可提交（防空提交假红）" \
+  "$( [ -n "$(git_at "$T" diff --cached --name-only 2>/dev/null)" ] && printf '1' || printf '0' )"
+git_commit "$T" "restored archive + new adr"
+assert_eq "W-DEL [GO] 恢复后提交成功（证明拒绝来自删除动作）" 0 "$C_RC"
+
+# ============ W-DRY：init --dry-run 计划行数（L3 ADVISORY 回归，task-10）============
+# 缺陷形态：dry-run 只列 A1/A2/A4（3 行），A6/A7 不在计划里 → 用户看不到新增门禁将被生成，
+# 「计划与实际」不一致（真跑 init 其实会生成 5 个门禁资产）。
+# 判定：fresh 目录 `ponygo init --dry-run` 的「将生成 .meta/gates/」行恰 5 行（A1/A2/A4/A6/A7）。
+T=$(new_case)
+run_in "$T" init --dry-run
+assert_eq "W-DRY init --dry-run（fresh 目录）exit 0" 0 "$R_RC"
+NRY=$(printf '%s\n' "$R_OUT" | grep -c '将生成 \.meta/gates/')
+assert_eq "W-DRY [GO] 「将生成 .meta/gates/」计划行恰 5 行（A1/A2/A4/A6/A7）" 5 "$NRY"
+for a in adr-verify.sh adr-verify.spec.sh ci-verify.sh archive-verify.sh archive-verify.spec.sh; do
+  assert_contains "W-DRY [GO] 计划含 .meta/gates/$a" "$R_OUT" ".meta/gates/$a"
+done
+assert_missing "W-DRY [NOGO] --dry-run 零落盘（不得创建 .meta/）" "$T/.meta"
+
 finish

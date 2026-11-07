@@ -279,4 +279,191 @@ assert_eq "A6-24 夹具：seal exit 0" 0 "$S_RC"
 LEFT=$(find "$T/$ARCHIVED_REL" \( -name '*.tmp' -o -name '*.new' \) 2>/dev/null | head -n3 | tr '\n' ' ')
 assert_eq "A6-24 [NOGO] 不得遗留 .tmp/.new 中间文件" "" "$LEFT"
 
+# ============ A6-SYM：符号链接绕过（L3 BLOCKING 回归，task-10）============
+# 缺陷形态：archived/ 下放 `*.md` 符号链接 → 既不被收进集合 B（`-type f` 跳过 symlink），
+# 也不报错 → check/seal 双双 exit 0，等于给「归档件」开了一条不受封印约束的旁路。
+# 判定：存在归档案符号链接时 check 与 seal 均 exit 1 且文案含「符号链接」；移除后合法件仍 0。
+T=$(new_case); gov_repo "$T" 2 || finish
+stage_archived_adr "$T" "testing/2026-01-02-sym-legit.md"
+a6 "$T" seal
+assert_eq "A6-SYM 夹具：合法件 seal exit 0" 0 "$S_RC"
+a6 "$T" check
+assert_eq "A6-SYM 对照：仅合法件时 check exit 0" 0 "$S_RC"
+# 相对 symlink（指向归档内的合法件）+ 绝对 symlink（指向仓外文件）
+ln -s "2026-01-02-sym-legit.md" "$T/$ARCHIVED_REL/testing/2026-01-02-sym-rel.md"
+ln -s "/etc/hostname" "$T/$ARCHIVED_REL/testing/2026-01-02-sym-abs.md"
+assert_exists "A6-SYM 取证：symlink 已放入归档目录" "$T/$ARCHIVED_REL/testing/2026-01-02-sym-rel.md"
+MAN_SYM=$(sha_of "$T/$MANIFEST_REL")
+a6 "$T" check
+assert_eq "A6-SYM [GO] 归档目录含 symlink → check exit 1" 1 "$S_RC"
+assert_contains "A6-SYM [GO] check 文案含「符号链接」" "$S_OUT" "符号链接"
+assert_contains "A6-SYM [GO] check 点名该 symlink" "$S_OUT" "2026-01-02-sym-rel.md"
+a6 "$T" seal
+assert_eq "A6-SYM [GO] 归档目录含 symlink → seal exit 1" 1 "$S_RC"
+assert_contains "A6-SYM [GO] seal 文案含「符号链接」" "$S_OUT" "符号链接"
+assert_eq "A6-SYM [NOGO] seal 拒绝时 manifest 零写入" "$MAN_SYM" "$(sha_of "$T/$MANIFEST_REL")"
+# 反向控制：移除 symlink 后回到 0（证明拒绝来自 symlink，不是「一律拒绝」）
+rm -f "$T/$ARCHIVED_REL/testing/2026-01-02-sym-rel.md" "$T/$ARCHIVED_REL/testing/2026-01-02-sym-abs.md"
+a6 "$T" check
+assert_eq "A6-SYM [GO] 移除 symlink 后 check 回到 exit 0（反向控制）" 0 "$S_RC"
+a6 "$T" seal
+assert_eq "A6-SYM [GO] 移除 symlink 后 seal 回到 exit 0" 0 "$S_RC"
+
+# ============ A6-STA：Status: archived 来源代理判据（L3 ADVISORY 回归，task-10）============
+# 缺陷形态：seal 只认 Status 首词 == implemented → 已按 1.7 迁到 archived/ 的冻结件
+# （Status: archived）永远封印不了，等于「归档目录里的合法终态被锁死」。
+# 判定：Status: archived → seal exit 0 且成功登记；proposed 仍 exit 1（判据不得放宽成「任意 Status」）。
+T=$(new_case); gov_repo "$T" 2 || finish
+stage_archived_adr "$T" "testing/2026-01-02-sta-archived.md" "archived"
+a6 "$T" seal
+assert_eq "A6-STA [GO] Status: archived → seal exit 0（不得锁死）" 0 "$S_RC"
+assert_eq "A6-STA [GO] Status: archived 被正常登记（manifest 恰 1 行）" 1 \
+  "$(grep -c . "$T/$MANIFEST_REL" 2>/dev/null || printf '0')"
+a6 "$T" check
+assert_eq "A6-STA [GO] 登记后 check exit 0" 0 "$S_RC"
+# 反向对照：proposed 仍拒绝（放宽必须止于「已归档/已实现」，不得放行提案态）
+T=$(new_case); gov_repo "$T" 2 || finish
+stage_archived_adr "$T" "testing/2026-01-02-sta-proposed.md" "proposed"
+a6 "$T" seal
+assert_eq "A6-STA [NOGO] Status: proposed 仍 seal exit 1（判据未放宽成任意 Status）" 1 "$S_RC"
+assert_missing "A6-STA [NOGO] proposed 不得被封印" "$T/$MANIFEST_REL"
+
+# ============ A6-EOL：manifest CRLF 容错（L3 ADVISORY 回归，task-10）============
+# 缺陷形态：Windows/Git Bash 检出把 manifest 换成 CRLF → 行尾 `\r` 混进路径/哈希比对，
+# check 报「未封印/孤儿」、seal 拒绝，门禁在跨平台场景自伤。
+# 判定：EOL 归一后 check 与 seal 均 exit 0，且逻辑条目不变（2 条）。
+T=$(new_case); gov_repo "$T" 2 || finish
+stage_archived_adr "$T" "testing/2026-01-02-eol-a.md"
+stage_archived_adr "$T" "testing/2026-01-02-eol-b.md"
+a6 "$T" seal
+assert_eq "A6-EOL 夹具：seal exit 0" 0 "$S_RC"
+assert_eq "A6-EOL 夹具：manifest 2 条" 2 "$(grep -c . "$T/$MANIFEST_REL" 2>/dev/null || printf '0')"
+# 转 CRLF（逐行加 \r），并取证确已变成 CRLF
+sed -i 's/$/\r/' "$T/$MANIFEST_REL"
+if grep -q $'\r' "$T/$MANIFEST_REL"; then
+  ok "A6-EOL 取证：manifest 确已转为 CRLF"
+else
+  bad "A6-EOL 夹具失败：未能把 manifest 转成 CRLF"
+fi
+a6 "$T" check
+assert_eq "A6-EOL [GO] CRLF manifest → check exit 0（EOL 归一）" 0 "$S_RC"
+assert_not_contains "A6-EOL [NOGO] 不得把 CRLF 误报为未封印" "$S_OUT" "未封印"
+a6 "$T" seal
+assert_eq "A6-EOL [GO] CRLF manifest → seal exit 0" 0 "$S_RC"
+assert_eq "A6-EOL [GO] seal 后逻辑条目仍 2 条（未被 \r 撕裂）" 2 \
+  "$(grep -c . "$T/$MANIFEST_REL" 2>/dev/null || printf '0')"
+
+# ============ A6-CONC：seal 并发回归（BLOCKING 缺陷，Lead 2026-11-07 立项 task-9）============
+# 缺陷形态：两个 `archive-verify.sh seal` 并行 → 各自「读 manifest（无此条）→ 追加」，
+# 无锁的 check-then-append 让同一归档件被写两次 → manifest 重复 → 随后 check exit 1（门禁自伤）。
+# 契约依据：A6-7（纯文本追加式）/ A6-14（重复条目 → exit 1）/ A6-19（只追加**缺失**条目）/
+#           A6-23（幂等）/ NFR `concurrency_lock`。
+# 判定：1 件 implemented 归档、无 manifest；**并行 2×seal × 10 轮**；每轮 manifest 必须恰 1 行、
+#       无重复条目、两个进程均 exit 0；收尾 check 必须 exit 0。
+# 并发原语：FIFO 发令栅栏（父进程持读写端 + 子进程 `read -u 7` 阻塞，非 sleep 轮询）——
+#           两 seal 在同一毫秒级窗口被放行，消除「顺序执行假绿」；`read -t 30` 兜底防挂死。
+CONC_ROUNDS=10
+GATE="$SBASE/conc.gate"; rm -f "$GATE"
+if ! mkfifo "$GATE" 2>/dev/null; then
+  bad "A6-CONC 夹具失败：无法创建发令 FIFO（$GATE）"
+else
+  T=$(new_case); gov_repo "$T" 2 || finish
+  stage_archived_adr "$T" "testing/2026-01-02-conc.md"
+  ARCH_FILE="$T/$ARCHIVED_REL/testing/2026-01-02-conc.md"
+  WANT_H=$(sha_of "$ARCH_FILE")
+  rm -f "$T/$MANIFEST_REL"
+  exec 7<>"$GATE"                      # 父进程持有读写端：FIFO open 永不阻塞
+  BAD_ROUNDS=0; BAD_RC=0; DET=""
+  for r in $(seq 1 "$CONC_ROUNDS"); do
+    rm -f "$T/$MANIFEST_REL" "$SBASE/rc1.$r" "$SBASE/rc2.$r"
+    ( read -r -t 30 -u 7 _ || exit 9
+      ( cd "$T" && bash "$A6_REL" seal >/dev/null 2>&1 ); printf '%s' "$?" > "$SBASE/rc1.$r" ) &
+    P1=$!
+    ( read -r -t 30 -u 7 _ || exit 9
+      ( cd "$T" && bash "$A6_REL" seal >/dev/null 2>&1 ); printf '%s' "$?" > "$SBASE/rc2.$r" ) &
+    P2=$!
+    printf 'go\ngo\n' >&7            # 同一时刻放行两个 seal
+    wait "$P1" 2>/dev/null; wait "$P2" 2>/dev/null
+    R1=$(cat "$SBASE/rc1.$r" 2>/dev/null || printf 'MISSING')
+    R2=$(cat "$SBASE/rc2.$r" 2>/dev/null || printf 'MISSING')
+    case "${R1}${R2}" in 00) : ;; *) BAD_RC=$((BAD_RC + 1)) ;; esac
+    NL=$(grep -c . "$T/$MANIFEST_REL" 2>/dev/null || printf '0'); NL=${NL:-0}
+    if [ "$NL" != "1" ]; then
+      BAD_ROUNDS=$((BAD_ROUNDS + 1))
+      [ ${#DET} -lt 200 ] && DET="$DET [round $r: ${NL} 行, seal rc=$R1/$R2]"
+    fi
+  done
+  exec 7<&-
+  assert_eq "A6-CONC [GO] 10 轮并行 2×seal：每轮 manifest 恰 1 行（偏离轮数）" 0 "$BAD_ROUNDS"
+  if [ "$BAD_ROUNDS" -eq 0 ]; then
+    ok "A6-CONC 并发写坏明细：无（10/10 轮恰 1 行）"
+  else
+    bad "A6-CONC 并发写坏明细：$DET"
+  fi
+  assert_eq "A6-CONC [GO] 10 轮内两个并发 seal 全部 exit 0（异常轮数）" 0 "$BAD_RC"
+  DUPN=$(grep -v '^[[:space:]]*$' "$T/$MANIFEST_REL" 2>/dev/null | awk '{print $2}' | sort | uniq -d | wc -l | tr -d ' ')
+  assert_eq "A6-CONC [NOGO] manifest 不得出现重复路径条目" 0 "$DUPN"
+  assert_eq "A6-CONC [GO] 收尾 manifest 恰 1 行" 1 \
+    "$(grep -c . "$T/$MANIFEST_REL" 2>/dev/null || printf '0')"
+  assert_eq "A6-CONC [GO] 唯一行 hex == 归档件真实 sha256" "$WANT_H" \
+    "$(awk 'NR==1{print $1}' "$T/$MANIFEST_REL" 2>/dev/null)"
+  a6 "$T" check
+  assert_eq "A6-CONC [GO] 并发生成后 check exit 0（不得因重复行红）" 0 "$S_RC"
+  # 顺序对照：串行两次 seal 后仍恰 1 行（证明「恰 1 行」不是靠非法实现恒成立）
+  rm -f "$T/$MANIFEST_REL"
+  a6 "$T" seal; a6 "$T" seal
+  assert_eq "A6-CONC 对照：串行两次 seal 后 manifest 恰 1 行" 1 \
+    "$(grep -c . "$T/$MANIFEST_REL" 2>/dev/null || printf '0')"
+fi
+
+# ============ A6-CONC-MUT：历史缺陷形态等价体（证明并发回归有辨别力）============
+# 为什么不用真实现做「去锁手术」：现行写路径是「lock + 临时文件 + 原子 mv」双保险，
+# 只拆锁也难复现重复行（末次 mv 胜出仍 1 行），据此判红会变成「测实现细节」。
+# 这里改为自造 15 行「无锁 check-then-append」的历史缺陷等价体，与主用例共用同一发令栅栏：
+# 若并发回归真能抓 BLOCKING，等价体必然在若干轮里产出重复行。
+MUTDIR=$(new_case); gov_repo "$MUTDIR" 2 || finish
+stage_archived_adr "$MUTDIR" "testing/2026-01-02-mut.md"
+MUT="$MUTDIR/.meta/gates/archive-verify.mutant.sh"
+cat > "$MUT" <<'MUTEOF'
+#!/usr/bin/env bash
+# 测试用变异体：复刻「无锁 check-then-append」的历史缺陷形态（不是产品代码）
+set -u
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+ARCH="$ROOT/.agents/notes/archived"
+MAN="$ARCH/manifest.sha256"
+F_REL=".agents/notes/archived/testing/2026-01-02-mut.md"
+F="$ROOT/$F_REL"
+if [ ! -f "$MAN" ]; then
+  h=$(sha256sum "$F" 2>/dev/null | awk '{print $1}')
+  printf '%s  %s\n' "$h" "$F_REL" >> "$MAN"
+fi
+exit 0
+MUTEOF
+chmod +x "$MUT"
+if ! mkfifo "$SBASE/conc.mut.gate" 2>/dev/null; then
+  bad "A6-CONC-MUT 夹具失败：无法创建发令 FIFO"
+else
+  exec 6<>"$SBASE/conc.mut.gate"
+  MUTBAD=0
+  for r in 1 2 3 4 5; do
+    rm -f "$MUTDIR/$MANIFEST_REL"
+    ( read -r -t 30 -u 6 _ || exit 9
+      ( cd "$MUTDIR" && bash "$MUT" >/dev/null 2>&1 ) ) &
+    A=$!
+    ( read -r -t 30 -u 6 _ || exit 9
+      ( cd "$MUTDIR" && bash "$MUT" >/dev/null 2>&1 ) ) &
+    B=$!
+    printf 'go\ngo\n' >&6
+    wait "$A" 2>/dev/null; wait "$B" 2>/dev/null
+    NL=$(grep -c . "$MUTDIR/$MANIFEST_REL" 2>/dev/null || printf '0')
+    [ "${NL:-0}" -gt 1 ] 2>/dev/null && MUTBAD=$((MUTBAD + 1))
+  done
+  exec 6<&-
+  if [ "$MUTBAD" -gt 0 ]; then
+    ok "A6-CONC-MUT [GO] 历史缺陷等价体被并发回归抓到（$MUTBAD/5 轮出现重复行）"
+  else
+    bad "A6-CONC-MUT [GO] 历史缺陷等价体未被抓到（0/5 轮重复）——并发回归缺乏辨别力"
+  fi
+fi
+
 finish
