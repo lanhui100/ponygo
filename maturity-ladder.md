@@ -15,7 +15,7 @@
 | **L1** | 决策入册 + 文档有家 | 非平凡决策落成带 lifecycle × class 路径编码的记录；每个事实有家（AGENTS.md 自动加载） | L0 成立，且出现第一条值得记的非平凡变更 | `notes/{lifecycle}/{class}/yyyy-mm-dd-topic-title.md` + `docs/AGENTS.md` + 包文档覆盖 | notes/ 下文件数 > 0 且路径两轴合法；文档家判据全过 | 机械 | 已交付 |
 | **L2** | 承诺可验 + 文档分层 | 把"必须/禁止"转成非零退出的门禁命令；tier 分类落地为已激活清单（条件判据：`docs-tier: off` 为显式 opt-out） | L1 成立，且出现需要被跨提交守住的硬约束 | `gates/` 门禁脚本 + 负样本 spec + 本地钩子 + docs-tier 激活 | format/classification 门禁可跑且拒绝非法样本；文档分层已激活（未声明/off 时 2.5 SKIPPED 不计入 PASS） | 机械 + 部分 | 已交付 |
 | **L3** | 流程资产 | 高频+高判断力流程沉淀为带触发式 description 的技能 | L2 成立，且同一流程第三次重复 | `skills/` SKILL.md（触发内联 + 校准样例） | 技能元数据门禁 + 触发条件可路由 | 靠 review + 部分机械 | 目标画像（依赖 skill 资产化） |
-| **L4** | 负空间 | 删除/归档/遗忘成为有验证的独立工程 | L3 或 L2 成立，且语料开始腐烂需要 GC（垃圾回收） | `notes/archived/` + 哈希封印 manifest + supersession 审计 | 归档冻结可查、supersession 同变更处理 | 部分机械 | 目标画像（依赖归档哈希封印 + supersession 审计） |
+| **L4** | 负空间 | 删除/归档/遗忘成为有验证的独立工程 | L3 或 L2 成立，且语料开始腐烂需要 GC（垃圾回收） | `notes/archived/` + 哈希封印 manifest + supersession 审计 | 归档冻结可查（`bash .meta/gates/archive-verify.sh`）、supersession 同变更处理 | 部分机械 | 部分交付（A6/A7 = 归档 SHA-256 封印门已交付；supersession 审计仍靠 review） |
 | **L5** | 领域定制 | 架构不变量 + 生成物漂移门等按领域量体裁衣 | 各领域问题已稳定出现，值得投资更贵捍卫层 | 运行时不变量 + gen-\* 漂移门 + 分层 CI | 不变量有捍卫者且漂移被命令拦住 | 靠 review + 部分机械 | 目标画像（依赖运行时不变量） |
 
 > **validation 列诚实标注**：L0→L1→L2 的可判定判据标「机械」（可被现成 `git`/`test`/`grep`/`find` 命令判定，见 §5）；L3–L5 标「靠 review」或「部分机械」——它们的判据要么依赖尚未交付的脚本，要么依赖语义判断，首版不复检。
@@ -24,7 +24,7 @@
 
 ## 2. 首版止步 L2 的诚实声明
 
-**首版只交付 L0–L2 的可机械闭环。** 这三个等级里的每一个判据，都锚定一条现成的 `git`/`find`/`grep`/`test` 命令（§5 展开）。L3–L5 在此文档中是**目标画像（名词 + 依赖清单）**，不是可判定等级——谁声称"我们到了 L4"，必须同时掏出 L4 依赖的那套未交付机制，否则只是散文。
+**首版只交付 L0–L2 的可机械闭环。** 这三个等级里的每一个判据，都锚定一条现成的 `git`/`find`/`grep`/`test` 命令（§5 展开）。L3–L5 在此文档中是**目标画像（名词 + 依赖清单）**，不是可判定等级——谁声称"我们到了 L4"，必须同时掏出 L4 依赖的那套机制（归档封印门 A6/A7 已随 `ponygo init` 交付；supersession 审计仍未交付），否则只是散文。
 
 **每一级依赖"尚未交付的脚本/机制"清单：**
 
@@ -32,7 +32,7 @@
 |---|---|---|
 | **L2 文档分层（部分）** | **doc-sync 门**——能把 tier 放置、slop（重复/历史叙事/手抄目录）清单、词数预算转成非零退出命令的脚本族（dsh 实证约 30 门，ponygo 首版只交付"已激活清单"这一形状判据） | 已激活清单态机械可查；tier 放置正确性靠 review |
 | **L3** | **skill 资产化**——SKILL.md 五要素（触发式 description / 真相源清单 / 程序步骤 / 校准样例 / 验证报告格式）的模板 + 一个 skill 元数据门禁；以及"每三次重复资产化"的计数机制 | 靠 review（人工判断某流程是否已到"第三次重复"该入库） |
-| **L4** | **归档哈希封印 + supersession 审计**——`verify-archived-*` 脚本（append-only SHA-256 manifest）、`.rgignore` 隔离归档、新增 note 触发的 supersession 范围审查程序 | 部分机械（归档目录存在可查），但"封印是否被改过""supersession 是否同变更处理"靠脚本，脚本尚未交付 |
+| **L4** | **归档哈希封印 + supersession 审计**——归档封印门 A6（`.meta/gates/archive-verify.sh`：append-only SHA-256 manifest，`check`/`seal` 位置子命令）与负样本自检 A7 **已交付**并接进 A1/A4；仍未交付的是 supersession 范围审查程序（新增 note 触发旧 note 复查） | 归档目录存在可查；"封印是否被改过"由 A6 `check` 机械判定（哈希不符/缺条目/孤儿/重复 → exit 1）；**supersession 是否同变更处理仍靠 review** |
 | **L5** | **运行时不变量 + 生成物漂移门**——invariant（不变量）断言服务、`gen-* --check` 逐字节漂移门、分层 CI 调度器（run-gates 等价物）、workflow 形状契约 | 大部分靠 review；类型层的部分可 `tsc`，但语义层靠 review |
 
 **为什么停在 L2 而不是往前冲**：L3–L5 的每个等级都需要先交付一批**新的机械验证脚本**，而写这些脚本本身是有终身维护税的工程（P9 负空间）。首版把 L0–L2 的机制（决策入册 + 文档有家 + 承诺可验）先转起来，让飞轮启动，L3–L5 的脚本族由"菜单式选装"按需解冻（§3）。
@@ -83,6 +83,12 @@ P9 负空间对称原理：**每次添加隐含终身维护税；删除不是添
 
 ### L4 负空间
 
+- **机械判据（已交付）**：归档件一旦进 `.agents/notes/archived/`，用
+  `bash .meta/gates/archive-verify.sh seal` 追加 SHA-256 封印（`.agents/notes/archived/manifest.sha256`，
+  纯文本 append-only），随后 `bash .meta/gates/archive-verify.sh check`（pre-commit 经 A1、CI 经 A4 自动跑）
+  对 manifest 与归档 `.md` 做双向一致校验：篡改一字节、缺条目（未封印）、孤儿条目、重复条目、非追加写入
+  一律非零退出。封印来源用「`Status:` 首词 = `implemented`」做代理判据；**git rename 溯源仍靠 review**。
+- **仍需 review 的部分**：supersession 范围审查（新决策是否在同变更里复查了被取代的旧决策）。
 - **启用**：决策语料开始腐烂——陈旧的 implemented note 挤掉当前 facts，或 supersession 债务开始堆积（新增决策覆盖旧决策却不清理）。
 - **退场 / 降级**：负空间这套 (归档封印 + supersession 审计 + `.rgignore`) 本身有维护税。当语料规模小到"人工扫一眼就知道哪些过期"时，降级：解除哈希封印门禁，归档退为普通移动 + 人工抽查。
 

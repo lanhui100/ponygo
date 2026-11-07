@@ -9,9 +9,11 @@
 #   - 本地也能直接 `bash .meta/gates/ci-verify.sh` 复现远端结论（不用开 PR 才知道）。
 # 平台适配器是薄壳（A5 不进宇宙表），门禁本体在这里（A4 恒生成、进宇宙表）。
 #
-# 两道：
+# 三段：
 #   1) 全树 ADR 格式（判定真源 verify-note.sh 无参模式：1.1–1.10，含 1.9 文档有家与 1.10 备选节）
 #   2) 暂存区门的负样本 spec（证明 A1 会拒绝非法样本——门禁自证，非产品检查）
+#   3) 归档 SHA-256 封印（A6 check + A7 负样本自检）——缺 A6/A7 时 **fail-closed**（exit 1），
+#      不静默跳过：全树兜底门缺件 = 封印无人看守，按「未验证不得计为 PASS」处理。
 #
 # 约定：本目录脚本一律 `chmod +x`（非可执行钩子会被 git 静默忽略，判据会假达标）。
 # 只读：不写仓库任何文件。
@@ -26,15 +28,31 @@ cd "$ROOT" || exit 1
 
 fail=0
 
-echo "== [1/2] 全树 ADR 格式（verify-note.sh，1.1–1.10）=="
+echo "== [1/3] 全树 ADR 格式（verify-note.sh，1.1–1.10）=="
 if ! bash .agents/skills/write-adr/verify-note.sh; then
   echo "ci-verify: FAIL 全树 ADR 格式门未通过 → 逐项修 FAIL 后重跑" >&2
   fail=1
 fi
 
-echo "== [2/2] 暂存区门负样本 spec（adr-verify.spec.sh）=="
+echo "== [2/3] 暂存区门负样本 spec（adr-verify.spec.sh）=="
 if ! bash .meta/gates/adr-verify.spec.sh; then
   echo "ci-verify: FAIL 门禁自检未通过（A1 的拒绝/放行语义与预期不符）" >&2
+  fail=1
+fi
+
+echo "== [3/3] 归档封印（archive-verify.sh check + archive-verify.spec.sh）=="
+if [ ! -f .meta/gates/archive-verify.sh ]; then
+  echo "ci-verify: FAIL 第 3 段缺资产 .meta/gates/archive-verify.sh（fail-closed：缺件不得静默跳过）→ 跑 'ponygo init --repair-skeleton' 补齐" >&2
+  fail=1
+elif ! bash .meta/gates/archive-verify.sh check; then
+  echo "ci-verify: FAIL 归档封印未通过（归档件被改动或未封印）→ 恢复原字节，或按 append-only 跑架构封印追加（archive-verify.sh seal）" >&2
+  fail=1
+fi
+if [ ! -f .meta/gates/archive-verify.spec.sh ]; then
+  echo "ci-verify: FAIL 第 3 段缺资产 .meta/gates/archive-verify.spec.sh（fail-closed：缺件不得静默跳过）→ 跑 'ponygo init --repair-skeleton' 补齐" >&2
+  fail=1
+elif ! bash .meta/gates/archive-verify.spec.sh; then
+  echo "ci-verify: FAIL 归档封印门自检未通过（archive-verify.spec.sh：门不再拒绝非法样本）" >&2
   fail=1
 fi
 
@@ -42,5 +60,5 @@ if [ "$fail" -ne 0 ]; then
   echo "ci-verify: 未通过（见上方 FAIL）" >&2
   exit 1
 fi
-echo "ci-verify: 通过（全树 ADR 格式 + 门禁自检）"
+echo "ci-verify: 通过（三段：全树 ADR 格式 + 暂存区门自检 + 归档封印）"
 exit 0

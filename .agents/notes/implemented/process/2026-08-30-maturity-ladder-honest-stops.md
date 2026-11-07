@@ -28,3 +28,6 @@ L3-L6 在 maturity-ladder.md 中是"目标画像 + 依赖的未交付物清单"�
 
 - "未交付物清单"（maturity-ladder §2）成为 L3-L6 解冻时的任务清单。
 - L0 是合法长驻终态（纯 L0 长驻模式），停止线双向。
+- 2026-11-07 更新：归档哈希封印已由 A6/A7 交付（见
+  `.agents/notes/implemented/process/2026-11-07-archive-seal.md`）；supersession 审计仍未交付，
+  L4 仍不完整。

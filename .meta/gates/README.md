@@ -1,22 +1,25 @@
 # gates/ —— 门禁（把承诺转成非零退出命令）
 
-**首版（L2 及以下）此目录为空。** 升到 L2 时放你的第一个门禁，并同步 meta.yaml 的 level 改为 2。
-（ponygo 框架仓自身是例外：它在此目录 dogfood 自己的 ADR 门，见下节——实例仓照旧从空开始。）
+**框架交付资产 A1/A2/A4/A6/A7 常驻；实例自有门禁从 L2 起按需添加。**
+升到 L2 时放你的第一个实例门禁，并同步 meta.yaml 的 level 改为 2——框架资产不需要你手动放，
+`ponygo init` 已经落盘（见下表）。
 
-## 本仓已接线的门禁（ADR 门，A1–A5）
+## 本仓已接线的门禁（ADR 门 + 归档封印门，A1–A7）
 
 「交付即接线」：`ponygo init` 幂等装配下列资产（`.meta` 已存在也装配，见 plan-freeze §6.2）；
 repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致。
 
 | 资产 | 路径 | 角色 | 退出语义 |
 |---|---|---|---|
-| A1 | `.meta/gates/adr-verify.sh` | 暂存区 ADR 格式门（无参=暂存 ADR；带参=指定路径） | 0 放行 / 非零拒绝 |
+| A1 | `.meta/gates/adr-verify.sh` | 暂存区 ADR 格式门（无参=暂存 ADR；带参=指定路径），末尾调 A6 `check` | 0 放行 / 非零拒绝 |
 | A2 | `.meta/gates/adr-verify.spec.sh` | A1 的负样本执行判据（非法→拒、合法→放行、TOCTOU→拒） | 0 = 自检通过 |
 | A3 | `.githooks/pre-commit`（或既有钩子内追加块） | 本地层挂载点 | 转发 A1 的退出码 |
-| A4 | `.meta/gates/ci-verify.sh` | forge 无关全树门（verify-note 整树 + A2） | 0 放行 / 非零拒绝 |
+| A4 | `.meta/gates/ci-verify.sh` | forge 无关全树门（verify-note 整树 + A2 + A6/A7，三段） | 0 放行 / 非零拒绝 |
 | A5 | `.github/workflows/ponygo-governance.yml` | GitHub 薄适配器（checkout + A4） | 同 A4 |
+| A6 | `.meta/gates/archive-verify.sh` | 归档 SHA-256 封印门：`check`（默认，只读）/ `seal`（追加封印），零旗标 | 0 通过 / 1 拒绝 |
+| A7 | `.meta/gates/archive-verify.spec.sh` | A6 的负样本执行判据（篡改/缺条目/孤儿/重复/非追加 → 必须拒；合法样本 → 放行） | 0 = 自检通过 |
 
-**宇宙表只登记 A1/A2/A4**（不可变资产）：A3/A5 是实例可编辑文件（有人会追加自己的钩子逻辑、
+**宇宙表只登记 A1/A2/A4/A6/A7**（不可变资产）：A3/A5 是实例可编辑文件（有人会追加自己的钩子逻辑、
 改 CI 触发），塞进 `UPGRADE_UNIVERSE` 会让实例永久 drift 红。
 
 ### 承诺 → 非零退出命令
@@ -28,7 +31,19 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 | 重命名 ADR 不绕过门 | 同上（`--diff-filter=ACMR`） | R7 |
 | 全树 ADR 格式常绿 | `bash .agents/skills/write-adr/verify-note.sh` | 1.1–1.10 |
 | 门自己会拒绝非法样本 | `bash .meta/gates/adr-verify.spec.sh` | A2 |
-| 远端层全树兜底 | `bash .meta/gates/ci-verify.sh` | A4（= `verify-note.sh` 整树 + A2） |
+| 归档件冻结（改一字节即拒） | `bash .meta/gates/archive-verify.sh check`（无参等价） | A6（manifest ↔ `archived/**/*.md` 双向一致） |
+| 归档必须显式封印 | `bash .meta/gates/archive-verify.sh seal` | A6（append-only 追加；新条目要求 `Status:` 首词 = `implemented`） |
+| 封印门自己会拒绝非法样本 | `bash .meta/gates/archive-verify.spec.sh` | A7（篡改/缺条目/孤儿/重复/非追加） |
+| 远端层全树兜底 | `bash .meta/gates/ci-verify.sh` | A4（= `verify-note.sh` 整树 + A2 + A6/A7，三段） |
+
+### 归档时先 seal（A6 的写路径）
+
+把一个决策移进 `.agents/notes/archived/` 之后、提交之前，跑一次
+`bash .meta/gates/archive-verify.sh seal`：它只为**尚未登记**的归档件追加
+`.agents/notes/archived/manifest.sha256` 行（`<64hex><空格><空格><仓库相对路径>`），
+既有行一个字节都不改（append-only）。忘了跑 → A1（暂存区）与 A4（全树）都会以
+「未封印」拒绝，CI 不会放行。封印之后归档件即冻结：任何字节改动都由 `check` 报「哈希不符」。
+**seal 是唯一写路径**，pre-commit 只 `check`——钩子不在提交窗口里偷偷改工作区/暂存区。
 
 ### 本地层与远端层：互补，**不等价**（B5 实测结论）
 
@@ -95,6 +110,24 @@ staged 后又在工作区改动（两个方向：暂存合法→工作区改、�
 只有 `## Problem` + `## Decision` 的非法样本必须被拒，且文案须含判据号 `1.10`（补救可执行）。
 本目录仍不私设第二真值（判据实现只在 verify-note.sh 一处）。执行判据只证明"门会响"，抽样无偏靠 review。
 
+### A6/A7 的负样本怎么读
+
+`archive-verify.spec.sh` 用 `mktemp -d` 造**独立**样本仓（只放被测门禁 + 归档目录，不需要 git；
+`trap … EXIT` 清理，被检仓库只读），以自身所在目录寻址 A6（不看 `cwd`、不从 `PATH` 取同名脚本），
+逐类断言 A6 会拒绝，并配一个合法样本断言"门不得一律拒绝"：
+
+| 样本类 | 造法 | 期望 |
+|---|---|---|
+| 篡改 | 封印后改归档件一字节（长度不变） | `check` exit 1 |
+| 缺条目 | 归档件存在但 manifest 无该条目 | `check` exit 1 |
+| 孤儿 | manifest 条目指向已删除的归档件 | `check` exit 1 |
+| 重复 | manifest 同一路径登记两行 | `check` exit 1 |
+| 非追加 | 既有条目被改动后再 `seal` | `seal` exit 1 **且** manifest 零写入 |
+| 合法样本 | 两件 `Status: implemented` 归档件 | `seal` 0 且 `check` 0 |
+
+`PONYGO_IN_SPEC` 只是信息变量，**不是**本 spec 的跳过开关：被 `audit --run-specs` 或 CI 调用时
+同样完整执行全套样本（跳过 = 未验证，不得计为通过）。
+
 运行时机：`bash .meta/gates/ci-verify.sh`（CI/本地全树）、`ponygo audit --run-specs`（opt-in，
 本 spec 会被**真跑**并断言 exit 0）、pre-commit 不跑它（秒级预算）。
 若 `audit --run-specs` 存在**未被真正执行**的 spec（0 个 / 自报 SKIPPED（含部分）/ 递归护栏拦截），
@@ -111,6 +144,13 @@ staged 后又在工作区改动（两个方向：暂存合法→工作区改、�
 
 **核心原则**：每层只抓该层性价比最高的缺陷；本地窄、CI 全，两层跑同样检查 = 白付延迟（P7）。
 分层是「值不值」的价值判断（P6）——小项目只上 CI 也合法，别为分层而分层。
+
+**中继层 pre-push 是可选动作，框架不生成该 hook、也不设开关**：想让推送前再挡一道，
+可在自己的 `.githooks/pre-push` 里加一行（按需自加，不装配就没有）：
+
+```bash
+bash .meta/gates/ci-verify.sh
+```
 
 > 可靠性 review 程序（掩盖式修法：加超时/加重试/全串行/吞错/弱断言/加 sleep 均不算根因修复）见 methodology §4.7——**本行非门禁、无执行语义**，checklist 2.A–2.C 判据链到该节，不链本行。
 

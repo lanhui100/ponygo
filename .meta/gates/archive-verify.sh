@@ -1,0 +1,284 @@
+#!/usr/bin/env bash
+# ============================================================
+# archive-verify.sh —— 归档 SHA-256 封印门（门禁资产 A6）
+#
+# 用法（位置子命令，零旗标）：
+#   bash .meta/gates/archive-verify.sh            # 无参 = check
+#   bash .meta/gates/archive-verify.sh check      # 校验封印（只读）
+#   bash .meta/gates/archive-verify.sh seal       # 追加新封印（唯一写入路径）
+#   旗标形态（--check / --seal / -c / -s）一律按未知输入拒绝（exit 1）。
+#
+# manifest：`.agents/notes/archived/manifest.sha256`，纯文本**追加式**，每行
+#   `<64hex><空格><空格><仓库相对路径>`（= `sha256sum` 原生格式；十六进制必须小写）。
+#
+# check（只读）：manifest 登记集 ↔ 归档实体集（`archived/` 下**递归** `*.md`，排除
+#   basename 为 `README.md` / `AGENTS.md` 的文件）双向一致：
+#     - 归档件哈希不符（封印后被改一字节）/ 归档件未封印（manifest 缺条目）/
+#       孤儿条目（manifest 有、磁盘无）/ 重复条目 / 行格式非法（含注释行）→ exit 1；
+#     - 无 archived 目录、空目录、空 manifest → exit 0（门禁只对"真的归档了"负责，
+#       不替实例决定要不要归档）。
+# seal（唯一写入）：先按 check 的**全部**判据校验既有条目（append-only：既有行绝不重写、
+#   不排序、不删除），再只为缺失条目追加新行：
+#     - 既有条目被改动（哈希不符/孤儿/重复/非法）→ 拒绝且**零写入**（不得把篡改洗白）；
+#     - 新条目要求该归档件的 `Status:` 首词 = `implemented`（**来源代理判据**：只封印
+#       已落地的决策）。已知局限：不做 git rename 溯源（只允许 implemented → archived 的
+#       `git mv`），靠 review 与该判据兜底；
+#     - 全一致态再 seal = 追加 0 条、manifest 字节不变（幂等）。
+#
+# 退出码：0 = 通过 / 已追加；1 = 拒绝。只允许 0/1。
+# 只读纪律（C3）：check 不写仓库任何文件、不执行任何仓库脚本（只做 sha256 比对与文本解析）；
+#   seal 只追加 manifest，中间文件走 `mktemp`（系统临时目录），仓库内不留 `.tmp` / `.new` 残留。
+# 零依赖（C4）：bash + GNU 用户态（sha256sum / find / awk / sed）；不引入 jq / python。
+# ============================================================
+set -u
+
+PROG=archive-verify
+ARCH=".agents/notes/archived"
+MANIFEST="$ARCH/manifest.sha256"
+MANIFEST_REL="$MANIFEST"
+
+ROOT=$(cd "$(dirname "$0")/../.." 2>/dev/null && pwd) || {
+  printf '[%s] FAIL：无法解析仓库根（本脚本须位于 <repo>/.meta/gates/）\n' "$PROG" >&2
+  exit 1
+}
+cd "$ROOT" || {
+  printf '[%s] FAIL：无法进入仓库根 %s\n' "$PROG" "$ROOT" >&2
+  exit 1
+}
+
+usage() {
+  printf '[%s] 用法：bash .meta/gates/archive-verify.sh [check|seal]\n' "$PROG" >&2
+  printf '  check （默认）校验归档封印；只读，不写仓库任何文件\n' >&2
+  printf '  seal          为未封印的归档件追加 manifest 行（append-only，不重写既有行）\n' >&2
+  printf '  零旗标：不接受 --check / --seal / -c / -s 等旗标形态\n' >&2
+}
+
+if [ "$#" -gt 1 ]; then
+  printf '[%s] FAIL：多余参数（只接受一个位置子命令 check|seal）\n' "$PROG" >&2
+  usage
+  exit 1
+fi
+MODE="${1:-check}"
+case "$MODE" in
+  check | seal) ;;
+  *)
+    printf '[%s] FAIL：未知输入：%s\n' "$PROG" "$MODE" >&2
+    usage
+    exit 1
+    ;;
+esac
+
+FAILS=0
+fail() {
+  printf '[%s] FAIL：%s\n' "$PROG" "$*" >&2
+  FAILS=$((FAILS + 1))
+}
+
+# 归档实体集 B：archived 下递归 *.md，排除 basename README.md / AGENTS.md（任意深度）
+# 输出仓库相对路径（find 的打印前缀即 `.agents/notes/archived/...`），字典序稳定。
+list_archived() {
+  [ -d "$ARCH" ] || return 0
+  find "$ARCH" -type f -name '*.md' ! -name 'README.md' ! -name 'AGENTS.md' -print 2>/dev/null |
+    LC_ALL=C sort
+}
+
+sha_of() { sha256sum "$1" 2>/dev/null | awk '{print $1}'; }
+
+# 路径必须是**仓库相对**且落在归档目录内、不得越界
+path_ok() {
+  case "$1" in
+    /*) return 1 ;;
+    .. | ../* | */.. | */../*) return 1 ;;
+  esac
+  case "$1" in
+    "$ARCH"/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# 扫描 manifest（check 与 seal 共用同一套判据；唯一实现）
+# 结果：SEEN（换行包裹 + 换行分隔的已登记路径，供"是否已登记"查询）
+# 返回：0 = 全部条目自洽；1 = 存在格式/重复/孤儿/哈希不符
+SEEN='
+'
+manifest_scan() {
+  local line h p n=0 rc=0 real
+  SEEN='
+'
+  [ -f "$MANIFEST" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    # 空行（含仅空白行）忽略，不参与判定（A6-8）
+    case "$line" in
+      *[![:space:]]*) ;;
+      *) continue ;;
+    esac
+    if ! [[ "$line" =~ ^([0-9a-f]{64})\ \ (.+)$ ]]; then
+      fail "manifest 格式非法（第 $n 行；期望 <64hex><空格><空格><仓库相对路径>，十六进制须小写；不支持注释行）：$line"
+      rc=1
+      continue
+    fi
+    h="${BASH_REMATCH[1]}"
+    p="${BASH_REMATCH[2]}"
+    if ! path_ok "$p"; then
+      fail "manifest 条目路径非法（第 $n 行；须为 $ARCH/ 下的仓库相对路径，不得越界）：$p"
+      rc=1
+      continue
+    fi
+    case "$SEEN" in
+      *"
+$p
+"*)
+        fail "manifest 重复条目（同一路径登记了多次）：$p"
+        rc=1
+        continue
+        ;;
+    esac
+    SEEN="$SEEN$p
+"
+    if [ ! -f "$p" ]; then
+      fail "manifest 孤儿条目（manifest 有、磁盘无）：$p"
+      rc=1
+      continue
+    fi
+    real=$(sha_of "$p")
+    if [ -z "$real" ] || [ "$real" != "$h" ]; then
+      fail "归档件哈希不符（封印后被改动；期望 ${h}，实得 ${real:-<不可读>}）：$p"
+      rc=1
+      continue
+    fi
+  done <"$MANIFEST"
+  return "$rc"
+}
+
+is_seen() { # <path> → 0 = 已登记
+  case "$SEEN" in
+    *"
+$1
+"*) return 0 ;;
+  esac
+  return 1
+}
+
+# 未封印：归档实体集 B 中有、manifest 登记集 A 中无
+scan_unsealed() {
+  local f rc=0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if is_seen "$f"; then continue; fi
+    fail "归档件未封印（manifest 缺条目）：$f"
+    rc=1
+  done < <(list_archived)
+  return "$rc"
+}
+
+do_check() {
+  printf '== 归档封印校验（%s）==\n' "$MANIFEST_REL"
+  local rc=0
+  if [ ! -d "$ARCH" ]; then
+    printf '无归档件（目录 %s 不存在；0 条）—— 无需封印校验\n' "$ARCH"
+    printf '== 归档封印：通过（无归档）==\n'
+    exit 0
+  fi
+  manifest_scan || rc=1
+  scan_unsealed || rc=1
+  if [ "$rc" -ne 0 ] || [ "$FAILS" -ne 0 ]; then
+    printf '[%s] 拒绝：归档封印不自洽（见上方 FAIL 行）→ 归档件被改动则恢复原字节；未封印件则跑 bash .meta/gates/archive-verify.sh seal\n' "$PROG" >&2
+    exit 1
+  fi
+  local n=0
+  while IFS= read -r _; do n=$((n + 1)); done < <(list_archived)
+  if [ "$n" -eq 0 ]; then
+    printf '无归档件（0 条）—— 无需封印校验\n'
+  else
+    printf '通过：%s 条归档件与 manifest 逐一一致（sha256）\n' "$n"
+  fi
+  printf '== 归档封印：通过 ==\n'
+  exit 0
+}
+
+status_first_word() { # <文件> → Status: 的首词（无 Status 行则空）
+  sed -n 's/^Status:[[:space:]]*//p' "$1" 2>/dev/null | head -n1 | awk '{print $1}'
+}
+
+do_seal() {
+  printf '== 归档封印追加（%s）==\n' "$MANIFEST_REL"
+  # 1) 既有条目必须先自洽：append-only 只允许"往后加"，不允许重写/删除/排序
+  manifest_scan || {
+    printf '[%s] 拒绝：既有 manifest 条目不自洽（append-only：既有行不得改动，seal 不会重写/删除它们）→ 恢复被改动的归档件，或由人工裁决后重跑\n' "$PROG" >&2
+    exit 1
+  }
+  if [ "$FAILS" -ne 0 ]; then
+    printf '[%s] 拒绝：既有 manifest 条目不自洽（append-only）→ 恢复被改动的归档件后重跑\n' "$PROG" >&2
+    exit 1
+  fi
+  # 2) 只为缺失条目构造追加块；任一新条目不合法 → 整批拒绝且零写入
+  local f st n=0 block="" h
+  block=""
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if is_seen "$f"; then continue; fi
+    st=$(status_first_word "$f")
+    if [ "$st" != "implemented" ]; then
+      fail "归档件 Status 非 implemented（来源代理判据：只封印已落地的决策；当前 Status 首词：${st:-缺失}）：$f"
+      continue
+    fi
+    h=$(sha_of "$f")
+    if [ -z "$h" ]; then
+      fail "无法计算 sha256（文件不可读）：$f"
+      continue
+    fi
+    block="$block$h  $f
+"
+    n=$((n + 1))
+  done < <(list_archived)
+  if [ "$FAILS" -ne 0 ]; then
+    printf '[%s] 拒绝：新条目不满足封印条件（见上方 FAIL 行）→ manifest 零写入\n' "$PROG" >&2
+    exit 1
+  fi
+  if [ "$n" -eq 0 ]; then
+    printf '追加 0 条（全一致态；manifest 字节不变）\n'
+    printf '== 归档封印：通过（0 条新增）==\n'
+    exit 0
+  fi
+  # 3) 追加写：中间文件在系统临时目录，`cat >>` 只追加；不留仓库内中间文件
+  mkdir -p "$ARCH" || {
+    printf '[%s] FAIL：无法创建 %s\n' "$PROG" "$ARCH" >&2
+    exit 1
+  }
+  local tmp=""
+  tmp=$(mktemp 2>/dev/null) || tmp=""
+  if [ -z "$tmp" ]; then
+    printf '[%s] FAIL：无法创建中间文件（mktemp 失败）——本次未写入 manifest\n' "$PROG" >&2
+    exit 1
+  fi
+  if ! printf '%s' "$block" >"$tmp"; then
+    rm -f "$tmp" 2>/dev/null || true
+    printf '[%s] FAIL：写中间文件失败——本次未写入 manifest\n' "$PROG" >&2
+    exit 1
+  fi
+  # 既有 manifest 末尾缺换行时先补一个，避免追加行与末行拼接
+  if [ -s "$MANIFEST" ]; then
+    if [ -n "$(tail -c 1 "$MANIFEST" 2>/dev/null)" ]; then
+      printf '\n' >>"$MANIFEST" || {
+        rm -f "$tmp" 2>/dev/null || true
+        printf '[%s] FAIL：写 manifest 失败\n' "$PROG" >&2
+        exit 1
+      }
+    fi
+  fi
+  if ! cat "$tmp" >>"$MANIFEST"; then
+    rm -f "$tmp" 2>/dev/null || true
+    printf '[%s] FAIL：追加 manifest 失败（磁盘/权限）——本次未完成封印\n' "$PROG" >&2
+    exit 1
+  fi
+  rm -f "$tmp" 2>/dev/null || true
+  printf '追加 %s 条新封印（既有条目零改动）\n' "$n"
+  printf '== 归档封印：通过（%s 条新增）==\n' "$n"
+  exit 0
+}
+
+case "$MODE" in
+  check) do_check ;;
+  seal) do_seal ;;
+esac

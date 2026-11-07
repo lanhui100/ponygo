@@ -127,7 +127,7 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
 ├── constitution/              # 宪法：语义规范（"什么是好的"），供投影到 AGENTS.md / CLAUDE.md
 │   └── constitution.md        #    模板态（槽位未填）时 sync 投影初始引导 bootstrap：AI agent 进场即有指引，
 │                              #    由 agent 完成填槽/重投影/首篇 ADR；填槽后重跑 sync，引导自动被常载命约替换
-├── gates/                     # 门禁：把承诺转成非零退出命令（每门配负样本 spec）
+├── gates/                     # 门禁：把承诺转成非零退出命令（框架常驻 A1/A2/A4/A6/A7 + 每门配负样本 spec）
 ├── docs-tier/                 # 文档分层：按 tier 分类法给每个事实安一个家
 └── adaptation/                # 替代治理适配任务书：init 检出既有治理形态时生成 alt-governance.md（不阻断注入）
 ```
@@ -150,10 +150,12 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
 | L1 | 决策入册 + 文档有家 | 真判据（机械可判） |
 | L2 | 承诺可验 + 文档分层 | 真判据（机械可判，分层激活形状） |
 | L3 | 流程资产 | 目标画像（靠 review） |
-| L4 | 负空间 | 目标画像（靠 review） |
+| L4 | 负空间 | 部分机械（归档封印门 A6/A7 已交付；supersession 审计靠 review） |
 | L5 | 领域定制 | 目标画像（靠 review） |
 
-> L0–L2 的判据以 `maturity-ladder.md` §5 的真值表为准，`ponygo status` 已对声明级（L0-L2）的判据逐项机械验证（v1.1 起；v2.0 起文档判据 0.5/1.9/2.5 并入），判据不符时非零退出。L3–L5 是"目标画像"，靠 review 校准。
+> L0–L2 的判据以 `maturity-ladder.md` §5 的真值表为准，`ponygo status` 已对声明级（L0-L2）的判据逐项机械验证（v1.1 起；v2.0 起文档判据 0.5/1.9/2.5 并入），判据不符时非零退出。L3/L5 仍是"目标画像"，靠 review 校准；L4 的**归档封印**已随框架交付（A6 `archive-verify.sh` + A7 负样本自检），只有 supersession 审计仍靠 review。
+>
+> **判据覆盖的诚实边界**：`status` / `audit` 只机械验证 1.1–1.9，1.10（必含 `## Alternatives considered`）由 A1/A4 门判定——两者都不执行仓库脚本，故结论行显式标注「1.10 未由本命令验证」，`--json` 里给出固定词表 `coverage{verified,unverified,reason}`。未验证不计为 PASS。
 
 ### 4.3 自适应审计（首版两档）
 
@@ -271,7 +273,7 @@ ponygo 的双根"变成可逐项勾掉的清单，而不是一句"先 audit 再�
 | `.github/workflows/ci.yml` | 回归门禁挂载：ubuntu + windows Git Bash 双平台跑 tests/run.sh + 聚合门 | 维护者；分支保护依赖 |
 | `.github/workflows/release.yml` | 发布校验和链：tag-push 触发，生成并发布 ponygo.sha256（裸哈希 + CRLF 断言 + 最小权限） | 维护者；发布动作 |
 | `docs/methodology.md` | 原理层：方法论设计依据（源自 deepseek-harness） | 想懂"为什么"的人；机制层的理论源头 |
-| `.meta/` + `.agents/` | 治理根骨架（双根）：.meta/ = constitution / gates / docs-tier / adaptation（检出替代治理时）/ meta.yaml；.agents/ = notes / skills | 实例化产物；由 `ponygo init` 生成进用户项目 |
+| `.meta/` + `.agents/` | 治理根骨架（双根）：.meta/ = constitution / gates（A1/A2/A4/A6/A7 框架资产）/ docs-tier / adaptation（检出替代治理时）/ meta.yaml；.agents/ = notes / skills | 实例化产物；由 `ponygo init` 生成进用户项目 |
 | `maturity-ladder.md` | 成熟度阶梯定义（L0–L5 逐档判据） | `ponygo status` 与 review 的判定来源 |
 | `audit/` | 四问记分卡 + 分层细目库 + 自适应深度选择器 | `ponygo audit` 的执行依据 |
 | `audit/checklist.md` | 分层细目（骨架 / 机制 / 精微三层条目） | 审计打分时的逐项参照 |

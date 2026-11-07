@@ -149,4 +149,12 @@ fi
 bash "$VERIFY" ${PATHS[@]+"${PATHS[@]}"} || exit 1
 
 printf '[%s] 通过：%d 条 ADR 经 %s 校验（暂存区与工作区一致）\n' "$PROG" "${#PATHS[@]}" "$VERIFY"
+
+# 6) 归档 SHA-256 封印（A6 check）：归档件被改一字节即拒绝提交。
+#    门禁不存在时**优雅回退**（不改变 ADR 判定、不报错）：A6 属框架资产，缺失由
+#    'ponygo init --repair-skeleton' 补齐；本地层窄、CI 层（A4）兜底，故此处不 fail-closed。
+ARCHIVE_GATE=".meta/gates/archive-verify.sh"
+if [ -f "$ARCHIVE_GATE" ]; then
+  bash "$ARCHIVE_GATE" check || exit 1
+fi
 exit 0
