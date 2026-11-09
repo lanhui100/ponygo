@@ -15,7 +15,14 @@ set -u
 
 COV_TOKEN='"coverage":{"verified":["1.1-1.9"],"unverified":["1.10"],"reason":"readonly-no-repo-exec"}'
 FORBIDDEN='机械判据全部 PASS'
-FROZEN_L1='级自洽验证：通过（L0-L1 判据 1.1–1.9 PASS；1.10 未由本命令验证——由 A1/A4 门把关）'
+# 2026-11-09 期望迁移（契约真源：.dev-team/wave-1-contract.md §C3；Lead 裁决：只迁期望值，
+# assert_eq 全串精确相等不变、断言一条不删）。本文件 lv=1 夹具（gov_repo）**未声明 ai-surface**，
+# 而 §C3 把判据 1.9 的「根 AGENTS.md 索引链」子项（1.9b）改为 fail-closed **仅当声明 ai-surface**：
+# 未声明 → 该子项 SKIPPED，结论行据实把「判据 1.1–1.9 PASS」改写为
+# 「判据 1.1–1.8 PASS；1.9b SKIPPED——…，不计入 PASS」（不得静默 PASS；同一契约由
+# tests/run.sh 场景 s79 的 C3⑦/C3⑨/C3⑩ 看守）。已声明 ai-surface: on 的态（COV-1 的本仓副本）
+# 仍为「1.1–1.9 PASS」——见 FROZEN_L2_BASE，不得顺手改掉正向影子。
+FROZEN_L1='级自洽验证：通过（L0-L1 判据 1.1–1.8 PASS；1.9b SKIPPED——根 AGENTS.md 索引链未判定（未声明 ai-surface），不计入 PASS；1.10 未由本命令验证——由 A1/A4 门把关）'
 FROZEN_L2_BASE='级自洽验证：通过（L0-L2 判据 1.1–1.9 PASS；1.10 未由本命令验证——由 A1/A4 门把关'
 conc_of() { printf '%s\n' "$1" | grep '^级自洽验证：' ; }
 
@@ -73,8 +80,10 @@ run_in "$T" status
 assert_eq "COV-2 [GO] status（骨架完整、无本地/远端载体）exit 0" 0 "$R_RC"
 assert_contains "COV-2 前置取证：骨架确为完整态（不是靠缺口制造低级别）" "$R_OUT" "骨架完整"
 run_split "$T" status
+# 期望迁移（同上，§C3）：本夹具未声明 ai-surface → 1.9b SKIPPED 子句并入结论行；
+# 「无门禁载体」尾句不变（coverage 诚实化语义未被改写）。
 assert_eq "COV-2 [GO] 态 2 结论行逐字" \
-  '级自洽验证：通过（L0-L1 判据 1.1–1.9 PASS；1.10 未由本命令验证——无门禁载体）' "$(conc_of "$R_OUT")"
+  '级自洽验证：通过（L0-L1 判据 1.1–1.8 PASS；1.9b SKIPPED——根 AGENTS.md 索引链未判定（未声明 ai-surface），不计入 PASS；1.10 未由本命令验证——无门禁载体）' "$(conc_of "$R_OUT")"
 assert_eq "COV-2 [GO] 独立行「1.10 无门禁载体（见接线）」恰 1 次" 1 \
   "$(printf '%s\n' "$R_OUT" | grep -c '^1\.10 无门禁载体（见接线）$')"
 assert_matches "COV-2 [GO] stderr 出现 WARN" "$R_ERR" 'WARN|警告'
