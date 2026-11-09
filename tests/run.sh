@@ -386,10 +386,14 @@ s09_audit_counts() {
   # shellcheck disable=SC2046
   run_cli_env "$T" $G audit --level S
   assert_eq "S 档 exit 0" 0 "$R_RC"
-  assert_contains "S 档命中 5 / 10（含预置 write-adr）" "$R_OUT" "命中 5 / 10"
+  # 契约变更（.dev-team/wave-1-contract.md §C6，Lead 裁决 B）：audit 问④「退场」判据
+  # 由 `[ -d archived ]` 改为「archived/ 下存在已封印归档件（manifest 存在且 ≥1 条登记）」。
+  # 本用例的基线是 init 后空 archived（无 manifest）→ 问④不再命中 → 期望值 5/10 → 4/10、
+  # 5/14 → 4/14。仍是**精确等值**断言（不弱化、不改模糊匹配），只把契约变更后的真值固化。
+  assert_contains "S 档命中 4 / 10（含预置 write-adr；未封印 archived 不计问④）" "$R_OUT" "命中 4 / 10"
   # shellcheck disable=SC2046
   run_cli_env "$T" $G audit --level M
-  assert_contains "M 档命中 5 / 14（含预置 write-adr）" "$R_OUT" "命中 5 / 14"
+  assert_contains "M 档命中 4 / 14（含预置 write-adr；未封印 archived 不计问④）" "$R_OUT" "命中 4 / 14"
 }
 
 s10_audit_level_arg() {
@@ -513,6 +517,11 @@ s11_l1_criteria() {
   T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-x.md"
+  # 契约前置（.dev-team/wave-1-contract.md §C3，Lead 裁决 A）：判据 1.9 的「根 AGENTS.md
+  # 必须链到 docs/AGENTS.md」子项（1.9b）改为 fail-closed **仅当声明 ai-surface**；未声明时
+  # 该子项 SKIPPED。故本负样本必须先声明 ai-surface: on 才是「在判定域内的断链」。
+  # 断言一条未删、未弱化（仍是 exit 1 + 含 1.9）。
+  printf 'ai-surface: on\n' >> "$T/.meta/meta.yaml"
   sed -i 's/docs\/AGENTS\.md//g' "$T/AGENTS.md"
   run_cli "$T" status
   assert_eq "根 AGENTS.md 断链（无 docs/AGENTS.md 引用）→ exit 1" 1 "$R_RC"
@@ -3883,6 +3892,237 @@ s78_wave13_acceptance() {
   done
 }
 
+# ============================================================
+# Wave-1 契约验收（s79）—— Test Agent 冻结件（红相），实现方只读
+#
+# 契约真源：.dev-team/wave-1-contract.md §1 的 C1/C2/C3/C6（Lead 裁决唯一）。
+# 本场景是该契约的**可执行判据**：断言只能由契约修订驱动，不得为实现让路。
+#
+# 覆盖面与断言关键词（Executor 镜像门禁侧 spec 时必须与本处一字一致）：
+#   C1 rejected 无理由 → A1 门 exit 1，文案关键词「缺一行理由」；补理由 → exit 0
+#   C2 implemented 缺 Decision → exit 1，关键词「缺 ## Decision」；
+#      implemented 含中文提案标题（## 验收）→ exit 1，关键词「提案时代标题」
+#   C3 1.9b 根 AGENTS.md fail-closed 三态：on+缺=exit 1 且含「1.9」；on+有链=exit 0 且含「1.9 PASS」；
+#      未声明=exit 0 且含「1.9b SKIPPED」「不计入 PASS」、且不得含「1.9 PASS」「全部 PASS」
+#   C6 audit 问④：空 archived（无 manifest）/ 有件未封印 → 不计命中；seal 后 → 命中数较
+#      「无 archived」基线恰 +1（只比「命中 N / M 项」文本里的 N，不读内部字段）
+#
+# 为什么 C1/C2 走 A1（.meta/gates/adr-verify.sh）而不是直接跑真源：被测事实是「门会拒绝」，
+# 真源只是门的判据来源。门在带参模式下要求该 ADR 已暂存（否则先走 TOCTOU 拒绝，测到的就
+# 不是判据）——故夹具先 git_seed_repo + git add（与 s77 同构），并用文案关键词区分成因。
+# ============================================================
+
+# audit 输出「命中 N / M 项」→ 只取 N（整数）；解析不到给空串（供 ⓪ 前置取证断言，
+# 杜绝「空 == 空」把解析失败伪装成通过）。契约 C6 要求「不依赖内部字段」，故只解析文本。
+audit_hit_n() {
+  printf '%s\n' "$1" | sed -n 's/^命中 \([0-9][0-9]*\) \/ [0-9][0-9]* 项$/\1/p' | head -n1
+}
+
+s79_wave1_contract_c1_c2_c3_c6() {
+  echo "--- 场景79：Wave-1 契约 C1/C2/C3/C6（rejected 理由 · implemented ## Decision · 1.9b fail-closed · audit 问④ 封印）"
+  local T F G H_base H_noarch H_unsealed H_sealed
+
+  # ---- C1 rejected 必须带一行理由（§C1，判据 1.7 补强）----
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init
+  F=".agents/notes/rejected/process/2026-01-01-x.md"
+  mkdir -p "$T/.agents/notes/rejected/process"
+  cat > "$T/$F" <<'EOF'
+# Agent Note: rejected without reason
+
+Status: rejected
+
+## Proposal
+what
+
+## Alternatives considered
+other
+EOF
+  git_local "$T" add "$F" >/dev/null 2>&1
+  run_script "$T" .meta/gates/adr-verify.sh "$F"
+  assert_eq "C1① rejected 无理由 → adr-verify exit 1（拒绝）" 1 "$S_RC"
+  assert_contains "C1② 拒绝文案含「缺一行理由」" "$S_OUT" "缺一行理由"
+  # 正向对照：同一行补上理由（分隔符 — + 非空理由）→ 放行（证明①不是「一律拒绝」）
+  sed -i 's/^Status: rejected$/Status: rejected — 与 X 冲突/' "$T/$F"
+  git_local "$T" add "$F" >/dev/null 2>&1
+  run_script "$T" .meta/gates/adr-verify.sh "$F"
+  assert_eq "C1③ 补一行理由 → adr-verify exit 0（放行）" 0 "$S_RC"
+  assert_not_contains "C1④ 放行后不再报「缺一行理由」" "$S_OUT" "缺一行理由"
+  # 豁免面（§C1：*.zh.md 同 1.10 口径）：译文不独立判理由，缺理由也放行
+  F=".agents/notes/rejected/process/2026-01-03-x.zh.md"
+  cat > "$T/$F" <<'EOF'
+# Agent Note: 译文（无理由，应豁免）
+
+Status: rejected
+
+## Proposal
+what
+EOF
+  git_local "$T" add "$F" >/dev/null 2>&1
+  run_script "$T" .meta/gates/adr-verify.sh "$F"
+  assert_eq "C1⑤ *.zh.md 豁免（无理由也放行）" 0 "$S_RC"
+  assert_not_contains "C1⑥ 豁免面不得报「缺一行理由」" "$S_OUT" "缺一行理由"
+
+  # ---- C2 implemented 必须含现在时 ## Decision；中文提案标题禁入（§C2，判据 1.8 补强）----
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init
+  F=".agents/notes/implemented/feature/2026-01-01-y.md"
+  mkdir -p "$T/.agents/notes/implemented/feature"
+  cat > "$T/$F" <<'EOF'
+# Agent Note: implemented without Decision
+
+Status: implemented
+
+## Problem
+why
+
+## Alternatives considered
+other
+EOF
+  git_local "$T" add "$F" >/dev/null 2>&1
+  run_script "$T" .meta/gates/adr-verify.sh "$F"
+  assert_eq "C2① implemented 缺 ## Decision → adr-verify exit 1" 1 "$S_RC"
+  assert_contains "C2② 拒绝文案含「缺 ## Decision」" "$S_OUT" "缺 ## Decision"
+  # 正向对照：补现在时 ## Decision → 放行
+  cat > "$T/$F" <<'EOF'
+# Agent Note: implemented with Decision
+
+Status: implemented
+
+## Problem
+why
+
+## Decision
+what
+
+## Alternatives considered
+other
+EOF
+  git_local "$T" add "$F" >/dev/null 2>&1
+  run_script "$T" .meta/gates/adr-verify.sh "$F"
+  assert_eq "C2③ 补 ## Decision → adr-verify exit 0（放行）" 0 "$S_RC"
+  # 中文提案时代标题（§C2 新增禁入清单）：Decision 在场也禁——标题本身是提案态残留
+  F=".agents/notes/implemented/feature/2026-01-02-z.md"
+  cat > "$T/$F" <<'EOF'
+# Agent Note: implemented with Chinese proposal title
+
+Status: implemented
+
+## Problem
+why
+
+## Decision
+what
+
+## 验收
+how
+
+## Alternatives considered
+other
+EOF
+  git_local "$T" add "$F" >/dev/null 2>&1
+  run_script "$T" .meta/gates/adr-verify.sh "$F"
+  assert_eq "C2④ implemented 含中文提案标题 ## 验收 → adr-verify exit 1" 1 "$S_RC"
+  assert_contains "C2⑤ 拒绝文案含「提案时代标题」" "$S_OUT" "提案时代标题"
+  # 正向对照：删掉中文提案标题 → 放行
+  cat > "$T/$F" <<'EOF'
+# Agent Note: implemented with Chinese title removed
+
+Status: implemented
+
+## Problem
+why
+
+## Decision
+what
+
+## Alternatives considered
+other
+EOF
+  git_local "$T" add "$F" >/dev/null 2>&1
+  run_script "$T" .meta/gates/adr-verify.sh "$F"
+  assert_eq "C2⑥ 去掉中文提案标题 → adr-verify exit 0（放行）" 0 "$S_RC"
+
+  # ---- C3 判据 1.9b 根 AGENTS.md fail-closed（仅当声明 ai-surface）（§C3）----
+  # 三态共用同一夹具：level 1 + 1 条合规决策（满足 L1 门槛），差异只在 ai-surface 与根 AGENTS.md
+  c3_fixture() { # <case 目录>：level 1 + 1 条合规决策（默认未声明 ai-surface）
+    run_cli "$1" init
+    printf 'level: 1\n' > "$1/.meta/meta.yaml"
+    write_valid_decision "$1" "implemented/feature/2026-01-02-ok.md"
+  }
+  # (a) ai-surface: on + 缺根 AGENTS.md → fail-closed（声明即承诺）
+  T=$(new_case); c3_fixture "$T"
+  printf 'ai-surface: on\n' >> "$T/.meta/meta.yaml"
+  rm -f "$T/AGENTS.md"
+  run_cli "$T" status
+  assert_eq "C3① ai-surface: on + 缺根 AGENTS.md → status exit 1（fail-closed）" 1 "$R_RC"
+  assert_contains "C3② 且点名判据 1.9" "$R_OUT" "1.9"
+  # 「报 1.9」不得被结论行的「1.1–1.9 PASS」冒充——FAIL 态下禁写 1.9 PASS
+  assert_not_contains "C3②b 且不得声称 1.9 PASS" "$R_OUT" "1.9 PASS"
+  # (b) ai-surface: on + 根 AGENTS.md 含 docs/AGENTS.md 链 → PASS
+  T=$(new_case); c3_fixture "$T"
+  printf 'ai-surface: on\n' >> "$T/.meta/meta.yaml"
+  assert_file_has "C3③ 前置取证：根 AGENTS.md 含 docs/AGENTS.md 索引链" "$T/AGENTS.md" "docs/AGENTS.md"
+  run_cli "$T" status
+  assert_eq "C3④ ai-surface: on + 根 AGENTS.md 有链 → status exit 0" 0 "$R_RC"
+  assert_contains "C3⑤ 且结论行声明 1.9 PASS" "$R_OUT" "1.9 PASS"
+  # (c) 未声明 ai-surface → 1.9b SKIPPED（不得静默 PASS、不得写成 FAIL）
+  T=$(new_case); c3_fixture "$T"
+  run_cli "$T" status
+  assert_eq "C3⑥ 未声明 ai-surface → status exit 0（SKIPPED 不是 FAIL）" 0 "$R_RC"
+  # 契约字面「1.9b SKIPPED 不计入 PASS」必须在**同一行**（对齐 2.6 既有措辞）；
+  # 不能拿 1.10 载体 WARN 里那句「不计入 PASS」冒充（那是另一条判据的提示）
+  if printf '%s\n' "$R_OUT" | grep -qE '1\.9b[^。]*SKIPPED[^。]*不计入 PASS'; then
+    ok "C3⑦ 输出「1.9b SKIPPED … 不计入 PASS」提示（对齐 2.6 措辞）"
+  else
+    bad "C3⑦ 输出「1.9b SKIPPED … 不计入 PASS」提示（同行未同时出现 1.9b / SKIPPED / 不计入 PASS）"
+  fi
+  assert_not_contains "C3⑨ 未声明时不得声称 1.9 PASS" "$R_OUT" "1.9 PASS"
+  assert_not_contains "C3⑩ 且禁写「全部 PASS」" "$R_OUT" "全部 PASS"
+
+  # ---- C6 audit 问④「退场」：空 archived 不得分；已封印归档件才得分（§C6）----
+  T=$(new_case); run_cli "$T" init
+  # 先把问①「有至少一条决策」打成命中，隔离「问④」这唯一的变量
+  write_valid_decision "$T" "implemented/feature/2026-01-02-ok.md"
+  G=$(sanitize_git)
+  assert_missing "C6⓪ 前置取证：init 后 archived/ 为空（无 manifest）" "$T/.agents/notes/archived/manifest.sha256"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G audit --level S
+  H_base=$(audit_hit_n "$R_OUT")
+  [ -n "$H_base" ] && ok "C6⓪b 前置取证：audit 命中行可解析（N=$H_base）" || bad "C6⓪b 前置取证：audit 输出无「命中 N / M 项」行"
+  # 对照组：整个 archived/ 移走 → 命中数应与之相等（目录存在本身不是「退场」证据）
+  mv "$T/.agents/notes/archived" "$T/archived.aside"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G audit --level S
+  H_noarch=$(audit_hit_n "$R_OUT")
+  [ -n "$H_noarch" ] && ok "C6⓪c 前置取证：无 archived 对照可解析（N=$H_noarch）" || bad "C6⓪c 前置取证：对照 audit 无命中行"
+  assert_eq "C6① 空 archived/（无 manifest）不计「退场」——与无 archived 同分" "$H_noarch" "$H_base"
+  mv "$T/archived.aside" "$T/.agents/notes/archived"
+  # 有归档件但未封印（无 manifest）→ 仍不得分（fail-closed：形态不是证据）
+  mkdir -p "$T/.agents/notes/archived/process"
+  cat > "$T/.agents/notes/archived/process/2026-01-01-old.md" <<'EOF'
+# Agent Note: archived old
+
+Status: implemented
+
+## Problem
+why
+
+## Decision
+what
+EOF
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G audit --level S
+  H_unsealed=$(audit_hit_n "$R_OUT")
+  assert_eq "C6② 归档件未封印（无 manifest）→ 仍不计「退场」" "$H_noarch" "$H_unsealed"
+  # 封印后 → 计为命中（相对「无 archived」基线恰 +1）
+  run_script "$T" .meta/gates/archive-verify.sh seal
+  assert_eq "C6③ 归档封印 seal exit 0" 0 "$S_RC"
+  assert_file_has "C6④ manifest 真登记该归档件" "$T/.agents/notes/archived/manifest.sha256" "2026-01-01-old.md"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G audit --level S
+  H_sealed=$(audit_hit_n "$R_OUT")
+  assert_eq "C6⑤ 已封印归档件 → 计「退场」（无 archived 基线 +1）" "$((H_noarch + 1))" "$H_sealed"
+}
+
 s42_observe_monorepo_subcomponents
 s43_observe_pipeline_awareness
 s44_observe_subcomponent_blocking
@@ -3920,6 +4160,7 @@ s75_alternatives_110_reject
 s76_alternatives_exemptions
 s77_gate_chain_alternatives
 s78_wave13_acceptance
+s79_wave1_contract_c1_c2_c3_c6
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
 [ "$FAIL" -eq 0 ] || exit 1
