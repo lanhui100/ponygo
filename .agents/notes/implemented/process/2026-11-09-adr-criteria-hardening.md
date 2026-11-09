@@ -85,6 +85,8 @@ A4/CI 的判定真源）在**同一变更内**改，且**关键字逐字相同**
   搬进去等于在真源里复制一份 CLI 的成对哨兵判据——同一判据两处实现必然漂移（P9），下次改投影形态
   要两处同改。取舍：宁可让 1.9b 的看守面窄（CLI 的 `status`/`audit` + A5 的 `audit --run-specs` 步），
   也不造第二个真值；归属写进 `maturity-ladder.md`，不靠读者猜。
+  **该方案已独立留痕**为 `rejected/process/2026-11-09-move-1.9b-criterion-into-verify-note.md`
+  （提案原文 + 当时比较过的处置），重开这个提案前先读它，别从零重推。
 - **保持 `[ -d archived ]` 判据**：否决。`init` 预建四态目录 → "建了个空目录"白送一分，与 2.1
   （`README`/`.gitkeep` 占位不计分）、2.3（空 spec 不计分）的既有口径直接矛盾；而且它奖励的是
   "留了位置"，不是"真退场"——本仓这次唯一一次真实归档（`2026-09-08` 停止线条）恰好证明了两者可分：
@@ -101,6 +103,10 @@ A4/CI 的判定真源）在**同一变更内**改，且**关键字逐字相同**
 
 ## Consequences
 
+- **本条的剩余面已由后一条收口**：`rejected` 理由的**标点绕过**（纯 CJK 标点曾被算作理由）与
+  `## ` 标题的**围栏绕过**（写进代码围栏的示例标题曾被算作在场）在本条只作为诚实边界登记，
+  实际收口见 `implemented/process/2026-11-09-upgrade-apply-and-fence-aware-criteria.md`
+  （CJK 标点闭集剥离 + 围栏感知标题判定 + `upgrade apply` 写路径）。
 - 每个 `implemented/` 决策不能只"删掉提案标题"就完事：`## Decision` 必须在场——迁移的真实工作量是
   **改写正文**，`git mv` 只是第一步。`rejected/` 的每一条都要能回答"为什么否决"，重开争执时有据可查。
 - 1.9b 的看守面是分层的：本地 `ponygo status` + CI 的 A5 workflow `ponygo audit --run-specs` 步

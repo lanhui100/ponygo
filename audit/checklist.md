@@ -29,7 +29,7 @@
 |---|---|---|---|---|
 | 1.4 | 状态与内容一致 | 无缺 `Status:` 头的决策文件（README 豁免） | `find .agents/notes -name '*.md' ! -name 'README.md' -exec grep -L '^Status:' {} + \| wc -l` 应为 0 | 给缺头文件补 `# Agent Note:` + `Status:` 前两行 |
 | 1.5 | 有 Alternatives 节 | 每条决策含候选方案 | `grep -rl 'Alternatives' .agents/notes \| wc -l` ≥ 记录总数 | 补 `## Alternatives considered` |
-| 1.6 | 被否选项留痕 | `rejected/` 非空（排除 `.gitkeep`/`README.md` 占位）或含被否候选记录 | `ls -A .agents/notes/rejected/ \| grep -v -e '^\.gitkeep$' -e '^README\.md$' \| wc -l` > 0 | 把被否决的方案落一条 `rejected/` 记录 |
+| 1.6 | 被否选项留痕 | `rejected/` 非空（排除 `.gitkeep`/`README.md` 占位），且每条留痕可追溯到来源（provenance 链回被否决方案所在的 ADR）——空目录/占位文件不计分，"某处提过一嘴"不算留痕 | `ls -A .agents/notes/rejected/ \| grep -v -e '^\.gitkeep$' -e '^README\.md$' \| wc -l` > 0；人工确认该条 `Status:` 首词为 `rejected` 且带实质理由（1.7 机械判）并有 provenance 句/段 | 把被否决的方案落一条 `rejected/{class}/` 记录（一行否决理由 + 指向来源 ADR 的 provenance + 当时的备选比较） |
 | 1.7 | 触发条件枚举化 | 有一份"何时必须写"的枚举清单 | `grep -rl "非平凡变更\|触发规则" .meta/ docs/ 2>/dev/null \| head -1` | 写触发规则（命中任一即写，纯机械豁免） |
 | 1.8 | supersession 当次处理 | 新增记录时替换旧记录在同一变更 | `git log --oneline -5 -- .agents/notes \| wc -l` 且无残留被弃记录（语义） | 靠 review；建 supersession 审计习惯 |
 
