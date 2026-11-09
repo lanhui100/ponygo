@@ -50,6 +50,21 @@ LINK_LINE=$(printf '%s\n' "$R_ERR" | grep '审计深度：' | head -n1)
 assert_contains "CA-17 GO：linked 档位行非空且为 M" "$LINK_LINE" "审计深度：M 档"
 assert_eq "CA-17 GO：同提交两工作树档位与触发理由逐字一致" "$MAIN_LINE" "$LINK_LINE"
 
+# CA-17 反例：父仓已有 3 位贡献者，普通无 .git 子目录不得继承父仓贡献者升 M。
+CHILD="$MAIN/plain-child"
+mkdir -p "$CHILD"
+printf '普通子目录，不是独立 git 工作树\n' > "$CHILD/README.txt"
+assert_missing "CA-17 反例夹具：普通子目录自身确无 .git" "$CHILD/.git"
+run_json "$CHILD" audit --json
+assert_rc_is "CA-17 反例：普通子目录保持既有退出码" 0 "$R_RC"
+assert_json_shape "CA-17 普通无 .git 子目录" "$R_RC" "$R_OUT"
+json_assert "CA-17 反例 GO：父仓三贡献者不得让普通子目录误判 M，期望 S=10" "$R_OUT" "
+if d.get('tier') != 'S': fail.append(d.get('tier'))
+if d.get('total') != 10: fail.append(d.get('total'))
+"
+assert_contains "CA-17 反例 GO：人读必须为 S 档" "$R_ERR" "审计深度：S 档"
+assert_not_contains "CA-17 反例 NOGO：不得伪造继承父仓的贡献者理由" "$R_ERR" "贡献者≥3"
+
 # ---------- CA-18：非 git / unborn HEAD 不崩溃、不伪造贡献者 ----------
 for mode in non-git unborn; do
   T=$(new_case)

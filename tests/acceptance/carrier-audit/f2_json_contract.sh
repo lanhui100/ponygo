@@ -106,6 +106,29 @@ if 'status' in dr: fail.append(dr)
 assert_contains "CA-12 GO：人读明确漂移未判定" "$R_ERR" "漂移未判定"
 assert_not_contains "CA-12 NOGO：unknown 不得冒充零漂移" "$R_ERR" "漂移 0 处"
 
+# CA-12 反例：比较器 cmp 本身失败时不得把未比较列成真实漂移。
+T=$(new_case); make_gov_repo "$T" 1 || finish
+BADBIN=$(new_case)
+cat > "$BADBIN/cmp" <<'CMPEOF'
+#!/usr/bin/env bash
+exit 2
+CMPEOF
+chmod +x "$BADBIN/cmp"
+PATH="$BADBIN:$PATH" cmp -s /dev/null /dev/null
+assert_rc_is "CA-12(cmp-exit2) 夹具：PATH 注入 cmp 确实以 2 失败" 2 "$?"
+run_json "$T" PATH="$BADBIN:$PATH" audit --json
+assert_rc_is "CA-12(cmp-exit2) 比较失败不改变既有退出码" 0 "$R_RC"
+assert_json_shape "CA-12(cmp-exit2)" "$R_RC" "$R_OUT"
+json_assert "CA-12(cmp-exit2) GO：比较器失败必须为 count=-1/files=[]，不得列漂移" "$R_OUT" "
+dr = d.get('drift', {})
+if dr.get('count') != -1: fail.append(dr)
+if dr.get('files') != []: fail.append(dr)
+if 'status' in dr: fail.append(dr)
+"
+assert_contains "CA-12(cmp-exit2) GO：人读明确漂移未判定" "$R_ERR" "漂移未判定"
+assert_not_contains "CA-12(cmp-exit2) NOGO：不得把 cmp exit 2 当真实漂移" "$R_ERR" "漂移 15 处"
+assert_not_contains "CA-12(cmp-exit2) NOGO：不得冒充真实零漂移" "$R_ERR" "漂移 0 处"
+
 run_json "$T" audit --json
 assert_rc_is "CA-13 正对照：真实比较完成不改退出码" "$UNKNOWN_RC" "$R_RC"
 assert_json_shape "CA-13 judged-zero" "$R_RC" "$R_OUT"
