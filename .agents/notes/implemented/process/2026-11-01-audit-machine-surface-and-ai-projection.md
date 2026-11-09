@@ -64,14 +64,16 @@ Status: implemented
   在此之前 `observe probe` 的定位是"可复现的取证入口"，不是"更强的门"。
 - 命令面仍六条；`ponygo probe` 会被当作未知参数拒绝（probe 只在 `observe` 之后合法）。
 
-## 实施加固（终审 7 条 BLOCKING 收口，2026-11-01 第三轮）
+## Consequences
+
+**第二批处置（终审 7 条 BLOCKING 收口，2026-11-01 第三轮）**：
 
 1. **CE-7（契约澄清，不改实现）**：F8-10「不带 `--json` 时人类 stdout 逐字节不变」的本意是
    **同一二进制**在带/不带 `--json` 下内容与退出码一致，**不是**「与上一版二进制逐字节相同」——
    后者会禁止任何新判据上线（2.5 的 SKIPPED 说明本就在 stdout 结论行）。故 2.6 的
    「SKIPPED」说明保留在 stdout（与 2.5 同先例），WARN 走 stderr；不变量只剩「退出码不变」。
 2. **`status --json` 的 `skeleton` 三字段是路径数组**（不是计数），`missing_files` 口径严格等于
-   `UPGRADE_UNIVERSE` 的 13 条（`.meta/meta.yaml` 不在其中，它由 0.4/目录存在性另判）——
+   `UPGRADE_UNIVERSE` 的 15 条（`.meta/meta.yaml` 不在其中，它由 0.4/目录存在性另判）——
    人类「骨架文件缺口：N」与 JSON 数组同源同数。
 3. **probe 的三处硬失败**：`--service` 与声明 service 双缺 → exit 1（不再静默 `unknown_service`）；
    `--timeout` 只接受正整数（`0` 等于取消预算，实测会静默挂死）、默认 10s；

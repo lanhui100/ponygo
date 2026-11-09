@@ -26,8 +26,12 @@ Status: implemented
 - **未发布状态诚实标注**：README 注明"未发布时按本地自算口径"，bootstrap 钉 tag 后 installer
   与载荷同源；校验只保 `ponygo` 不保 `install.sh` 自身（信任链起点诚实标注）。
 
-框架规则细节（含否决的替代方案、采纳理由、影响面）见 `revisions/accepted/2026-09-14-upgrade-drift-report.md` 同级；
-本项目发布规则随 `revisions/accepted/` 框架规则体系统一归档。
+发布链的**现行口径**落在两处物理载体上：`README.md` §3.1（安装主命令块的 fail-closed 守卫，
+以及 `PONYGO_VERSION` / `PONYGO_SHA256` 的对外契约）与 `install.sh`（空 SHA 显式拒绝、bootstrap
+与载荷同钉 tag、未设版本时回退 main 的兼容分支）。校验和的发布物本身由
+`.github/workflows/release.yml` 在 tag-push 时产出（`ponygo.sha256`）。
+`revisions/` 轨道已冻结（框架级决策归口 `.agents/notes/`），故发布规则不再托管到该树——
+决策见 `implemented/process/2026-11-09-revisions-track-frozen.md`。
 
 ## Alternatives considered
 

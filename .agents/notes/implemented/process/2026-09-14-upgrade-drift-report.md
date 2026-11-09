@@ -1,4 +1,4 @@
-# Agent Note: upgrade 骨架漂移报告（宇宙 = s14 十文件 + --check）
+# Agent Note: upgrade 骨架漂移报告（宇宙 = s14 十五文件 + --check）
 
 Status: implemented
 
@@ -14,11 +14,13 @@ meta.yaml 的 level 是实例状态、README 真实 vs 占位）——一个"全
 按 consultant 三选一裁决（Q2=A，`docs/dev-team/reviews/review-TASK-003-consultant.md`），
 `cmd_upgrade` 重写为**骨架漂移报告**：
 
-- **比对宇宙 = s14 的 10 个文件精确路径**（notes/README、skills/README、docs-tier/README、
+- **比对宇宙 = s14 的 15 个文件精确路径**（notes/README、skills/README、docs-tier/README、
   write-adr/SKILL、verify-note.sh、governance-review/SKILL、gates/README、change-review/SKILL、
-  notes/AGENTS、archived/AGENTS），不另立清单文件（第三副本，slop 第一条）；
+  notes/AGENTS、archived/AGENTS、gates/adr-verify.sh、gates/adr-verify.spec.sh、gates/ci-verify.sh、
+  gates/archive-verify.sh、gates/archive-verify.spec.sh），不另立清单文件（第三副本，slop 第一条）；
+  唯一真源是 CLI 的 `UPGRADE_UNIVERSE` 变量；
 - 宇宙外文件（根 README、meta.yaml、已填 constitution、根 AGENTS.md/CLAUDE.md、classes.local、
-  exemptions）根本不进报告；报告头一句话盲区声明"本报告只覆盖 s14 宇宙内十文件；宇宙外文件无基线，不判定"；
+  exemptions）根本不进报告；报告头一句话盲区声明"本报告只覆盖 s14 宇宙内十五文件；宇宙外文件无基线，不判定"；
 - **漂移是观察不是承诺**：默认 exit 0；新增 `--check`（漂移**或缺口**非零，供 CI）；
 - donot 三场景：无 `.meta/`（真·空目录温和跳过 / 有实质内容 die 指引 init）、非 git WARN、
   无 level 按 L0（空值/畸形仍走 0.4 FAIL）；
@@ -44,5 +46,5 @@ meta.yaml 的 level 是实例状态、README 真实 vs 占位）——一个"全
 - 教训归因：`gates/README.md` 无"假漂移"一字，真源 = TASK-002 双审（不塞进用户可见输出）。
 
 > 实证出处注：漂移报告形态源自 TASK-002 双审实测（"缺失才写"语义下基线从未建立、宇宙外文件
-> 无基线）与 TASK-003 consultant 三选一裁决；本仓库为 ponygo 框架自身实例，宇宙十文件与模板
+> 无基线）与 TASK-003 consultant 三选一裁决；本仓库为 ponygo 框架自身实例，宇宙十五文件与模板
 > 逐字节一致（s14 保证），`upgrade --check` exit 0。

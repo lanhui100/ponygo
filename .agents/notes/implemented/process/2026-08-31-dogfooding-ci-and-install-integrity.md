@@ -5,9 +5,9 @@ Status: implemented
 ## Problem
 
 外部审核 EXTERNAL-001 的 P0 组：ponygo 的全部可信性来自"实证"，但自身治理停在
-`level: 0` 字面合法态——`.meta/decisions/` 与 `revisions/` 均为空（决策散在
-docs/dev-team/ 与 git log）；回归门禁 tests/run.sh 无任何钩子/CI 挂载，宣称的
-pass=117 无法独立复跑；README 首推的 curl|bash 安装无版本钉住、无完整性校验。
+`level: 0` 字面合法态——决策记录的家 `.agents/notes/`（审核当时路径为 `.meta/decisions/`）与
+`revisions/` 均为空（决策散在 docs/dev-team/ 与 git log）；回归门禁 tests/run.sh 无任何钩子/CI
+挂载，宣称的 pass=117 无法独立复跑；README 首推的 curl|bash 安装无版本钉住、无完整性校验。
 
 ## Decision
 

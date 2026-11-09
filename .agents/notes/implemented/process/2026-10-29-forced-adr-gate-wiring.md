@@ -175,12 +175,16 @@ ponygo 自身纪律是"每门配负样本执行判据"，框架仓自己豁免�
    `git`/`find`/`bash` 与判定真源，挂死面来自本机文件系统而非外部代码。真要兜底应由钩子层加
    `timeout` 包装——那是实例可编辑面（A3），不在框架资产里硬编码。
 
-**覆盖缺口（本次实测发现，登记为已知限制）**：`.agents/notes/README.md` 规定每条决策必含
-`## Alternatives considered`，但判定真源 `verify-note.sh` 的 1.1–1.9 **不含**这一项
-（`grep -c Alternatives verify-note.sh` = 0）。因此 A1/门禁**不拒绝**缺备选节的 ADR——
-A2 把该 case 做成**探针**：真源将来覆盖则断言拒绝，未覆盖则 `WARN` 并声明不计入 PASS。
-为什么不在 A1 里补一个 grep：同一判据两份实现必然漂移（P9），且会造成"`ponygo status` 绿、
-门禁红"的双真值。**修法方向**：给 verify-note 加 1.10（真源侧），由下一次框架变更统一做。
+**覆盖缺口（已关闭，留档备查）**：`.agents/notes/README.md` 规定每条决策必含
+`## Alternatives considered`，而本条记录落笔时判定真源 `verify-note.sh` 的 1.1–1.9 **不含**这一项
+（当时 `grep -c Alternatives verify-note.sh` = 0），因此 A1/门禁**不拒绝**缺备选节的 ADR——
+A2 当时把该 case 做成**探针**（真源覆盖则断言拒绝，未覆盖则 `WARN` 且声明不计入 PASS）。
+**现状：该缺口已由判据 1.10 关闭**——真源补齐硬判据（`1.10 <path>：缺 ## Alternatives considered…`，
+非 WARN），A2 的同一 case 同批由探针翻转为硬断言，探针的存在理由随之消失。
+决策与豁免口径见 `implemented/process/2026-10-29-ponygo-self-level2-and-alternatives-gate.md`
+（决定二），判据本体见 `maturity-ladder.md` §5 的 1.10 行。
+不在 A1 里补 grep 的理由不变：同一判据两份实现必然漂移（P9），且会造成"`ponygo status` 绿、
+门禁红"的双真值。
 
 **配套改动（同一次变更内）**：
 

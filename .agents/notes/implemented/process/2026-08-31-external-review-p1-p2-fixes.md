@@ -26,7 +26,8 @@ revisions/decisions 双轨边界不清、缺 LICENSE、HANDOFF 过期陈述、do
 6. **classes.local 扩展口**（P2-1）：`decisions/classes.local` 每行一个额外 class 名即被
    判据 1.4 认可；封闭集本身不放开，扩展须显式落盘留审计载体。
 7. **revisions 双轨边界成文**（P2-2）：框架规则演进 → `revisions/`；本仓库工程决策 →
-   `.meta/decisions/`，写入 `revisions/README.md`。
+   `.agents/notes/`（本条落笔时该轴还叫 `.meta/decisions/`，双根拆分后迁到 `.agents/`），
+   写入 `revisions/README.md`。
 8. **补 MIT LICENSE**（P2-3）。
 9. **HANDOFF 过期陈述标注**（P2-4）：头部注明其为历史快照，"尚未 commit/剩余工作"已过时。
 10. **docs-tier 模板落地**（P2-5）：占位 README 扩为含 8-tier 可填模板表 + slop checklist +

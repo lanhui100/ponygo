@@ -24,12 +24,19 @@
 | 1 | 贡献者规模 | `git shortlog -sne \| wc -l` | ≥ 3 |
 | 2 | 多技术栈 | `for f in package.json Cargo.toml go.mod pyproject.toml pom.xml; do [ -e $f ] && echo; done \| wc -l` | ≥ 2 种 manifest |
 | 3 | monorepo | `find packages -maxdepth 2 -name package.json \| wc -l` | ≥ 3 包 |
-| 4 | 治理已有痕迹 | `ls -d .github .githooks .gitlab-ci.yml bitbucket-pipelines.yml ci Jenkinsfile 2>/dev/null \| wc -l` | ≥ 1（已有治理，值得深查） |
-
-> 信号 4 刻意**不含 `.meta`**：ponygo init 自己的产物不应把项目自动升 M 档——否则 S 档只剩"零治理"项目可用，与"S 档 = 起步/小项目"的口径矛盾（EXTERNAL-001 P1-2）。CLI 实现当前取 `.github .githooks` 两个探针。
+| 4 | 治理已有痕迹 | `for g in .github .githooks; do [ -e $g ] && echo; done \| wc -l` | ≥ 1（已有治理，值得深查） |
 | 5 | 强合规要求 | `ls -d compliance traceability docs/compliance docs/traceability 2>/dev/null \| wc -l` | ≥ 1（粗筛命中，合规评判仍靠 review） |
 
 **判定规则**：任一重型信号命中 → **M 档**；全部未命中 → **S 档**。
+
+> 表内命令 = `ponygo audit` 的**实测口径**（共 5 条探测，与 CLI 自适应分支逐条对齐；
+> 触发原因会打印成 `贡献者≥3(N)` / `已有治理痕迹×N` 等）。两处口径差异如实标注，不写成"满足"：
+> - **信号 4 当前只探 2 个路径**（`.github` / `.githooks`）。候选集本可更宽
+>   （`.gitlab-ci.yml` / `bitbucket-pipelines.yml` / `ci` / `Jenkinsfile`），但 `ponygo` 单文件 CLI
+>   只实现了这两个——非 GitHub/本地钩子形态的治理痕迹**不升档**，需要时用
+>   `ponygo audit --level M` 强制升档。
+> - 信号 4 刻意**不含 `.meta`**：ponygo init 自己的产物不应把项目自动升 M 档——否则 S 档只剩"零治理"
+>   项目可用，与"S 档 = 起步/小项目"的口径矛盾（EXTERNAL-001 P1-2）。
 （`ponygo audit --level S|M` 可强制指定，覆盖自适应。）
 
 ---

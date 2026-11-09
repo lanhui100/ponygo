@@ -113,9 +113,11 @@ Status: implemented
   与任务书是否在场无关；decision 登记后两种情形都静默）。这是幂等重写/无命中即删的正常表现，
   不是漂移——任务书本来就是"给尚未被 ponygo 接管的资产开清单"，不需要也不该被"修"成恒定字节。
 
-## 验收
+## Consequences
 
-1. `bash .agents/skills/write-adr/verify-note.sh` → 0（整树 1.1–1.9）
+**验收面（本条的物理凭证清单，实测 rc）**：
+
+1. `bash .agents/skills/write-adr/verify-note.sh` → 0（整树 1.1–1.10）
 2. `bash .meta/gates/ci-verify.sh` → 0
 3. `grep -rn '\-\-yes' README.md checklists/ revisions/ .agents/notes/ .meta/` → 只剩历史/被否决备选性质的提及
    （本条的 Alternatives ① 与 R15 的作废说明），无"用法"层残留

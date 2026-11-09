@@ -105,13 +105,13 @@
 
 | # | 子项 | 判定 | 检查命令 | 失败动作 |
 |---|---|---|---|---|
-| 4.1 | 有归档目录 | `archived/` 存在 | `ls -d .agents/notes/archived 2>/dev/null` | 建 `archived/`（只有 implemented 能进） |
+| 4.1 | 有已封印归档件 | 存在 `manifest.sha256` 且含 **≥1 条格式合法的登记条目**（`<64 位小写 hex><两空格><仓库相对路径>`；空 `archived/`、空 manifest、只有注释行均记 0 分）。**只判存在性与格式**——"manifest 与归档件逐一一致"不在此项，由 A6 `archive-verify.sh check` 判（4.2）；只读纪律下 `audit` 不执行仓库脚本 | `test -s .agents/notes/archived/manifest.sha256 && grep -cE '^[0-9a-f]{64}  [^ ]' .agents/notes/archived/manifest.sha256`（输出 ≥1） | 归档第一条 implemented：`git mv` 进 `archived/{class}/` 后跑 `bash .meta/gates/archive-verify.sh seal` |
 
 ### 机制层（M 档追加）
 
 | # | 子项 | 判定 | 检查命令 | 失败动作 |
 |---|---|---|---|---|
-| 4.2 | 归档被冻结 | 归档件有哈希封印 manifest | `ls .agents/notes/archived/*.manifest* 2>/dev/null \| head -1` | 加 append-only 封印 manifest |
+| 4.2 | 归档被冻结 | 归档件有哈希封印 manifest，且封印与归档件双向一致（篡改/缺条目/孤儿/重复/非追加写入任一即不成立）——此项**由 A6 判**，审计层只给命令、不代跑（`audit` 是只读命令，不执行仓库脚本） | 人工跑 `bash .meta/gates/archive-verify.sh check`（manifest 的固定家 = `.agents/notes/archived/manifest.sha256`；CI 由 A4 第 3 段与 A5 自动跑） | 恢复归档件原字节，或按 append-only 跑 `bash .meta/gates/archive-verify.sh seal` 补封印 |
 | 4.3 | 搜索隔离过期 | `.rgignore` 排除 archived | `grep -l archived .rgignore 2>/dev/null` | 在 `.rgignore` 排除 archived 目录 |
 | 4.4 | 退场有判据 | 归档/拒绝不是按字数或年龄 | 语义，见 `scorecard.md` 问④ | 靠 review |
 | 4.5 | supersession 同 PR | 被取代记录同一变更删除 | 语义 | 靠 review |

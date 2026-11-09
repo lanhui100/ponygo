@@ -22,7 +22,7 @@ Status: implemented
 | 类别 | 判定标准 | 统一归属 | Git 追踪 | 退场与生命周期 |
 |---|---|---|---|---|
 | **决策 (Decisions)** | 为什么这样设计 | `.agents/notes/` | 跟踪入库 | 永久留存，状态机迁移 |
-| **证据 (Receipts)** | 怎么证明满足验收 | `docs/dev-team/receipts/` | 跟踪入库（纯文本为主） | 随里程碑封印冻结 |
+| **证据 (Receipts)** | 怎么证明满足验收 | `.dev-team/receipts/` | 随 `.dev-team/` 一致（本仓 `.gitignore` 声明为本地工作区）：收据本身是本地物理凭证，**可入库的形态**是把关键 ≤ 20 行蒸馏进交付说明/对应文档的家 | 按里程碑保留最终态，过程重试件随 scratch 清理 |
 | **中间产物 (Scratch)** | 过程副产品，可再生产 | `.scratch/<yyyy-mm-dd>-<topic>/` | **强忽略（不入库）** | 关单即删 / TTL 7 天 |
 
 ### 2. `.scratch/` 契约（单一临时边界）
@@ -40,7 +40,7 @@ Status: implemented
 ### 4. 退场机制与轻量门禁
 
 - **双轨退场**：关单验收时主动清理对应的 `.scratch/<topic>/` 目录；超过 7 天的未清理目录由周期性命令兜底清理。
-- **轻量门禁资产**：在 `.meta/gates/scratch-hygiene.sh` 落地门禁并在 `ci-verify.sh` 挂载，负样本由 `scratch-hygiene.spec.sh` 保障：
+- **轻量门禁资产**：在 `.meta/gates/scratch-hygiene.sh` 落地门禁，负样本由 `scratch-hygiene.spec.sh` 保障，二者挂在**远端层 A5**（`.github/workflows/ponygo-governance.yml` 的独立 step）——刻意**不进** A4 `ci-verify.sh` 的三段：新实例没有这两个资产，挂进 A4 会让它们成为「缺文件即静默跳过」的可选门。A4 仍是三段（全树 ADR 格式 + 暂存区门自检 + 归档封印），不因本门增长：
   - **E1**：`git ls-files` 严禁出现 `.scratch/` 路径（违例 exit 1）；
   - **E2**：`.gitignore` 必须显式声明 `.scratch/` 忽略（违例 exit 1）；
   - **E3**：构建及发布链路文件不得显式引用 scratch 目录（违例 exit 1）。

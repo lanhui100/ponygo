@@ -39,6 +39,14 @@ rc = 0。**声明 `docs-tier` 是另一件事，本次不做**：为过判据去
 已激活"变成一句没人兑现的声明（`.meta/docs-tier/README.md` 仍是模板态），而 `off` 又需要一条
 独立的"为何不上文档分层"决策——两者都超出本次范围，故留 2.5 为 SKIPPED + WARN 的诚实状态。
 
+**取代链（决定一的退场面）**：决定一取代 `2026-09-08-framework-stops-at-l1.md`（"框架自身停在
+L1"的停止线裁决）。该条的现行依据已被现状全部推翻——`meta.yaml` 现为 `level: 2`、
+`.githooks/pre-commit` 已入库、其 Decision 第 4 项引用的
+`proposed/process/2026-09-08-l2-minimal-representable.md` 在树内不存在（`proposed/` 为空）。
+故该条已 `git mv` 归档至 `.agents/notes/archived/process/`（由 `archive-verify.sh seal` 封印、
+原貌冻结），**不再作为现行权威**；其登记的重开条件（贡献者 ≥ 2 或出现需跨提交守住的硬约束）
+已由本决策满足结案，不再另行重开。
+
 **决定二：新增判据 1.10——每条决策必含 `## Alternatives considered`（硬判据，不是 WARN）。**
 
 - 实现：`verify-note.sh` 在 `check_one` 内、1.8 之后新增一段，沿用同一 `fail()` 与同一遍历入口

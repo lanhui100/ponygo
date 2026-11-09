@@ -216,7 +216,8 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
   - ob2 的挂载证据是形状判据（grep 载体里出现 `audit-diff`），真执行证据是 `audit-diff` 本身（K7）。
 
 > 清单：落地看 `checklists/observe-init.md`，审计与门禁看 `checklists/observe-audit.md`；
-> 决策背景与被否选项见 `revisions/proposed/2026-10-25-observe-dimension.md`。
+> 决策背景与被否选项见 `revisions/accepted/2026-10-25-observe-dimension.md`（`revisions/` 轨道已冻结，
+> 仅作历史只读；框架级新决策归口 `.agents/notes/`）。
 
 ---
 

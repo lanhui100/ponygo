@@ -81,7 +81,7 @@ WP5 假漂移完整清单、`docs/AGENTS.md` 实测 SAME（推翻"先例已分�
 
 | 发现 | 处置 |
 |---|---|
-| P0-1 停止线 | **采纳**：仓库保持 `level: 1`；L1→L2 可达性由 `tests/run.sh` 场景 28 证明；ADR `implemented/process/2026-09-08-framework-stops-at-l1.md`；§5/§6 矛盾登记为 proposed ADR |
+| P0-1 停止线 | **采纳**：仓库保持 `level: 1`；L1→L2 可达性由 `tests/run.sh` 场景 28 证明；ADR `archived/process/2026-09-08-framework-stops-at-l1.md`（该条已归档、原貌冻结——现任裁决见 `implemented/process/2026-10-29-ponygo-self-level2-and-alternatives-gate.md`）；§5/§6 矛盾登记为 proposed ADR |
 | P0-2 只读不变量 | **采纳**：回滚默认执行；新增 opt-in `ponygo audit --run-specs`（timeout / dry-run 跳过 / 递归 SKIPPED 不计入 PASS / 聚合全部失败）；revision `2026-09-08-spec-execution-opt-in.md` |
 | P0-3 s14 | **采纳**：不激活 docs-tier，s14 原样保留 |
 | P0-4 WP5 | **采纳**：暂缓，登记 proposed ADR（比对宇宙未定义） |

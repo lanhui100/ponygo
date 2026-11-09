@@ -13,8 +13,24 @@ ponygo 的命令面已经是六条核心命令 + `observe`，但每次加能力�
 
 旗标预算固定为三条：
 
-1. 只允许三类旗标：`--json`（机读输出）、`--dry-run`（安全预览）、`--run-specs`
+1. 只允许三类**新增**旗标：`--json`（机读输出）、`--dry-run`（安全预览）、`--run-specs`
    （显式执行仓库脚本的 opt-in）。
+   **存量登记（预算外的既有旗标，不构成新增授权）**：usage 已公布的旗标按"登记现状 + 仍禁新增"
+   处置，不追溯删除，也不据此放宽预算——
+   - `upgrade --check`（与 `observe upgrade --check` 同名同义）：同一条命令的**检查模式**——
+     `upgrade` 默认只观察（drift 打印、exit 0），`--check` 把同一份漂移报告转成 CI 可消费的
+     非零退出码；不新增行为路径，只新增退出码语义。
+   - `init --repair-skeleton`：骨架补缺的**单一职责模式**（只补缺失、绝不覆盖既有文件），
+     可与 `--dry-run` 叠加预览；它存在的理由正是不为补缺另开顶层命令
+     （见 `implemented/process/2026-08-30-six-command-surface.md`）。
+   - 参数型旗标（`audit --level`；`observe init --kind/--service/--dims/--anchor-<dim>/--reason-<dim>`、
+     `observe audit --level/--base/--strict`、`observe probe --endpoint/--env/--timeout`、
+     `observe --skill-dir/--mapping`）：只承载**调用者输入**（目标档位、基线 rev、声明值、投递目标），
+     不改变默认行为，归属见 `implemented/process/2026-11-09-observe-dimension.md`。
+   - `observe init --force`（**行为开关，登记为唯一例外**）：覆盖已存在的 `docs/observability.yaml`
+     必须显式 `--force`，缺它时真实落盘 exit 2（绝不静默覆盖）。它不新增行为路径——默认行为是
+     "不覆盖"，`--force` 只把"覆盖"这一条从不可表达变成可显式表达；与 `init`（只补缺失、绝不覆盖）
+     构成互补的两条写纪律。
 2. 其余能力一律用**位置子命令**或**默认行为**表达，不新增行为开关：
    - 归档封印门禁用 `archive-verify.sh check|seal`（位置子命令，零旗标）；
    - 状态/审计的新信息默认打印（如骨架漂移、环境依赖行），不设 `--drift` / `--doctor`；

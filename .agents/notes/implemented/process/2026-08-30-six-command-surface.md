@@ -1,4 +1,4 @@
-# Agent Note: 命令面固定为六条
+# Agent Note: 命令面固定为六条核心命令（外加 observe 治理维度）
 
 Status: implemented
 
@@ -9,8 +9,12 @@ Status: implemented
 
 ## Decision
 
-命令面固定六条：`init`（铺骨架）/ `audit`（体检打分）/ `status`（现状 + 级自洽验证）/
+命令面固定六条**核心命令**：`init`（铺骨架）/ `audit`（体检打分）/ `status`（现状 + 级自洽验证）/
 `upgrade`（升级纪律）/ `sync`（宪法投影）/ `retire`（退级/退场）。
+六条之外另有 `observe` 治理维度——它是一组位置子命令
+（`observe status|init|audit|upgrade|probe`），不是第七条核心命令：不占命令面序号、不新增
+行为开关（旗标预算见 `2026-11-07-flag-budget.md`），决策见
+`implemented/process/2026-11-09-observe-dimension.md`。
 新能力的默认处置是并入现有命令或拒绝，不是加命令。命令面唯一真源是 CLI 的
 `usage()` + case 分发，改动必须同步 README §3/§1 表/§7 索引三处。
 
