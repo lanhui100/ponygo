@@ -105,7 +105,7 @@ assert_file "CA-08 夹具：旧 .githooks/pre-commit 仍存在（禁 fallback �
 assert_eq "CA-08 夹具：hooksPath 已切到空目录" ".empty-hooks" "$(git_at "$H" config core.hooksPath)"
 audit_m "$H"
 assert_rc_is "CA-09 负样本：同一 probe 让 2.4 FAIL" 1 "$M_HRC"
-assert_eq "CA-08 GO：空 hooksPath 目录不得加分（恰少 1）" 1 "$((WIRED_HIT-M_HIT))"
+assert_eq "CA-08 GO：空 hooksPath 目录的 M 两项 hook 分均不得获取（恰少 2）" 2 "$((WIRED_HIT-M_HIT))"
 assert_contains "CA-09 GO：人读报告未接线" "$M_HOUT" "治理门接线：未接线"
 assert_contains "CA-09 GO：人读沿用 probe 的钩子缺失因由" "$M_HOUT" "钩子缺失：.empty-hooks/pre-commit"
 assert_contains "CA-09 GO：2.4 输出同一失败因由" "$M_HOUT" "2.4 本地层未接 ADR 门：钩子缺失：.empty-hooks/pre-commit"
