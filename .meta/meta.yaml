@@ -24,3 +24,9 @@ level: 2
 # 文档分层启用声明（判据 2.5）：on = 启用并校验「已激活文档家清单」；
 # 本仓自 2026-10-29 起启用（决策见 .agents/notes/implemented/process/2026-10-29-activate-docs-tier.md）。
 docs-tier: on
+
+# AI 常载命约投影声明（判据 2.6）：on = sync 生成 AGENTS.md / CLAUDE.md 并校验成对哨兵块；
+# off = 显式 opt-out（不生成任何 AI 投影文件）；未声明 = SKIPPED 不计入 PASS。
+# 本仓自 2026-11-09 起启用：常载命约 = .meta/constitution/constitution.md 的投影体，
+# 其中第 6 条命约链到 docs/AGENTS.md。
+ai-surface: on
