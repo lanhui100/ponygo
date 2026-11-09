@@ -454,9 +454,134 @@ Status: implemented
 git -C "$R" add -A >/dev/null 2>&1
 expect_reject_with "implemented 含中文复合提案标题（## 验收清单）拒绝" "$R" '提案时代标题'
 
+# ---------- 13. Wave-2 §D1：CJK 标点不得充作 rejected 理由 ----------
+# 旧口径只剥 ASCII 标点 → `Status: rejected — 。` 有 3 字节，被当作"有理由"放行。
+# 新口径剥掉 CJK 标点闭集后剩余正文须 ≥2 字节（两面同实现：verify-note.sh 的 reason_body_of）。
+R=$(new_repo cjk-punct-reason)
+write_adr "$R" .agents/notes/rejected/process/2026-11-09-cjk-punct.md '# Agent Note: 理由只有中文句号
+
+Status: rejected — 。
+
+## Problem
+
+样本：rejected 的理由只有一个中文句号。
+
+## Proposal
+
+样本提案。
+
+## Alternatives considered
+
+- 样本。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_reject_with "rejected 理由只有中文句号拒绝（文案带「缺一行理由」）" "$R" '缺一行理由'
+# 正向对照：真实理由带句末中文标点 → 放行（剥离不得误伤正文——逐个 UTF-8 序列剥，不按字节）
+write_adr "$R" .agents/notes/rejected/process/2026-11-09-cjk-punct.md '# Agent Note: 理由带句末句号
+
+Status: rejected — 与 X 冲突。
+
+## Problem
+
+样本：真实理由 + 句末标点。
+
+## Proposal
+
+样本提案。
+
+## Alternatives considered
+
+- 样本。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_accept "rejected 真实理由带句末中文标点放行" "$R"
+
+# ---------- 14. Wave-2 §D2：围栏代码块内的标题不计入（1.8） ----------
+R=$(new_repo fenced-decision)
+write_adr "$R" .agents/notes/implemented/process/2026-11-09-fenced-decision.md '# Agent Note: Decision 只在围栏内
+
+Status: implemented
+
+## Problem
+
+样本：把 ## Decision 塞进示例代码块骗过在场判据。
+
+## 示例
+
+```text
+## Decision
+what
+```
+
+## Alternatives considered
+
+- 样本。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_reject_with "围栏内的 ## Decision 不算在场（文案带「缺 ## Decision」）" "$R" '缺 ## Decision'
+# 正向对照：真标题在围栏外、围栏内只有示例 → 放行（围栏外的标题必须仍被认）
+write_adr "$R" .agents/notes/implemented/process/2026-11-09-fenced-decision.md '# Agent Note: Decision 在围栏外
+
+Status: implemented
+
+## Problem
+
+样本：围栏外有真标题，围栏内只有示例片段。
+
+## Decision
+
+what
+
+```text
+示例片段，不含标题语义
+```
+
+## Alternatives considered
+
+- 样本。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_accept "围栏外 ## Decision + 围栏内示例放行" "$R"
+
+# ---------- 15. Wave-2 §D2：未闭合围栏 → 其后全部视为围栏内（fail-closed） ----------
+R=$(new_repo unclosed-fence)
+write_adr "$R" .agents/notes/implemented/process/2026-11-09-unclosed.md '# Agent Note: 未闭合围栏
+
+Status: implemented
+
+## Problem
+
+样本：围栏从不闭合，其后的标题都在围栏内。
+
+```text
+## Decision
+what
+
+## Alternatives considered
+other'
+git -C "$R" add -A >/dev/null 2>&1
+expect_reject_with "未闭合围栏后的 ## Decision 不算在场（文案带「缺 ## Decision」）" "$R" '缺 ## Decision'
+
+# ---------- 16. Wave-2 §D2：围栏内的 ## Alternatives considered 不计入（1.10） ----------
+R=$(new_repo fenced-alternatives)
+write_adr "$R" .agents/notes/proposed/process/2026-11-09-fenced-alt.md '# Agent Note: 备选节只在围栏内
+
+Status: proposed
+
+## Problem
+
+样本：把 ## Alternatives considered 塞进示例代码块骗过 1.10。
+
+## Proposal
+
+样本提案。
+
+```text
+## Alternatives considered
+other
+```'
+git -C "$R" add -A >/dev/null 2>&1
+expect_reject_with "围栏内的 ## Alternatives considered 不算在场（文案带「缺 ## Alternatives considered」）" "$R" '缺 ## Alternatives considered'
+
 if [ "$FAIL" -ne 0 ]; then
   printf '[%s] 未通过：门禁的拒绝/放行语义与预期不符（见上方 FAIL）\n' "$SPEC" >&2
   exit 1
 fi
-printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节 + 1.7 rejected 理由 + 1.8 ## Decision/中文提案标题（含复合词）均已证明（exit 0）\n' "$SPEC"
+printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节 + 1.7 rejected 理由（含 CJK 标点）+ 1.8 ## Decision/中文提案标题（含复合词）+ 围栏感知（1.8/1.10）均已证明（exit 0）\n' "$SPEC"
 exit 0

@@ -76,6 +76,41 @@ done < <(find "$NOTES_DIR" -mindepth 2 -maxdepth 2 -type d -exec basename {} \; 
 DATE_OK=0
 date -d @0 '+%Y' >/dev/null 2>&1 && DATE_OK=1
 
+# ---------- 判定辅助（CLI 侧有同名同语义实现，两面必须逐项一致） ----------
+# 理由正文归一（判据 1.7）：剥掉 ASCII 空白/标点、em dash、全角空格与 CJK 标点闭集后，剩下的才是"正文"。
+# 为什么每个字符用独立 -e 而不是 `[。，、]` 字符组：C locale 下字符组按**字节**匹配，会连带剥掉恰好
+# 共享字节的正常汉字（`突` = E7 AA 81 含 0x81，而 `、` = E3 80 81 也含 0x81）——逐序列替换是精确的
+# UTF-8 序列匹配，不误伤正文。闭集见契约 §D1；新增标点须两侧（本脚本 + CLI 影子）同时加。
+reason_body_of() {
+  printf '%s' "$1" | tr -d '[:space:][:punct:]' \
+    | sed -e 's/—//g' -e 's/　//g' \
+          -e 's/，//g' -e 's/。//g' -e 's/、//g' -e 's/；//g' -e 's/：//g' \
+          -e 's/！//g' -e 's/？//g' -e 's/「//g' -e 's/」//g' -e 's/『//g' -e 's/』//g' \
+          -e 's/（//g' -e 's/）//g' -e 's/【//g' -e 's/】//g' -e 's/《//g' -e 's/》//g' \
+          -e 's/…//g' -e 's/～//g' -e 's/·//g' -e 's/﹁//g' -e 's/﹂//g' \
+          -e 's/“//g' -e 's/”//g' -e 's/‘//g' -e 's/’//g'
+}
+
+# 围栏感知的标题探测（判据 1.8 / 1.10）：只在**围栏外**认 `## ` 标题。
+# 围栏口径（契约 §D2）：以「可选缩进 + ```」开头的行**切换**围栏态（```text / ```bash 等语言标记同样
+# 是围栏行）；未闭合的围栏 → 其后全部视为围栏内（fail-closed：不认里面的标题，宁可误拒不可假绿）。
+# 用法：heading_outside_fence <文件> <ERE（不含 ^ 锚）>；返回 0 = 围栏外存在该标题。
+# 实操陷阱（写 ADR 时最常见的一次踩坑）：正文里想**引用**三反引号时，不要让那三个字符出现在行首
+#   （含缩进行首）——围栏态只看"行首可选缩进 + ```"，一行以它开头就会被当成围栏开启；若之后没有配对
+#   的关闭行，其后**所有真标题**都落进围栏内 → 该条 ADR 会自判 1.8 缺 ## Decision + 1.10 缺
+#   ## Alternatives considered（看起来像门禁误报，其实是文档里多了一行行首反引号）。安全写法：行内引用
+#   （前后加文字）或加前缀字符（如 `> ` / `- ` 之外的文字前缀），别让三个反引号起行。
+# 未识别的边界（诚实条款）：4 空格缩进式代码块、HTML 注释里的标题仍会被认（只认 ``` 围栏，见契约）；
+# 需要更严时由 review 兜，本脚本不冒充全 Markdown 解析器。
+heading_outside_fence() {
+  awk -v pat="$2" '
+    /^[[:space:]]*```/ { infence = !infence; next }
+    infence { next }
+    $0 ~ ("^" pat) { found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' "$1" 2>/dev/null
+}
+
 check_one() { # $1 = 决策文件路径
   local f="$1" b rel lc slashes st stline rest sep reason_body d8
   b="${f##*/}"
@@ -116,10 +151,9 @@ check_one() { # $1 = 决策文件路径
   # 也不能解释现状为何是现在这样（状态轴有位置、没有内容）。
   # 豁免：`archived/`（冻结，与 1.8/1.10 同口径）、README.md / AGENTS.md（函数入口早退）、
   # `*.zh.md`（双语配对，随母语版同批补齐，不独立判——与 1.10 同口径）。
-  # 计数口径（2026-11-09 收紧）：剥掉**分隔符本身**与空白/ASCII 标点/em dash 后，剩余正文 ≥2 字节。
-  # 旧口径只数非空白字节 → `Status: rejected ——`（纯分隔符）被放行——分隔符不是理由。纯标点同理。
-  # 残留边界（诚实条款）：CJK 标点（如单独一个 `。`）不被本口径剥离（C locale 下按字节匹配会误删汉字），
-  # 故"仅一个中文句号"仍可能过——属已知残余，靠 review 兜。
+  # 计数口径（Wave-2 §D1）：剥掉**分隔符本身**、空白、ASCII 标点、em dash 与 **CJK 标点**闭集后，
+  # 剩余正文 ≥2 字节才算理由。`Status: rejected ——`（纯分隔符）与 `Status: rejected — 。`（纯中文标点）
+  # 都必须拒——分隔符/标点不是理由。CJK 标点的剥离实现在 reason_body_of（逐 UTF-8 序列，不误伤汉字）。
   if [ "$st" = "rejected" ] && [ "$lc" != "archived" ]; then
     case "$b" in
       *.zh.md) ;;
@@ -139,7 +173,7 @@ check_one() { # $1 = 决策文件路径
         fi
         # 正文 = 剥掉 ASCII 空白/标点（含 - 与 :）与 em dash 之后的剩余字节。
         # `——` / `--` / `:` / `?!` 之类的"纯分隔符/纯标点"在这里归零 → 缺一行理由。
-        reason_body=$(printf '%s' "$rest" | tr -d '[:space:][:punct:]' | sed 's/—//g')
+        reason_body=$(reason_body_of "$rest")
         if [ "$sep" != "1" ] || [ "$(printf '%s' "$reason_body" | wc -c | tr -d ' ')" -lt 2 ]; then
           fail "1.7 $f：rejected 缺一行理由（Status: rejected — <为何否决>）"
         fi
@@ -155,23 +189,21 @@ check_one() { # $1 = 决策文件路径
   # ——中文标题无词间空格，边界匹配会让 `## 验收清单` / `## 风险与缓解` / `## 待办事项` 等复合词
   # 全部放行（等于开个洞）。前缀匹配的代价：`## 计划性…` 这类以禁词开头的标题也一并拒（fail-closed，可接受）。
   # 豁免：archived/ 冻结（详见 `.agents/notes/README.md` 格式契约与 write-adr 技能）。
+  # 围栏口径（Wave-2 §D2）：全部标题判定走 heading_outside_fence——**围栏内的标题不算在场**，
+  # 否则把 `## Decision` 塞进示例代码块即可骗过 1.8/1.10（Wave-1 遗留的假绿面）。
   case "$lc" in
     implemented)
-      grep -qE '^## Decision([[:space:]]|$)' "$f" \
+      heading_outside_fence "$f" '## Decision([[:space:]]|$)' \
         || fail "1.8 $f：implemented 缺 ## Decision（迁移即改写：现在时 Decision 必须在场）"
-      grep -qE '^## (Proposal|Plan|Migration plan|Acceptance criteria)([[:space:]]|$)' "$f" \
+      heading_outside_fence "$f" '## (Proposal|Plan|Migration plan|Acceptance criteria)([[:space:]]|$)' \
         && fail "1.8 $f：implemented 含提案时代标题（## Proposal/## Plan/## Migration plan/## Acceptance criteria）"
-      grep -qE '^## (提案|计划|迁移计划|验收标准|验收|风险|待办)' "$f" \
+      heading_outside_fence "$f" '## (提案|计划|迁移计划|验收标准|验收|风险|待办)' \
         && fail "1.8 $f：implemented 含提案时代标题（中文提案时代标题：## 提案/## 计划/## 迁移计划/## 验收标准/## 验收/## 风险/## 待办，按前缀匹配含复合词）"
       ;;
     proposed|rejected)
-      grep -qE '^## Proposal([[:space:]]|$)' "$f" || fail "1.8 $f：$lc 缺 ## Proposal"
-      grep -qE '^## Decision([[:space:]]|$)' "$f" && fail "1.8 $f：$lc 含现在时 ## Decision（提案伪装成决定）" ;;
+      heading_outside_fence "$f" '## Proposal([[:space:]]|$)' || fail "1.8 $f：$lc 缺 ## Proposal"
+      heading_outside_fence "$f" '## Decision([[:space:]]|$)' && fail "1.8 $f：$lc 含现在时 ## Decision（提案伪装成决定）" ;;
   esac
-  # 已知弱点（诚实条款，不修解析器）：本脚本按**行**匹配标题，不解析 Markdown 结构——
-  # 围栏代码块（``` 或 ~~~ 内）里出现的 `## Decision` / `## Alternatives considered` 同样会被认作在场，
-  # 故"把标题塞进示例代码块"可绕过 1.8/1.10 的在场判据。为什么不修：修它需要真正的 Markdown 解析
-  # （bash 里即半个解析器），收益低而回归面大；这道缝由 review（人看全文）兜，本脚本不冒充已闭。
   # 1.10 必含 ## Alternatives considered（2026-10-29 起为硬判据，不是 WARN）
   # 为何是硬判据：备选与落选理由是"非平凡决策"的实质内容——只写 Decision 的 ADR 会退化为
   # 事后记录，重新面对同一岔路时答不出"为什么不选另一条"；契约本就在 .agents/notes/README.md
@@ -182,7 +214,7 @@ check_one() { # $1 = 决策文件路径
     *.zh.md) ;;
     *)
       if [ "$lc" != "archived" ]; then
-        grep -qE '^## Alternatives considered([[:space:]]|$)' "$f" \
+        heading_outside_fence "$f" '## Alternatives considered([[:space:]]|$)' \
           || fail "1.10 $f：缺 ## Alternatives considered（非平凡决策必须写明被否决的备选与理由）"
       fi
       ;;

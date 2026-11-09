@@ -114,6 +114,33 @@ ai_surface_state() {
   esac
 }
 
+# ---------- 判据辅助（与判定真源 verify-note.sh 逐项同语义；两面必须一起改） ----------
+# 理由正文归一（判据 1.7）：剥掉 ASCII 空白/标点、em dash、全角空格与 CJK 标点闭集后，剩下的才是"正文"。
+# 为什么每个字符用独立 -e 而不是 `[。，、]` 字符组：C locale 下字符组按**字节**匹配，会连带剥掉恰好
+# 共享字节的正常汉字（`突` = E7 AA 81 含 0x81，而 `、` = E3 80 81 也含 0x81）——逐序列替换是精确的
+# UTF-8 序列匹配，不误伤正文。闭集见 .dev-team/wave-2-contract.md §D1。
+reason_body_of() {
+  printf '%s' "$1" | tr -d '[:space:][:punct:]' \
+    | sed -e 's/—//g' -e 's/　//g' \
+          -e 's/，//g' -e 's/。//g' -e 's/、//g' -e 's/；//g' -e 's/：//g' \
+          -e 's/！//g' -e 's/？//g' -e 's/「//g' -e 's/」//g' -e 's/『//g' -e 's/』//g' \
+          -e 's/（//g' -e 's/）//g' -e 's/【//g' -e 's/】//g' -e 's/《//g' -e 's/》//g' \
+          -e 's/…//g' -e 's/～//g' -e 's/·//g' -e 's/﹁//g' -e 's/﹂//g' \
+          -e 's/“//g' -e 's/”//g' -e 's/‘//g' -e 's/’//g'
+}
+
+# 围栏感知的标题探测（判据 1.8；判定真源 1.10 用同一实现）：只在**围栏外**认 `## ` 标题。
+# 围栏口径（契约 §D2）：以「可选缩进 + ```」开头的行**切换**围栏态；未闭合围栏 → 其后全部视为围栏内
+# （fail-closed：不认里面的标题）。返回 0 = 围栏外存在该标题。
+heading_outside_fence() {
+  awk -v pat="$2" '
+    /^[[:space:]]*```/ { infence = !infence; next }
+    infence { next }
+    $0 ~ ("^" pat) { found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' "$1" 2>/dev/null
+}
+
 # 读取当前成熟度级（缺 yaml 或缺 level 行视为 L0；把 "L2" 形式防御性归一为 2）
 # 注意：level 行存在但值为空/畸形时**不默认归 0**——返回空串交由 verify_ladder 0.4 判 FAIL，
 # 否则 "level: "（空值）会被宽放成假 L0 PASS（判据宽于 maturity-ladder 真源）。
@@ -227,8 +254,10 @@ Status: <status>
 
 - `Status:` 词表，必须与所在文件夹一致：`proposed` / `implemented` / `rejected — <一行理由>` /
   `archived`。两条硬约束（判据 1.7 机械校验）：
-  - `rejected` **必须**带一行理由——`rejected` 之后跟分隔符（`—` / `-` / `:` 任一）且其后至少
-    2 个非空白字符；理由是否决理由唯一不可再生的载体，没有理由的 rejected 只是"有人不同意"；
+  - `rejected` **必须**带一行理由——`rejected` 之后跟分隔符（`—` / `-` / `:` 任一），且**剥掉分隔符、
+    空白、ASCII 标点与中文标点（，。、；：！？「」『』（）【】《》…～· 等）之后**剩余正文 ≥2 字节；
+    理由是否决理由唯一不可再生的载体，没有理由的 rejected 只是"有人不同意"——`Status: rejected — 。`
+    这类"标点充理由"同样 FAIL；`*.zh.md` 豁免（译文随母语版补齐）；
   - `archived/` 下 `Status:` 允许 `implemented`（**冻结保留原态**，归档不改一字）或 `archived`。
 - 正文从 `## Problem` 开始（先写动机，脱离方案也成立）。
 - **正文骨架按 lifecycle 分态**（时态与状态一致，判据 1.8 机械校验）：
@@ -241,9 +270,26 @@ Status: <status>
   | `archived/` | 冻结豁免（保持归档时原貌，不改一字） |
 
 - 每条必含 `## Alternatives considered`（候选方案与落选原因）——记录无备选的决策是在邀请重开争执。
+- **围栏内的标题不算在场**（判据 1.8/1.10 机械校验的固有口径）：``` 围栏（含 ` ```text ` 等语言标记）
+  里的 `## Decision` / `## Alternatives considered` 是**示例文本**，不能充当在场证据；围栏未闭合时
+  其后所有标题都视为围栏内（fail-closed）。要证明"真有这个节"，把标题写在围栏外。
 - **迁移即改写**：proposed → implemented 时，移动文件的那次变更必须把 `## Proposal`
   改写为现在时 `## Decision`（Acceptance criteria / Risks 折叠进 `## Consequences`）；
   提案用现在时等于"未批准的方案伪装成已落地的决定"，状态轴在正文层失真。
+
+## 非机械项（机械影子管不到、必须靠 review 的三件事）
+
+判据 1.7 / 1.8 / 1.10 只锁**影子**（行文形态），不锁**内容成立性**。下面三项永远靠人看：
+`verify-note.sh` 通过 **不等于**这三项成立——**不要把"门绿了"当成"理由成立"的证据**。
+
+| 非机械项 | 机械影子能判（1.7/1.8/1.10） | 影子判不到（靠 review） | 抽查动作 |
+|---|---|---|---|
+| 1.7 理由**是否成立** | 同一行有分隔符，且剥掉标点后正文 ≥2 字节 | 理由是"真理由"还是"为过门编的一句"（如"时间不够"不是否决理由） | `governance-review` 决策面抽查：抽 N 条 rejected 读理由，问"半年后能靠它避免重开争执吗" |
+| 1.8 标题**是否真是决定** | `implemented/` 有 `## Decision`、无提案时代标题（含中文等价） | Decision 写的是"已落地的决定"还是"计划换个说法的复述" | `change-review`：对照代码现实读 Decision，问"这句话现在为真吗" |
+| 1.10 备选**是否真权衡** | 有 `## Alternatives considered` 节（围栏外的标题才算） | 备选是真实候选（有落选理由）还是凑数的稻草人 | `governance-review`：抽条读备选，问"其中一条是否曾被真正认真考虑过" |
+
+三者的共同结构：**机械影子只能证明"这一节在场"，不能证明"这一节有内容"**。影子存在的意义是把
+"忘了写"降为零成本拦截，而不是替人做判断（P6 形意分离：形可机械、意靠 review）。
 
 ## 触发规则（谁在什么时候必须写）
 
@@ -587,6 +633,12 @@ staged 后又在工作区改动（两个方向：暂存合法→工作区改、�
 故把标题塞进示例代码块可绕过 1.8/1.10 的在场判据（与 1.10 同型弱点）。修它需要真 Markdown 解析，
 收益低而回归面大；这道缝由 review 兜，spec 不冒充已闭。
 
+**围栏感知（Wave-2 §D2）**：1.8/1.10 的标题判定只认**围栏外**的 `## 标题`——``` 围栏内的标题是示例文本，
+不算在场；未闭合围栏 → 其后全部视为围栏内（fail-closed）。故"把 `## Decision` 塞进示例代码块"不再能骗过
+A1/A2/A4，spec 用「围栏内 Decision / 围栏内 Alternatives / 未闭合围栏」三负样本 + 一条"围栏外真标题"正向对照看守。
+**CJK 标点（Wave-2 §D1）**：1.7 的理由正文口径先剥分隔符、空白、ASCII 标点与中文标点（，。、；：！？「」
+『』（）【】《》…～· 等），剩余 ≥2 字节才算理由——`Status: rejected — 。` 必拒。
+
 `## Alternatives considered` 曾是 notes/README 的强制契约而判定真源 1.1–1.9 不判（覆盖缺口），
 该 case 当时做成**探针**；**2026-10-29 起 1.10 落地为硬判据**，探针随之翻转为**硬断言**：
 只有 `## Problem` + `## Decision` 的非法样本必须被拒，且文案须含判据号 `1.10`（补救可执行）。
@@ -845,8 +897,8 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 3. **选 lifecycle**：`proposed/`（未实现）或 `implemented/`（随本次变更落地）。
 4. **选 class**：`feature`（新能力）/ `bug-fix`（修缺陷）/ `simplification`（减复杂度）/ `architecture`（交付源码的结构）/ `process`（代码周围的工具与流程）/ `testing`（测试策略）。都不够 → 考虑在 `notes/classes.local` 登记领域扩展（扩展即一次治理决策，须评审）。
 5. **建文件**：`.agents/notes/{lifecycle}/{class}/$(date +%F)-<topic-title>.md`，topic 用 kebab-case。
-6. **头部**：第一行 `# Agent Note: <title>`，空行，`Status: <与所在目录一致>`。`rejected` 必须带一行理由：`Status: rejected — <为何否决>`（分隔符 `—` / `-` / `:` 任一，其后至少 2 个非空白字符；判据 1.7 机械校验，缺理由即 FAIL）。
-7. **正文**：`## Problem` 开头（先写动机，脱离方案也成立），随后**按 lifecycle 选骨架**（判据 1.8 机械校验标题是否与 lifecycle 匹配，选错即 FAIL：`implemented/` 缺 `## Decision` 即 FAIL，含提案时代标题——英文 `## Proposal`/`## Plan`/`## Migration plan`/`## Acceptance criteria` 或中文 `## 提案`/`## 计划`/`## 迁移计划`/`## 验收标准`/`## 验收`/`## 风险`/`## 待办`——同样 FAIL；判据 1.10 机械校验 `## Alternatives considered` 必须在场）：
+6. **头部**：第一行 `# Agent Note: <title>`，空行，`Status: <与所在目录一致>`。`rejected` 必须带一行理由：`Status: rejected — <为何否决>`（分隔符 `—` / `-` / `:` 任一，且**剥掉分隔符、空白、ASCII 与中文标点**后正文 ≥2 字节；判据 1.7 机械校验：`Status: rejected — 。` 这种「标点充理由」同样 FAIL；`*.zh.md` 豁免）。
+7. **正文**：`## Problem` 开头（先写动机，脱离方案也成立），随后**按 lifecycle 选骨架**（判据 1.8 机械校验标题是否与 lifecycle 匹配，选错即 FAIL：`implemented/` 缺 `## Decision` 即 FAIL，含提案时代标题——英文 `## Proposal`/`## Plan`/`## Migration plan`/`## Acceptance criteria` 或中文 `## 提案`/`## 计划`/`## 迁移计划`/`## 验收标准`/`## 验收`/`## 风险`/`## 待办`——同样 FAIL；判据 1.10 机械校验 `## Alternatives considered` 必须在场）。**围栏感知**：``` 围栏内的 `## 标题` 是示例文本，不算在场（未闭合围栏 → 其后全部视为围栏内）；要证明「真有这一节」，标题写在围栏外：
 
    | lifecycle | 骨架 |
    |---|---|
@@ -872,6 +924,9 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 - 反例（豁免）：格式化重排、重命名局部变量 → 无行为/契约/结构/流程变化，不写。
 - 边界（靠 review）：重构归哪个 class？判别器是"可观察行为是否改变"——改变 → feature/bug-fix；只为减复杂度 → simplification（`refactor` 刻意缺席，与之重叠）。
 - 反例（时态错位，判据 1.8）：proposed/ 下用现在时 `## Decision` → 未批准的提案伪装成已落地的决定；proposed 必须用 `## Proposal`，迁移到 implemented 时再改写为现在时。
+- 反例（标点充理由，判据 1.7）：`Status: rejected — 。`（理由只有一个中文句号）→ 剥掉标点后正文为 0 字节，FAIL（`1.7 <path>：rejected 缺一行理由`）；正确写法是写出**为什么**否决（如「与 X 冲突」「成本高于收益」）。
+- 反例（围栏内标题，判据 1.8/1.10）：把 `## Decision` 放进 ```` ```text ```` 示例块 → 围栏内标题不算在场，仍报「缺 ## Decision」；示例代码块里的标题只是**样例**，不是本文档的节。
+- 反例（围栏吞标题，判据 1.8/1.10）：prose 里想引用三反引号时，别让它出现在行首（含缩进行首）——会被当成围栏开启；改为行内引用或加前缀字符。
 - 反例（缺备选节，判据 1.10，硬判据）：只写 `## Problem` + `## Decision` 就收尾、整条没有 `## Alternatives considered` → 决策史只剩结论没有权衡，读者无法判断"为什么不选另一条"，ADR 退化成事后记录；`verify-note.sh` 直接 FAIL（`1.10 <path>：缺 ## Alternatives considered`）。补法：把当时真正比较过的 2–3 个备选各写一行 + 各自落选理由（"没考虑过备选"本身不是备选——说明该决定还不该落条）。
 - 反例（混合 ADR）：把"治理已采纳"（implemented/process）与"架构尚在设计中、零代码"（proposed/architecture）写进同一条 implemented note → 状态轴失真（未实施伪装成已落地）+ class 污染；**多类拆条**（notes/README 触发规则）：已落地的记 implemented，未实施的记 proposed。
 - 反例（文不对题，判据管不到、靠 review）：TUI 定价表单功能（11 个 `.rs` 含大文件重写）携带一篇多协议声明 proposed note——标题与代码无关，ADR 成了"有记录无对应"的伪证据；正确做法是为 TUI 定价单独立条，把多协议提案放到它自己的分支/commit。
@@ -879,7 +934,8 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 
 ## 验证与报告
 
-- 跑 **`bash .agents/skills/write-adr/verify-note.sh`**（无参 = 整树；或跟单个相对路径）——机械影子 1.1–1.10（1.1–1.8：路径两轴/文件名/日期/Status/骨架标题；1.9：整树文档有家 docs/AGENTS.md 存在；1.10：必含 `## Alternatives considered`）全部通过，exit 0 才算完成；FAIL 项逐条修复重跑。
+- 跑 **`bash .agents/skills/write-adr/verify-note.sh`**（无参 = 整树；或跟单个相对路径）——机械影子 1.1–1.10（1.1–1.8：路径两轴/文件名/日期/Status（含 rejected 一行理由）/骨架标题（围栏感知）；1.9a：整树文档有家 docs/AGENTS.md 存在；1.10：必含 `## Alternatives considered`，围栏感知）全部通过，exit 0 才算完成；FAIL 项逐条修复重跑。
+- **门绿 ≠ 内容成立**：1.7 理由是否成立、1.8 标题是否真是决定、1.10 备选是否真权衡属**非机械项**（见 `.agents/notes/README.md` 同名小节），由 `governance-review` / `change-review` 抽查。
 - 归档/迁移落 `archived/` 时，再跑 **`bash .meta/gates/archive-verify.sh seal`**（追加封印，append-only）与 **`bash .meta/gates/archive-verify.sh check`**（只读校验：逐条比对归档件哈希，应为 exit 0；报「未封印」/「哈希不符」即欠账）。
 - 再跑 `ponygo status`：决策数 +1、L1 判据全绿、无卫生 WARN。
 - 报告格式：新记录路径 + lifecycle/class + 一句话 Problem + verify-note.sh 的通过输出。
@@ -970,6 +1026,41 @@ done < <(find "$NOTES_DIR" -mindepth 2 -maxdepth 2 -type d -exec basename {} \; 
 DATE_OK=0
 date -d @0 '+%Y' >/dev/null 2>&1 && DATE_OK=1
 
+# ---------- 判定辅助（CLI 侧有同名同语义实现，两面必须逐项一致） ----------
+# 理由正文归一（判据 1.7）：剥掉 ASCII 空白/标点、em dash、全角空格与 CJK 标点闭集后，剩下的才是"正文"。
+# 为什么每个字符用独立 -e 而不是 `[。，、]` 字符组：C locale 下字符组按**字节**匹配，会连带剥掉恰好
+# 共享字节的正常汉字（`突` = E7 AA 81 含 0x81，而 `、` = E3 80 81 也含 0x81）——逐序列替换是精确的
+# UTF-8 序列匹配，不误伤正文。闭集见契约 §D1；新增标点须两侧（本脚本 + CLI 影子）同时加。
+reason_body_of() {
+  printf '%s' "$1" | tr -d '[:space:][:punct:]' \
+    | sed -e 's/—//g' -e 's/　//g' \
+          -e 's/，//g' -e 's/。//g' -e 's/、//g' -e 's/；//g' -e 's/：//g' \
+          -e 's/！//g' -e 's/？//g' -e 's/「//g' -e 's/」//g' -e 's/『//g' -e 's/』//g' \
+          -e 's/（//g' -e 's/）//g' -e 's/【//g' -e 's/】//g' -e 's/《//g' -e 's/》//g' \
+          -e 's/…//g' -e 's/～//g' -e 's/·//g' -e 's/﹁//g' -e 's/﹂//g' \
+          -e 's/“//g' -e 's/”//g' -e 's/‘//g' -e 's/’//g'
+}
+
+# 围栏感知的标题探测（判据 1.8 / 1.10）：只在**围栏外**认 `## ` 标题。
+# 围栏口径（契约 §D2）：以「可选缩进 + ```」开头的行**切换**围栏态（```text / ```bash 等语言标记同样
+# 是围栏行）；未闭合的围栏 → 其后全部视为围栏内（fail-closed：不认里面的标题，宁可误拒不可假绿）。
+# 用法：heading_outside_fence <文件> <ERE（不含 ^ 锚）>；返回 0 = 围栏外存在该标题。
+# 实操陷阱（写 ADR 时最常见的一次踩坑）：正文里想**引用**三反引号时，不要让那三个字符出现在行首
+#   （含缩进行首）——围栏态只看"行首可选缩进 + ```"，一行以它开头就会被当成围栏开启；若之后没有配对
+#   的关闭行，其后**所有真标题**都落进围栏内 → 该条 ADR 会自判 1.8 缺 ## Decision + 1.10 缺
+#   ## Alternatives considered（看起来像门禁误报，其实是文档里多了一行行首反引号）。安全写法：行内引用
+#   （前后加文字）或加前缀字符（如 `> ` / `- ` 之外的文字前缀），别让三个反引号起行。
+# 未识别的边界（诚实条款）：4 空格缩进式代码块、HTML 注释里的标题仍会被认（只认 ``` 围栏，见契约）；
+# 需要更严时由 review 兜，本脚本不冒充全 Markdown 解析器。
+heading_outside_fence() {
+  awk -v pat="$2" '
+    /^[[:space:]]*```/ { infence = !infence; next }
+    infence { next }
+    $0 ~ ("^" pat) { found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' "$1" 2>/dev/null
+}
+
 check_one() { # $1 = 决策文件路径
   local f="$1" b rel lc slashes st stline rest sep reason_body d8
   b="${f##*/}"
@@ -1010,10 +1101,9 @@ check_one() { # $1 = 决策文件路径
   # 也不能解释现状为何是现在这样（状态轴有位置、没有内容）。
   # 豁免：`archived/`（冻结，与 1.8/1.10 同口径）、README.md / AGENTS.md（函数入口早退）、
   # `*.zh.md`（双语配对，随母语版同批补齐，不独立判——与 1.10 同口径）。
-  # 计数口径（2026-11-09 收紧）：剥掉**分隔符本身**与空白/ASCII 标点/em dash 后，剩余正文 ≥2 字节。
-  # 旧口径只数非空白字节 → `Status: rejected ——`（纯分隔符）被放行——分隔符不是理由。纯标点同理。
-  # 残留边界（诚实条款）：CJK 标点（如单独一个 `。`）不被本口径剥离（C locale 下按字节匹配会误删汉字），
-  # 故"仅一个中文句号"仍可能过——属已知残余，靠 review 兜。
+  # 计数口径（Wave-2 §D1）：剥掉**分隔符本身**、空白、ASCII 标点、em dash 与 **CJK 标点**闭集后，
+  # 剩余正文 ≥2 字节才算理由。`Status: rejected ——`（纯分隔符）与 `Status: rejected — 。`（纯中文标点）
+  # 都必须拒——分隔符/标点不是理由。CJK 标点的剥离实现在 reason_body_of（逐 UTF-8 序列，不误伤汉字）。
   if [ "$st" = "rejected" ] && [ "$lc" != "archived" ]; then
     case "$b" in
       *.zh.md) ;;
@@ -1033,7 +1123,7 @@ check_one() { # $1 = 决策文件路径
         fi
         # 正文 = 剥掉 ASCII 空白/标点（含 - 与 :）与 em dash 之后的剩余字节。
         # `——` / `--` / `:` / `?!` 之类的"纯分隔符/纯标点"在这里归零 → 缺一行理由。
-        reason_body=$(printf '%s' "$rest" | tr -d '[:space:][:punct:]' | sed 's/—//g')
+        reason_body=$(reason_body_of "$rest")
         if [ "$sep" != "1" ] || [ "$(printf '%s' "$reason_body" | wc -c | tr -d ' ')" -lt 2 ]; then
           fail "1.7 $f：rejected 缺一行理由（Status: rejected — <为何否决>）"
         fi
@@ -1049,23 +1139,21 @@ check_one() { # $1 = 决策文件路径
   # ——中文标题无词间空格，边界匹配会让 `## 验收清单` / `## 风险与缓解` / `## 待办事项` 等复合词
   # 全部放行（等于开个洞）。前缀匹配的代价：`## 计划性…` 这类以禁词开头的标题也一并拒（fail-closed，可接受）。
   # 豁免：archived/ 冻结（详见 `.agents/notes/README.md` 格式契约与 write-adr 技能）。
+  # 围栏口径（Wave-2 §D2）：全部标题判定走 heading_outside_fence——**围栏内的标题不算在场**，
+  # 否则把 `## Decision` 塞进示例代码块即可骗过 1.8/1.10（Wave-1 遗留的假绿面）。
   case "$lc" in
     implemented)
-      grep -qE '^## Decision([[:space:]]|$)' "$f" \
+      heading_outside_fence "$f" '## Decision([[:space:]]|$)' \
         || fail "1.8 $f：implemented 缺 ## Decision（迁移即改写：现在时 Decision 必须在场）"
-      grep -qE '^## (Proposal|Plan|Migration plan|Acceptance criteria)([[:space:]]|$)' "$f" \
+      heading_outside_fence "$f" '## (Proposal|Plan|Migration plan|Acceptance criteria)([[:space:]]|$)' \
         && fail "1.8 $f：implemented 含提案时代标题（## Proposal/## Plan/## Migration plan/## Acceptance criteria）"
-      grep -qE '^## (提案|计划|迁移计划|验收标准|验收|风险|待办)' "$f" \
+      heading_outside_fence "$f" '## (提案|计划|迁移计划|验收标准|验收|风险|待办)' \
         && fail "1.8 $f：implemented 含提案时代标题（中文提案时代标题：## 提案/## 计划/## 迁移计划/## 验收标准/## 验收/## 风险/## 待办，按前缀匹配含复合词）"
       ;;
     proposed|rejected)
-      grep -qE '^## Proposal([[:space:]]|$)' "$f" || fail "1.8 $f：$lc 缺 ## Proposal"
-      grep -qE '^## Decision([[:space:]]|$)' "$f" && fail "1.8 $f：$lc 含现在时 ## Decision（提案伪装成决定）" ;;
+      heading_outside_fence "$f" '## Proposal([[:space:]]|$)' || fail "1.8 $f：$lc 缺 ## Proposal"
+      heading_outside_fence "$f" '## Decision([[:space:]]|$)' && fail "1.8 $f：$lc 含现在时 ## Decision（提案伪装成决定）" ;;
   esac
-  # 已知弱点（诚实条款，不修解析器）：本脚本按**行**匹配标题，不解析 Markdown 结构——
-  # 围栏代码块（``` 或 ~~~ 内）里出现的 `## Decision` / `## Alternatives considered` 同样会被认作在场，
-  # 故"把标题塞进示例代码块"可绕过 1.8/1.10 的在场判据。为什么不修：修它需要真正的 Markdown 解析
-  # （bash 里即半个解析器），收益低而回归面大；这道缝由 review（人看全文）兜，本脚本不冒充已闭。
   # 1.10 必含 ## Alternatives considered（2026-10-29 起为硬判据，不是 WARN）
   # 为何是硬判据：备选与落选理由是"非平凡决策"的实质内容——只写 Decision 的 ADR 会退化为
   # 事后记录，重新面对同一岔路时答不出"为什么不选另一条"；契约本就在 .agents/notes/README.md
@@ -1076,7 +1164,7 @@ check_one() { # $1 = 决策文件路径
     *.zh.md) ;;
     *)
       if [ "$lc" != "archived" ]; then
-        grep -qE '^## Alternatives considered([[:space:]]|$)' "$f" \
+        heading_outside_fence "$f" '## Alternatives considered([[:space:]]|$)' \
           || fail "1.10 $f：缺 ## Alternatives considered（非平凡决策必须写明被否决的备选与理由）"
       fi
       ;;
@@ -1444,6 +1532,56 @@ warn_adaptation_pending() {
   return 0
 }
 
+# ---------- D5：revisions/ 轨道冻结守卫（只读报告；WARN-only，不改退出码/不进 hit） ----------
+# 语义（Wave-2 契约 §D5）：框架轨道 `revisions/` 自冻结提交起不得再变——新决策一律落
+# `.agents/notes/`。守卫只回答一个问题：冻结提交之后，`revisions/` 的**决策记录**有没有变。
+# 判定对象 = `revisions/**/*.md`，但**排除 `revisions/README.md`**：README 是轨道契约载体
+# （豁免口径/读法），补文档口径不属于"重开轨道"——与 A1 对 notes 的 README/AGENTS 豁免同源；
+# 不排除的话，任何一次口径维护都会让守卫永久 WARN（假报警，噪音把真变更淹掉）。
+# 判据：`git log <冻结提交>..HEAD --name-only -- 'revisions/**/*.md' ':(exclude)revisions/README.md'`
+#   为空 → 冻结成立；非空 → WARN 并逐条列出（含「轨道已冻结，新决策请落 .agents/notes/」）。
+# 环境不可判定（非 git 仓 / 冻结提交不在历史 / git 查询失败）→ SKIPPED：**不计入 PASS**，
+#   不冒充 PASS、也不判 FAIL（退出码不受影响）。
+# 只读纪律：只跑 git 只读查询（log/cat-file/rev-parse），不执行任何仓库脚本；零新旗标。
+REVISIONS_FREEZE_COMMIT="cbc6f15"
+REV_STATUS=""; REV_DETAIL=""
+audit_revisions_frozen() { # 0=PASS 1=WARN 2=SKIPPED；结果写 REV_STATUS/REV_DETAIL
+  REV_STATUS=""; REV_DETAIL=""
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    REV_STATUS="skipped"; REV_DETAIL="非 git 仓库"; return 2
+  fi
+  if ! git cat-file -e "${REVISIONS_FREEZE_COMMIT}^{commit}" 2>/dev/null; then
+    REV_STATUS="skipped"; REV_DETAIL="冻结提交 ${REVISIONS_FREEZE_COMMIT} 不在当前历史（浅克隆或历史被重写）"; return 2
+  fi
+  local out="" rc=0
+  out=$(git log "${REVISIONS_FREEZE_COMMIT}..HEAD" --name-only --pretty=format: \
+          -- 'revisions/**/*.md' ':(exclude)revisions/README.md' 2>/dev/null) || rc=$?
+  if [ "${rc:-0}" -ne 0 ]; then
+    REV_STATUS="skipped"; REV_DETAIL="git log 查询失败（rc=$rc）"; return 2
+  fi
+  out=$(printf '%s\n' "$out" | sed '/^[[:space:]]*$/d' | sort -u)
+  if [ -z "$out" ]; then REV_STATUS="pass"; return 0; fi
+  REV_STATUS="warn"; REV_DETAIL="$out"; return 1
+}
+
+# 打印 D5 守卫结果（audit 报告段调用；PASS 一行、WARN 逐条、SKIPPED 明说不计入 PASS）
+audit_revisions_report() {
+  audit_revisions_frozen || true
+  case "$REV_STATUS" in
+    pass)
+      echo "revisions/ 轨道冻结：自冻结提交 ${REVISIONS_FREEZE_COMMIT} 起无新增/改动"
+      ;;
+    warn)
+      printf 'ponygo: WARN revisions/ 轨道已冻结，新决策请落 .agents/notes/ —— 自 %s 起仍有变更：\n' "$REVISIONS_FREEZE_COMMIT" >&2
+      printf '%s\n' "$REV_DETAIL" | sed 's/^/ponygo: WARN   /' >&2
+      ;;
+    *)
+      printf 'ponygo: WARN revisions/ 轨道冻结检查 SKIPPED（%s）——不计入 PASS\n' "${REV_DETAIL:-不可判定}" >&2
+      ;;
+  esac
+  return 0
+}
+
 warn_governance_hygiene() {
   # 1. 治理根已建但不在 git 仓库内（版本派生/提交边界/钩子挂载全部悬空）
   if { [ -d "$META_DIR" ] || [ -d "$AGENTS_RUNTIME_DIR" ]; } && \
@@ -1687,7 +1825,7 @@ verify_ladder() {
               fi
               # 正文 = 剥掉 ASCII 空白/标点（含 - 与 :）与 em dash 后的剩余字节（与真源同一口径）：
               # `Status: rejected ——` / `--` / `:` 这类纯分隔符必须归零，分隔符本身不是理由。
-              reason_body=$(printf '%s' "$rest" | tr -d '[:space:][:punct:]' | sed 's/—//g')
+              reason_body=$(reason_body_of "$rest")
               if [ "$sep" != "1" ] || [ "$(printf '%s' "$reason_body" | wc -c | tr -d ' ')" -lt 2 ]; then
                 n17r=$((n17r+1)); [ "$n17r" -le 3 ] && names17r="${names17r}${b}；"
               fi
@@ -1703,6 +1841,8 @@ verify_ladder() {
       #   （英文 ## Proposal/## Plan/## Migration plan/## Acceptance criteria 按边界匹配；
       #    中文 提案/计划/迁移计划/验收标准/验收/风险/待办 按**前缀**匹配——中文标题无词间空格，
       #    边界匹配会让 `## 验收清单`/`## 风险与缓解`/`## 待办事项` 等复合词全部放行，等于开个洞）。
+      # 围栏口径（Wave-2 §D2）：全部标题判定走 heading_outside_fence——**围栏内的标题不算在场**，
+      # 否则把 `## Decision` 塞进示例代码块即可骗过影子（与真源同一实现口径）。
       # 与真源 verify-note.sh 同文案关键字：「缺 ## Decision」「提案时代标题」。
       local n18=0 n18d=0 names18="" names18d=""
       while IFS= read -r -d '' f; do
@@ -1712,17 +1852,17 @@ verify_ladder() {
         lc="${rel%%/*}"
         case "$lc" in
           implemented)
-            if ! grep -qE '^## Decision([[:space:]]|$)' "$f"; then
+            if ! heading_outside_fence "$f" '## Decision([[:space:]]|$)'; then
               n18d=$((n18d+1)); [ "$n18d" -le 3 ] && names18d="${names18d}${b}；"
             fi
-            if grep -qE '^## (Proposal|Plan|Migration plan|Acceptance criteria)([[:space:]]|$)' "$f" \
-               || grep -qE '^## (提案|计划|迁移计划|验收标准|验收|风险|待办)' "$f"; then
+            if heading_outside_fence "$f" '## (Proposal|Plan|Migration plan|Acceptance criteria)([[:space:]]|$)' \
+               || heading_outside_fence "$f" '## (提案|计划|迁移计划|验收标准|验收|风险|待办)'; then
               n18=$((n18+1)); [ "$n18" -le 3 ] && names18="${names18}${b}(implemented 含提案时代标题)；"
             fi ;;
           proposed|rejected)
-            if ! grep -qE '^## Proposal([[:space:]]|$)' "$f"; then
+            if ! heading_outside_fence "$f" '## Proposal([[:space:]]|$)'; then
               n18=$((n18+1)); [ "$n18" -le 3 ] && names18="${names18}${b}($lc 缺 ## Proposal)；"
-            elif grep -qE '^## Decision([[:space:]]|$)' "$f"; then
+            elif heading_outside_fence "$f" '## Decision([[:space:]]|$)'; then
               n18=$((n18+1)); [ "$n18" -le 3 ] && names18="${names18}${b}($lc 含现在时 ## Decision)；"
             fi ;;
         esac
@@ -2807,11 +2947,136 @@ Status: implemented
 git -C "$R" add -A >/dev/null 2>&1
 expect_reject_with "implemented 含中文复合提案标题（## 验收清单）拒绝" "$R" '提案时代标题'
 
+# ---------- 13. Wave-2 §D1：CJK 标点不得充作 rejected 理由 ----------
+# 旧口径只剥 ASCII 标点 → `Status: rejected — 。` 有 3 字节，被当作"有理由"放行。
+# 新口径剥掉 CJK 标点闭集后剩余正文须 ≥2 字节（两面同实现：verify-note.sh 的 reason_body_of）。
+R=$(new_repo cjk-punct-reason)
+write_adr "$R" .agents/notes/rejected/process/2026-11-09-cjk-punct.md '# Agent Note: 理由只有中文句号
+
+Status: rejected — 。
+
+## Problem
+
+样本：rejected 的理由只有一个中文句号。
+
+## Proposal
+
+样本提案。
+
+## Alternatives considered
+
+- 样本。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_reject_with "rejected 理由只有中文句号拒绝（文案带「缺一行理由」）" "$R" '缺一行理由'
+# 正向对照：真实理由带句末中文标点 → 放行（剥离不得误伤正文——逐个 UTF-8 序列剥，不按字节）
+write_adr "$R" .agents/notes/rejected/process/2026-11-09-cjk-punct.md '# Agent Note: 理由带句末句号
+
+Status: rejected — 与 X 冲突。
+
+## Problem
+
+样本：真实理由 + 句末标点。
+
+## Proposal
+
+样本提案。
+
+## Alternatives considered
+
+- 样本。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_accept "rejected 真实理由带句末中文标点放行" "$R"
+
+# ---------- 14. Wave-2 §D2：围栏代码块内的标题不计入（1.8） ----------
+R=$(new_repo fenced-decision)
+write_adr "$R" .agents/notes/implemented/process/2026-11-09-fenced-decision.md '# Agent Note: Decision 只在围栏内
+
+Status: implemented
+
+## Problem
+
+样本：把 ## Decision 塞进示例代码块骗过在场判据。
+
+## 示例
+
+```text
+## Decision
+what
+```
+
+## Alternatives considered
+
+- 样本。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_reject_with "围栏内的 ## Decision 不算在场（文案带「缺 ## Decision」）" "$R" '缺 ## Decision'
+# 正向对照：真标题在围栏外、围栏内只有示例 → 放行（围栏外的标题必须仍被认）
+write_adr "$R" .agents/notes/implemented/process/2026-11-09-fenced-decision.md '# Agent Note: Decision 在围栏外
+
+Status: implemented
+
+## Problem
+
+样本：围栏外有真标题，围栏内只有示例片段。
+
+## Decision
+
+what
+
+```text
+示例片段，不含标题语义
+```
+
+## Alternatives considered
+
+- 样本。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_accept "围栏外 ## Decision + 围栏内示例放行" "$R"
+
+# ---------- 15. Wave-2 §D2：未闭合围栏 → 其后全部视为围栏内（fail-closed） ----------
+R=$(new_repo unclosed-fence)
+write_adr "$R" .agents/notes/implemented/process/2026-11-09-unclosed.md '# Agent Note: 未闭合围栏
+
+Status: implemented
+
+## Problem
+
+样本：围栏从不闭合，其后的标题都在围栏内。
+
+```text
+## Decision
+what
+
+## Alternatives considered
+other'
+git -C "$R" add -A >/dev/null 2>&1
+expect_reject_with "未闭合围栏后的 ## Decision 不算在场（文案带「缺 ## Decision」）" "$R" '缺 ## Decision'
+
+# ---------- 16. Wave-2 §D2：围栏内的 ## Alternatives considered 不计入（1.10） ----------
+R=$(new_repo fenced-alternatives)
+write_adr "$R" .agents/notes/proposed/process/2026-11-09-fenced-alt.md '# Agent Note: 备选节只在围栏内
+
+Status: proposed
+
+## Problem
+
+样本：把 ## Alternatives considered 塞进示例代码块骗过 1.10。
+
+## Proposal
+
+样本提案。
+
+```text
+## Alternatives considered
+other
+```'
+git -C "$R" add -A >/dev/null 2>&1
+expect_reject_with "围栏内的 ## Alternatives considered 不算在场（文案带「缺 ## Alternatives considered」）" "$R" '缺 ## Alternatives considered'
+
 if [ "$FAIL" -ne 0 ]; then
   printf '[%s] 未通过：门禁的拒绝/放行语义与预期不符（见上方 FAIL）\n' "$SPEC" >&2
   exit 1
 fi
-printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节 + 1.7 rejected 理由 + 1.8 ## Decision/中文提案标题（含复合词）均已证明（exit 0）\n' "$SPEC"
+printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节 + 1.7 rejected 理由（含 CJK 标点）+ 1.8 ## Decision/中文提案标题（含复合词）+ 围栏感知（1.8/1.10）均已证明（exit 0）\n' "$SPEC"
 exit 0
 PONYGO_EOF
   # 已有但丢执行位（如经 Windows/zip 转手）→ 补回；A1/A2/A4 是框架不可变资产，改权限不改字节
@@ -4897,6 +5162,8 @@ cmd_audit() {
   warn_meta_violations
   warn_governance_hygiene
   warn_adaptation_pending
+  # D5：revisions/ 轨道冻结（只读；WARN-only，不改变 hit 与退出码）
+  audit_revisions_report
   # F6b：缺口标题只在**确有**缺口条目时打印（零缺口时不留空标题）
   local gap_txt=""
   if [ ! -f "$META_YAML" ]; then
@@ -5267,6 +5534,65 @@ repair_skeleton_gaps() { # <dry:0|1>
   else
     printf '骨架补齐：%s\n' "$n"
     info "骨架补齐只补缺失项：既有十五文件一字不动（缺口口径与 'ponygo upgrade' 同一宇宙表）"
+  fi
+  return 0
+}
+
+# ---------- upgrade apply（D4：把宇宙内文件刷新为内嵌模板的**写路径**） ----------
+# 为什么是位置子命令而不是旗标：旗标预算受 flag-budget ADR 约束（零新旗标）；语义上 apply 是
+# upgrade 的写路径变体，位置词不会被误当"只读检查"。
+# 与 --check 的**共同口径**（禁第二份判断）：
+#   - 同一宇宙表 UPGRADE_UNIVERSE（十五文件）；
+#   - 同一模板基准（write_skeleton 0 到 mktemp 目录）；
+#   - 同一 docs-tier 跳过规则（已激活实例的 .meta/docs-tier/README.md 不参与比对/刷新）；
+#   - 同一内容比较口径（EOL 归一后 diff）。
+# 差别只在**有漂移时做什么**：--check 报 drift 并非零退出；apply 原子写回模板字节。
+cmd_upgrade_apply() {
+  echo "===== ponygo upgrade apply ====="
+  has_meta || die "无 .meta/ 治理根（meta.yaml 缺失）——先 'ponygo init'；apply 只刷新宇宙内十五文件，不播种骨架"
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    printf 'ponygo: WARN 不在 git 仓库内——apply 不依赖 git，但无法派生版本/血缘（与 --check 同款 WARN）\n' >&2
+  fi
+  local tmp="" f="" n=0 fails=0 mode="" dt_skip=0 existed=1
+  tmp=$(mktemp -d) || die "无法创建临时目录——apply 未写任何文件"
+  trap 'rm -rf "${tmp:-}" 2>/dev/null || true; trap - EXIT INT TERM' EXIT INT TERM
+  ( cd "$tmp" && write_skeleton 0 ) >/dev/null 2>&1 \
+    || { rm -rf "$tmp"; trap - EXIT INT TERM; die "无法生成模板基准（write_skeleton 0 非零）——apply 未写任何文件"; }
+  # docs-tier 已激活实例：该文件跳过（与 --check 完全同一口径）
+  if [ -f "$META_DIR/docs-tier/README.md" ] && grep -q '## 已激活文档家清单' "$META_DIR/docs-tier/README.md"; then
+    dt_skip=1
+    echo "注：docs-tier 已激活实例——.meta/docs-tier/README.md 跳过刷新（与 --check 同口径：激活必改写它，覆盖即抹掉实例申报）；其余十四文件照常处理。"
+  fi
+  for f in $UPGRADE_UNIVERSE; do
+    [ "$dt_skip" = "1" ] && [ "$f" = ".meta/docs-tier/README.md" ] && continue
+    if [ ! -f "$tmp/$f" ]; then
+      printf '内部不一致: 模板基准缺 %s（UPGRADE_UNIVERSE 与 write_skeleton 生成集漂移）——该项未刷新\n' "$f" >&2
+      fails=$((fails+1)); continue
+    fi
+    mode=$(file_mode "$tmp/$f")
+    # 内容一致（EOL 归一后）→ 一字不动。这条是幂等的机械保证：第二次 apply 必报「零变更」。
+    if [ -f "$f" ] && diff -q <(tr -d '\r' < "$f") <(tr -d '\r' < "$tmp/$f") >/dev/null 2>&1; then
+      continue
+    fi
+    existed=1
+    [ -f "$f" ] || existed=0
+    if write_atomic "$f" "$mode" < "$tmp/$f"; then
+      n=$((n+1))
+      if [ "$existed" = "1" ]; then info "应用（刷新）：$f"; else info "应用（补缺失）：$f"; fi
+    else
+      printf 'ponygo: WARN 写入失败：%s（目录不可写 / 原子替换失败）→ 该项未刷新\n' "$f" >&2
+      fails=$((fails+1))
+    fi
+  done
+  rm -rf "$tmp"; trap - EXIT INT TERM
+  if [ "$fails" -ne 0 ]; then
+    printf 'apply 未完成：%s 项写入失败（见上）；本次成功应用 %s 处\n' "$fails" "$n"
+    return 1
+  fi
+  if [ "$n" -eq 0 ]; then
+    printf 'apply 零变更（宇宙内十五文件已与内嵌模板一致，未写任何文件）\n'
+  else
+    printf '应用 %s 处（宇宙内十五文件已与内嵌模板对齐；跑 ponygo upgrade --check 复核零漂移）\n' "$n"
   fi
   return 0
 }
@@ -6724,6 +7050,26 @@ EOF
 }
 
 # ---------- 帮助 ----------
+# upgrade 的独立用法段（D4：位置子命令 apply 的写路径语义与边界）。
+usage_upgrade() {
+  cat <<'EOF'
+ponygo upgrade —— 骨架漂移报告 / 宇宙内文件刷新
+
+用法：
+  ponygo upgrade              漂移报告（只读；宇宙 = UPGRADE_UNIVERSE 十五文件；默认 exit 0）
+  ponygo upgrade --check      同报告，但存在漂移/缺口 → exit 非零（供 CI；与 --dry-run 互斥）
+  ponygo upgrade apply        把宇宙内十五文件刷新为内嵌模板（写路径；仅内容不同才写）
+
+apply 的边界（诚实条款）：
+  - 只处理 UPGRADE_UNIVERSE 十五文件；宇宙外文件（根 README / meta.yaml / 已填 constitution /
+    根 AGENTS.md / CLAUDE.md / classes.local / docs-tier 激活版等）无模板基线，一概不动；
+  - docs-tier「已激活实例」（.meta/docs-tier/README.md 含「## 已激活文档家清单」）跳过该文件——
+    与 --check 同口径：激活必改写它，覆盖即抹掉实例申报；
+  - 写入走原子替换（同目录临时文件 + mv），权限位取模板（A1/A2/A4 = 755）；
+  - 幂等：第二次 apply 报「零变更」；无参 upgrade 与 --check 的语义一字不变。
+EOF
+}
+
 usage() {
   cat <<'EOF'
 ponygo —— 项目工程化治理元框架命令行（单文件、零依赖）
@@ -6732,7 +7078,7 @@ ponygo —— 项目工程化治理元框架命令行（单文件、零依赖）
   ponygo init     [--dry-run] [--repair-skeleton]  建立/注入 .agents/ + .meta/ 治理骨架（自判新/旧项目；既有 .meta 下按 UPGRADE_UNIVERSE 只补缺失骨架文件）
   ponygo audit    [--level S|M] [--run-specs] [--json]  自适应体检：打分 + 缺口 + 最小改进动作（判据不符 exit 1）
   ponygo status   [--json]               查看成熟度级与骨架完整度（骨架缺口或声明级判据不符 exit 1）
-  ponygo upgrade  [--check]              骨架漂移报告（宇宙=UPGRADE_UNIVERSE 十五文件；默认 exit 0；--check 漂移非零供 CI）
+  ponygo upgrade  [--check] [apply]      骨架漂移报告（宇宙=UPGRADE_UNIVERSE 十五文件；默认 exit 0；--check 漂移非零供 CI；apply 刷新为内嵌模板）
   ponygo sync                            把 constitution 投影到 AGENTS.md / CLAUDE.md（模板态投影初始引导）
   ponygo retire   --level <N|off>        退级 / 整体退场（停止线执行器）
   ponygo observe  status|init|audit|upgrade|probe  可观测性治理维度（ob0/ob1/ob2 判定；详见 'ponygo observe --help'）
@@ -6755,6 +7101,8 @@ EOF
 
 # ---------- 入口 ----------
 DRY_RUN=0; LEVEL=""; CMD=""; RETIRE_LEVEL=""; RUN_SPECS=0; UPGRADE_CHECK=0; REPAIR_SKELETON=0
+# D4：upgrade 的位置子命令（零新旗标——flag-budget ADR 约束）。空 = 只读报告（既有语义）。
+UPGRADE_SUB=""
 # observe 独立变量族：OBSERVE_SUB 承载子命令（与顶层 CMD 分离，防 'observe audit' 被
 # 'audit)' 分支二次覆盖），OBSERVE_LEVEL 只收 ob0|ob1|ob2（不复用 LEVEL 的 S|M 值域）。
 OBSERVE_SUB=""; OBSERVE_LEVEL=""; OBSERVE_JSON=0; OBSERVE_SKILL_DIR=""; OBSERVE_MAPPING_FILE=""; OBSERVE_STRICT=0
@@ -6813,6 +7161,8 @@ while [ $# -gt 0 ]; do
     -h|--help)
       # 'ponygo observe --help' 与本段帮助同源（usage_observe 是 usage 的子集文案）
       if [ "${CMD:-}" = "observe" ]; then usage_observe; exit 0; fi
+      # D4：'ponygo upgrade --help' 给 upgrade 专用段（含 apply 的写路径边界）
+      if [ "${CMD:-}" = "upgrade" ]; then usage_upgrade; exit 0; fi
       usage; exit 0 ;;
     observe)
       # 不盲取下一词：子命令词交给下面的 'init|audit|status|upgrade' 分支（A1 守卫）认领，
@@ -6844,6 +7194,14 @@ while [ $# -gt 0 ]; do
         CMD="$1"
       fi
       ;;
+    apply)
+      # D4：upgrade 的**位置子命令**（不新增旗标——flag-budget ADR）。其它命令收到 'apply' 仍是未知参数。
+      if [ "${CMD:-}" = "upgrade" ]; then
+        UPGRADE_SUB=apply
+      else
+        die "未知参数或子命令：apply（位置子命令 apply 仅适用于 'ponygo upgrade'；见 'ponygo --help'）"
+      fi
+      ;;
     *)
       # wave-5：`--yes` 已彻底移除（无兼容分支、无交互确认）——按未知选项报错并给替代指引
       if [ "$1" = "--yes" ]; then
@@ -6855,6 +7213,13 @@ while [ $# -gt 0 ]; do
           die "observe 不接受第二个子命令词：$1（见 'ponygo observe --help'）"
         fi
         die "未知 observe 子命令：$1（用 status|init|audit|upgrade，见 'ponygo observe --help'）"
+      fi
+      # D4：upgrade 的**未识别位置参数**（如 'upgrade bogus'）→ 直接打印 upgrade 用法并 exit 1
+      # （契约要求：不能只指向 'ponygo --help'，必须把「用法」摆在面前）
+      if [ "${CMD:-}" = "upgrade" ] && [ "${1#-}" = "$1" ]; then
+        usage_upgrade >&2
+        printf 'ponygo: 未知位置参数：%s（upgrade 只接受位置子命令 apply，或不带位置参数）\n' "$1" >&2
+        exit 1
       fi
       die "未知参数或子命令：$1（见 'ponygo --help'）"
       ;;
@@ -6900,6 +7265,12 @@ fi
 # --check 必须读真实文件：与 --dry-run 互斥（--check --dry-run → die）
 if [ "$UPGRADE_CHECK" = "1" ] && [ "$DRY_RUN" = "1" ]; then
   die "--check 与 --dry-run 互斥——检查必须读真实文件，dry-run 只打印不落盘"
+fi
+# D4：apply 是写路径，与 --check（只读检查）/ --dry-run（预览）组合一律 usage + exit 1
+if [ "${UPGRADE_SUB:-}" = "apply" ] && { [ "$UPGRADE_CHECK" = "1" ] || [ "$DRY_RUN" = "1" ]; }; then
+  usage_upgrade >&2
+  printf 'ponygo: apply 是写路径，不与 --check / --dry-run 组合（先跑 ponygo upgrade 看 drift 列表即可预览）\n' >&2
+  exit 1
 fi
 # --strict 只属于 'observe audit'（严格门禁：任一缺口非零退出）；其余命令拒绝，避免静默忽略
 if [ "$OBSERVE_STRICT" = "1" ] \
@@ -6951,7 +7322,7 @@ case "${CMD:-}" in
   init) cmd_init ;;
   audit) cmd_audit ;;
   status) cmd_status ;;
-  upgrade) cmd_upgrade ;;
+  upgrade) if [ "${UPGRADE_SUB:-}" = "apply" ]; then cmd_upgrade_apply || exit 1; else cmd_upgrade; fi ;;
   sync) do_sync ;;
   retire) cmd_retire "${LEVEL:-}" ;;
   observe)
