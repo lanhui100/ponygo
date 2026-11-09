@@ -389,11 +389,12 @@ s09_audit_counts() {
   # 契约变更（.dev-team/wave-1-contract.md §C6，Lead 裁决 B）：audit 问④「退场」判据
   # 由 `[ -d archived ]` 改为「archived/ 下存在已封印归档件（manifest 存在且 ≥1 条登记）」。
   # 本用例的基线是 init 后空 archived（无 manifest）→ 问④不再命中 → 期望值 5/10 → 4/10、
-  # 5/14 → 4/14。仍是**精确等值**断言（不弱化、不改模糊匹配），只把契约变更后的真值固化。
-  assert_contains "S 档命中 4 / 10（含预置 write-adr；未封印 archived 不计问④）" "$R_OUT" "命中 4 / 10"
+  # 5/14 → 4/14。carrier-audit CA-05 再收紧：n_dec=0 时 Status 项不得 vacuously 得分，
+  # 因而本空 notes 夹具由 4/10、4/14 精确降为 3/10、3/14；四态结构分仍独立保留。
+  assert_contains "S 档命中 3 / 10（空 notes 不送 Status；未封印 archived 不计问④）" "$R_OUT" "命中 3 / 10"
   # shellcheck disable=SC2046
   run_cli_env "$T" $G audit --level M
-  assert_contains "M 档命中 4 / 14（含预置 write-adr；未封印 archived 不计问④）" "$R_OUT" "命中 4 / 14"
+  assert_contains "M 档命中 3 / 14（空 notes 不送 Status；未封印 archived 不计问④）" "$R_OUT" "命中 3 / 14"
 }
 
 s10_audit_level_arg() {
@@ -4373,6 +4374,35 @@ EOF
   assert_contains "D4⑯ 且仍报零漂移" "$R_OUT" "零漂移"
 }
 
+# carrier-audit 冻结验收：独立进程隔离，解析真实断言计数；缺汇总行同样判红。
+s81_carrier_audit_acceptance() {
+  echo "--- 场景81：carrier-audit 验收（空 notes · 四态 · hook · JSON · worktree · revisions）"
+  local dir f out rc p n base
+  dir="$ROOT/tests/acceptance/carrier-audit"
+  if [ ! -d "$dir" ]; then
+    bad "场景81 验收目录缺失（$dir）"
+    return 0
+  fi
+  for f in "$dir"/f[0-9]*.sh; do
+    [ -f "$f" ] || continue
+    base=$(basename "$f")
+    out=$(bash "$f" 2>&1); rc=$?
+    printf '%s\n' "$out" | grep -E '^(FAIL |##CASE )' || true
+    p=$(printf '%s\n' "$out" | sed -n 's/^##CASE .* pass=\([0-9][0-9]*\) fail=\([0-9][0-9]*\)$/\1/p' | tail -n1)
+    n=$(printf '%s\n' "$out" | sed -n 's/^##CASE .* fail=\([0-9][0-9]*\)$/\1/p' | tail -n1)
+    if [ -z "${p:-}" ] || [ -z "${n:-}" ]; then
+      bad "场景81 $base 未产出 ##CASE 汇总行（子进程异常退出 rc=$rc）"
+      continue
+    fi
+    PASS=$((PASS + p)); FAIL=$((FAIL + n))
+    if [ "$rc" -ne 0 ] || [ "$n" -ne 0 ]; then
+      printf '  RED  %s（rc=%s pass=%s fail=%s）\n' "$base" "$rc" "$p" "$n"
+    else
+      printf '  ok   %s（pass=%s）\n' "$base" "$p"
+    fi
+  done
+}
+
 s42_observe_monorepo_subcomponents
 s43_observe_pipeline_awareness
 s44_observe_subcomponent_blocking
@@ -4412,6 +4442,7 @@ s77_gate_chain_alternatives
 s78_wave13_acceptance
 s79_wave1_contract_c1_c2_c3_c6
 s80_wave2_contract_d1_d2_d4
+s81_carrier_audit_acceptance
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
 [ "$FAIL" -eq 0 ] || exit 1

@@ -21,11 +21,12 @@ set -u
 #   COV_TOKEN_19 = 1.9b **已判**（ai-surface: on）态：verified 保持 ["1.1-1.9"]，且**不带** skipped 键
 # 本文件绝大多数夹具（gov_repo lv≥1）未声明 ai-surface → 用 COV_TOKEN；on 态由 COV-J1b 单独看守，
 # 证明这是「两态可区分」，不是「一律降级」。
-# 第三态（T7 收口后已并入 COV_TOKEN）：lv=0「纯 L0 长驻」——L1 判据不在判定域，
-# 但机器面同样**不得宣称已验**：T7 后实测输出与 COV_TOKEN 逐字相同（verified ["1.1-1.8"]
-# + skipped:["1.9b"]、无 on 态特权）。COV-J6 因此复用 COV_TOKEN，不再单列常量。
+# 第三态（carrier-audit CA-14/15 最终口径）：lv=0「纯 L0 长驻」并未实际执行 L1，
+# 机器面必须明确 verified=[] / unverified=["1.1-1.10"] / reason="l1-not-run"，
+# 不得沿用「1.9b SKIPPED」伪装成已跑 L1 后的条件跳过。
 COV_TOKEN='"coverage":{"verified":["1.1-1.8"],"unverified":["1.10"],"skipped":["1.9b"],"reason":"readonly-no-repo-exec"}'
 COV_TOKEN_19='"coverage":{"verified":["1.1-1.9"],"unverified":["1.10"],"reason":"readonly-no-repo-exec"}'
+COV_TOKEN_L1_NOT_RUN='"coverage":{"verified":[],"unverified":["1.1-1.10"],"reason":"l1-not-run"}'
 FORBIDDEN='机械判据全部 PASS'
 # 2026-11-09 期望迁移（契约真源：.dev-team/wave-1-contract.md §C3；Lead 裁决：只迁期望值，
 # assert_eq 全串精确相等不变、断言一条不删）。本文件 lv=1 夹具（gov_repo）**未声明 ai-surface**，
@@ -216,16 +217,15 @@ done
 assert_contains "COV-J4 [GO] audit --json exit 字段 == 真实退出码" "$R_OUT" "\"exit\":$R_RC"
 
 # ---------- COV-J6：lv=0 的 JSON 也带 coverage ----------
-# 迁移说明（2026-11-09，T7 收口）：lv=0 走「纯 L0 长驻」分支，1.9b 不在判定域——机器面
-# **不得**把没跑的子项报成已验证。T7 后实测输出与 COV_TOKEN 逐字相同
-# （verified:["1.1-1.8"] + skipped:["1.9b"]），故本断言复用 COV_TOKEN（与 COV-J1/J2 同一口径），
-# 已是「未判 → 收窄 + skipped」的保守态；不再存在「lv=0 报 verified:["1.1-1.9"]」的观察项。
+# 契约同步（carrier-audit CA-14/15）：lv=0 走「纯 L0 长驻」分支，L1 实际未运行；
+# 不再复用已跑 L1 后的 1.9b skipped 形态，而精确断言 L1_NOT_RUN 固定 token。
+# 原断言强度不变：仍是逐字节子串 + exit 0，未改为宽松字段存在性检查。
 T=$(new_case)
 git_seed_repo "$T"
 run_in "$T" init
 printf 'level: 0\n' > "$T/.meta/meta.yaml"
 run_split "$T" status --json
 assert_eq "COV-J6 夹具：lv=0 status --json exit 0" 0 "$R_RC"
-assert_contains "COV-J6 [GO] lv=0 JSON 同样带 coverage 固定 token" "$R_OUT" "$COV_TOKEN"
+assert_contains "COV-J6 [GO] lv=0 JSON 精确声明 L1 未运行" "$R_OUT" "$COV_TOKEN_L1_NOT_RUN"
 
 finish
