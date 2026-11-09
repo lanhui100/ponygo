@@ -13,7 +13,19 @@
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-COV_TOKEN='"coverage":{"verified":["1.1-1.9"],"unverified":["1.10"],"reason":"readonly-no-repo-exec"}'
+# coverage 机器面两态（契约收口/T4 落地后迁移 2026-11-09；**逐字取自实测**：只有
+# `.meta/meta.yaml` 的 `level: 2`（不含 ai-surface）的实例跑 `bash ponygo status --json` →
+# `"coverage":{"verified":["1.1-1.8"],"unverified":["1.10"],"skipped":["1.9b"],"reason":"readonly-no-repo-exec"}`）：
+#   COV_TOKEN    = 1.9b **未判定**（未声明 / off / 值非法）态：verified 收窄为 ["1.1-1.8"]
+#                  并显式列 skipped:["1.9b"]（SKIPPED ≠ PASS：机器面不得宣称没跑的子项已验证）
+#   COV_TOKEN_19 = 1.9b **已判**（ai-surface: on）态：verified 保持 ["1.1-1.9"]，且**不带** skipped 键
+# 本文件绝大多数夹具（gov_repo lv≥1）未声明 ai-surface → 用 COV_TOKEN；on 态由 COV-J1b 单独看守，
+# 证明这是「两态可区分」，不是「一律降级」。
+# 第三态（T7 收口后已并入 COV_TOKEN）：lv=0「纯 L0 长驻」——L1 判据不在判定域，
+# 但机器面同样**不得宣称已验**：T7 后实测输出与 COV_TOKEN 逐字相同（verified ["1.1-1.8"]
+# + skipped:["1.9b"]、无 on 态特权）。COV-J6 因此复用 COV_TOKEN，不再单列常量。
+COV_TOKEN='"coverage":{"verified":["1.1-1.8"],"unverified":["1.10"],"skipped":["1.9b"],"reason":"readonly-no-repo-exec"}'
+COV_TOKEN_19='"coverage":{"verified":["1.1-1.9"],"unverified":["1.10"],"reason":"readonly-no-repo-exec"}'
 FORBIDDEN='机械判据全部 PASS'
 # 2026-11-09 期望迁移（契约真源：.dev-team/wave-1-contract.md §C3；Lead 裁决：只迁期望值，
 # assert_eq 全串精确相等不变、断言一条不删）。本文件 lv=1 夹具（gov_repo）**未声明 ai-surface**，
@@ -176,6 +188,21 @@ done
 assert_not_contains "COV-J1 [NOGO] verified 数组不得超过 1.1-1.9（未验证不得计为已验证）" \
   "$R_OUT" '"verified":["1.1-1.9","1.10"]'
 
+# ---------- COV-J1b：ai-surface: on 态 coverage **不降级**（两态可区分，不是「一律降级」）----------
+# 口径 B（Lead 裁决 2026-11-09）：只有 1.9b 未判定时才收窄 verified 并显式列 skipped；
+# 1.9b 已判（ai-surface: on）→ verified 保持 ["1.1-1.9"]，且**无** skipped 键（不留空键）。
+T=$(new_case); gov_repo "$T" 2 || finish
+write_adr "$T" "implemented/feature/2026-01-02-json-on.md"
+printf 'ai-surface: on\n' >> "$T/.meta/meta.yaml"
+assert_file_has "COV-J1b 前置取证：已声明 ai-surface: on（否则测到的不是 on 态）" "$T/.meta/meta.yaml" "ai-surface: on"
+run_split "$T" status --json
+assert_eq "COV-J1b 夹具：on 态 status --json exit 0（1.9b 已判且 PASS）" 0 "$R_RC"
+assert_contains "COV-J1b [GO] on 态 coverage 保持 verified:[\"1.1-1.9\"]（逐字节）" "$R_OUT" "$COV_TOKEN_19"
+assert_eq "COV-J1b [GO] on 态 coverage token 出现次数 = 1" 1 \
+  "$(printf '%s' "$R_OUT" | grep -oF "$COV_TOKEN_19" | wc -l | tr -d ' ')"
+assert_not_contains "COV-J1b [NOGO] on 态不得带 skipped 键（不留空键 / 不一律降级）" "$R_OUT" '"skipped"'
+assert_not_contains "COV-J1b [NOGO] on 态 verified 不得收窄为 1.1-1.8" "$R_OUT" '"verified":["1.1-1.8"]'
+
 # ---------- COV-J2 / COV-J3 / COV-J4：audit --json ----------
 T=$(new_case); gov_repo "$T" 2 || finish
 write_adr "$T" "implemented/feature/2026-01-02-json2.md"
@@ -189,6 +216,10 @@ done
 assert_contains "COV-J4 [GO] audit --json exit 字段 == 真实退出码" "$R_OUT" "\"exit\":$R_RC"
 
 # ---------- COV-J6：lv=0 的 JSON 也带 coverage ----------
+# 迁移说明（2026-11-09，T7 收口）：lv=0 走「纯 L0 长驻」分支，1.9b 不在判定域——机器面
+# **不得**把没跑的子项报成已验证。T7 后实测输出与 COV_TOKEN 逐字相同
+# （verified:["1.1-1.8"] + skipped:["1.9b"]），故本断言复用 COV_TOKEN（与 COV-J1/J2 同一口径），
+# 已是「未判 → 收窄 + skipped」的保守态；不再存在「lv=0 报 verified:["1.1-1.9"]」的观察项。
 T=$(new_case)
 git_seed_repo "$T"
 run_in "$T" init

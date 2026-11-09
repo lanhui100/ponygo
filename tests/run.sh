@@ -4121,6 +4121,77 @@ EOF
   run_cli_env "$T" $G audit --level S
   H_sealed=$(audit_hit_n "$R_OUT")
   assert_eq "C6⑤ 已封印归档件 → 计「退场」（无 archived 基线 +1）" "$((H_noarch + 1))" "$H_sealed"
+
+  # ---- 契约收口回归（契约已在 T4 落地，**非红相**）----
+  # 这两条不是新契约，而是 C2/C3 判定器落地后的「写法不可绕过」边界：
+  #   ① 中文标题按**前缀**匹配（含复合词）：清单里的精确词 `## 验收` 之外，`## 验收清单`
+  #      这类复合标题同样必须被拒——否则实现只要写宽一个字符就能把提案态伪装成决定。
+  #   ② `ai-surface: "on"`（带引号变体）归一后必须与裸 `on` 同语义：仍 fail-closed 判 1.9b。
+  #      否则「加一对引号」就是绕过 1.9 的开关。
+  # 夹具口径：① 走 A1 带参模式（需暂存，与 C1/C2 同构）；② 用 lv=1 + 合规决策，令 1.9b 是唯一变量。
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init
+  F=".agents/notes/implemented/feature/2026-01-03-compound.md"
+  mkdir -p "$T/.agents/notes/implemented/feature"
+  cat > "$T/$F" <<'EOF'
+# Agent Note: implemented with compound Chinese proposal title
+
+Status: implemented
+
+## Problem
+why
+
+## Decision
+what
+
+## 验收清单
+how
+
+## Alternatives considered
+other
+EOF
+  git_local "$T" add "$F" >/dev/null 2>&1
+  run_script "$T" .meta/gates/adr-verify.sh "$F"
+  assert_eq "R1① 中文复合标题 ## 验收清单 → adr-verify exit 1" 1 "$S_RC"
+  assert_contains "R1② 且文案含「提案时代标题」" "$S_OUT" "提案时代标题"
+  T=$(new_case); c3_fixture "$T"
+  printf 'ai-surface: "on"\n' >> "$T/.meta/meta.yaml"
+  rm -f "$T/AGENTS.md"
+  run_cli "$T" status
+  assert_eq "R2① ai-surface: \"on\"（带引号）+ 缺根 AGENTS.md → status exit 1" 1 "$R_RC"
+  assert_contains "R2② 且点名判据 1.9（引号变体不绕过 fail-closed）" "$R_OUT" "1.9"
+  assert_not_contains "R2③ 且不得声称 1.9 PASS" "$R_OUT" "1.9 PASS"
+  # ---- 契约收口回归：已在 T7 落地，非红相 ----
+  # 1.7「rejected 必须带一行理由」的**理由非空**边界：分隔符本身不是理由。
+  # T7 起理由判据剥掉分隔符与空白后要求 ≥2 个非空白字节，故「只有分隔符」（`——` / `-` / `:`）
+  # 一律按「缺一行理由」拒绝——否则 `Status: rejected —` 这种空壳写法就能把否决理由洗白。
+  # 诚实残余（已知、**不由解析器修**、靠 review 兜，故只写注释不写成断言）：
+  #   a) CJK 单标点不被剥离：`Status: rejected — 。` 剥分隔符后仍有 3 字节（「。」）→ **仍会通过**；
+  #      判据只数非空白**字节**，不判语义；理由是否真是理由，属 review 面（P6 诚实条款）。
+  #   b) 单 ASCII 字符（`x`）只有 1 字节 < 2 → 拒绝（与 CJK 单字 ≥3 字节的差异是字节口径的固有后果）。
+  # 夹具复用同一文件（先空壳、再补理由），证明拒绝不是「一律拒绝」。
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init
+  F=".agents/notes/rejected/process/2026-01-05-sep.md"
+  mkdir -p "$T/.agents/notes/rejected/process"
+  cat > "$T/$F" <<'EOF'
+# Agent Note: rejected with separators only
+
+Status: rejected ——
+
+## Proposal
+what
+
+## Alternatives considered
+other
+EOF
+  git_local "$T" add "$F" >/dev/null 2>&1
+  run_script "$T" .meta/gates/adr-verify.sh "$F"
+  assert_eq "R3① Status: rejected ——（仅分隔符）→ adr-verify exit 1" 1 "$S_RC"
+  assert_contains "R3② 且文案含「缺一行理由」" "$S_OUT" "缺一行理由"
+  sed -i 's/^Status: rejected ——$/Status: rejected — 与 X 冲突/' "$T/$F"
+  git_local "$T" add "$F" >/dev/null 2>&1
+  run_script "$T" .meta/gates/adr-verify.sh "$F"
+  assert_eq "R3③ 同一夹具补理由 → adr-verify exit 0（拒绝不是一刀切）" 0 "$S_RC"
+  assert_not_contains "R3④ 放行后不再报「缺一行理由」" "$S_OUT" "缺一行理由"
 }
 
 s42_observe_monorepo_subcomponents

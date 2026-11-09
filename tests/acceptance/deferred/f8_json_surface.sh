@@ -62,14 +62,20 @@ else:
     if set(lad.keys()) != {"verdict","fails"}: fail.append("ladder keys=%s" % sorted(lad.keys()))
     if not isinstance(lad.get("fails"), list): fail.append("ladder.fails 不是数组")
 '
-json_assert "F8-1 GO：coverage 固定词表（verified/unverified/reason）" "$R_OUT" '
+# 期望迁移（T7 收口，2026-11-09）：本段夹具（gov_repo lv=1）**未声明 ai-surface** →
+# 1.9b 未判定（SKIPPED ≠ PASS），机器面据实收窄 verified 并显式列 skipped:["1.9b"]。
+# 逐字取自实测：`bash ponygo audit --json` →
+#   "coverage":{"verified":["1.1-1.8"],"unverified":["1.10"],"skipped":["1.9b"],"reason":"readonly-no-repo-exec"}
+# 保持原强度：值按字面精确相等、键集仍为集合相等（多/少皆红），只是把「未判」这一态补进契约。
+json_assert "F8-1 GO：coverage 固定词表（verified/unverified/skipped/reason）" "$R_OUT" '
 c = d.get("coverage")
 if not isinstance(c, dict): fail.append("coverage 不是对象")
 else:
-    if c.get("verified") != ["1.1-1.9"]: fail.append("coverage.verified=%r" % (c.get("verified"),))
+    if c.get("verified") != ["1.1-1.8"]: fail.append("coverage.verified=%r" % (c.get("verified"),))
     if c.get("unverified") != ["1.10"]: fail.append("coverage.unverified=%r" % (c.get("unverified"),))
+    if c.get("skipped") != ["1.9b"]: fail.append("coverage.skipped=%r" % (c.get("skipped"),))
     if c.get("reason") != "readonly-no-repo-exec": fail.append("coverage.reason=%r" % (c.get("reason"),))
-if set(d.get("coverage", {}).keys()) != {"verified","unverified","reason"}:
+if set(d.get("coverage", {}).keys()) != {"verified","unverified","skipped","reason"}:
     fail.append("coverage keys=%s" % sorted(d.get("coverage", {}).keys()))
 '
 json_assert "F8-1 GO：drift{count,files[]} 形状固定" "$R_OUT" '
