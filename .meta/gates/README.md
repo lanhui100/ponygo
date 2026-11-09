@@ -11,7 +11,7 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 
 | 资产 | 路径 | 角色 | 退出语义 |
 |---|---|---|---|
-| A1 | `.meta/gates/adr-verify.sh` | 暂存区 ADR 格式门（无参=暂存 ADR；带参=指定路径），末尾调 A6 `check` | 0 放行 / 非零拒绝 |
+| A1 | `.meta/gates/adr-verify.sh` | 暂存区 ADR 格式门（无参=暂存 ADR；带参=指定路径）；A6 `check` 在**任何跳过分支之前**早期 probe（见下「A6 的时序」） | 0 放行 / 非零拒绝 |
 | A2 | `.meta/gates/adr-verify.spec.sh` | A1 的负样本执行判据（非法→拒、合法→放行、TOCTOU→拒） | 0 = 自检通过 |
 | A3 | `.githooks/pre-commit`（或既有钩子内追加块） | 本地层挂载点 | 转发 A1 的退出码 |
 | A4 | `.meta/gates/ci-verify.sh` | forge 无关全树门（verify-note 整树 + A2 + A6/A7，三段） | 0 放行 / 非零拒绝 |
@@ -26,10 +26,10 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 
 | 承诺（maturity-ladder §5） | 命令 | 命中判据 |
 |---|---|---|
-| 落了 ADR 就必须过机械格式门（暂存区） | `bash .meta/gates/adr-verify.sh` | 1.5–1.8 |
+| 落了 ADR 就必须过机械格式门（暂存区） | `bash .meta/gates/adr-verify.sh` | 1.5–1.8 + 1.10（逐文件；1.9 只在整树模式判，带参模式不判） |
 | 暂存字节 = 校验字节（不许"暂存后偷改"） | 同上（内建 R6 比对） | R6 TOCTOU |
 | 重命名 ADR 不绕过门 | 同上（`--diff-filter=ACMR`） | R7 |
-| 全树 ADR 格式常绿 | `bash .agents/skills/write-adr/verify-note.sh` | 1.1–1.10 |
+| 全树 ADR 格式常绿 | `bash .agents/skills/write-adr/verify-note.sh` | 1.1–1.9a + 1.10（1.9b/1.9c 不在本门面，见「1.9 的分工」） |
 | 门自己会拒绝非法样本 | `bash .meta/gates/adr-verify.spec.sh` | A2 |
 | 归档件冻结（改一字节即拒） | `bash .meta/gates/archive-verify.sh check`（无参等价） | A6（manifest ↔ `archived/**/*.md` 双向一致） |
 | 归档必须显式封印 | `bash .meta/gates/archive-verify.sh seal` | A6（append-only 追加；新条目要求 `Status:` 首词 ∈ {`implemented`, `archived`}） |
@@ -53,6 +53,15 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 review 与 CI 的可追溯性，本门不冒充。
 **seal 是唯一写路径**，pre-commit 只 `check`——钩子不在提交窗口里偷偷改工作区/暂存区。
 
+### A6 的时序（为什么不是"末尾调 A6"）
+
+A1 里 A6 是**早期 probe**，不是末尾收口：判定在任何 `skip` 分支之前完成（`archive_probe`），
+输出与拒绝留在 ADR 段之后打印（`archive_finish`）。顺序语义没变（ADR 段在前、归档段在后），
+变的是**判定时机**——把 A6 留到末尾会把"本次没有暂存 ADR"变成绕过封印的门（实测缺陷：
+删除或移出归档件不产生暂存 ADR 变更，末尾调用的 A6 永远跑不到）。故：
+`archive_probe` 先算出 A6 的 rc 与输出 → ADR 段照常判 → `archive_finish` 打印归档段并按 rc
+fail-closed 收口。门缺失时优雅回退（不影响 ADR 判定）。
+
 ### 本地层与远端层：互补，**不等价**（B5 实测结论）
 
 两层跑的不是同一套判据，**不得**用"本地绿"推断"CI 也绿"，反之亦然：
@@ -60,19 +69,38 @@ review 与 CI 的可追溯性，本门不冒充。
 | | 本地层 `adr-verify.sh`（A3 → A1） | 远端层 `ci-verify.sh`（A4 → A5） |
 |---|---|---|
 | 输入面 | 暂存区**改动的 ADR 子集**（`--diff-filter=ACMR -- .agents/notes/*.md`） | `verify-note.sh` **整树**（`find .agents/notes -type f -name '*.md'`） |
-| 判据范围 | 1.5–1.8 + 1.10（逐文件）+ R6 字节比对 + R7 覆盖面 | 1.1–1.10（整树），**含 1.9「文档有家」等只在整树模式判的项** |
+| 判据范围 | 1.5–1.8 + 1.10（逐文件）+ R6 字节比对 + R7 覆盖面 | 1.1–1.9a + 1.10（整树；1.9a = 文档标准家 `docs/AGENTS.md` 存在）|
 | 定位 | 提交**前**拦截"这次改动" | 全仓**兜底**，抓历史债与整树不变量 |
 | 通过时能推什么 | 只说明"本次改动的 ADR 是合法的" | 只说明"整树此刻合法"，不校验暂存态 |
 
-**具体例子（实测）**：仓库缺 `docs/AGENTS.md`（1.9 违例），且这次提交没碰 `.agents/notes/`：
+**具体例子（实测）**：仓库缺 `docs/AGENTS.md`（1.9a 违例），且这次提交没碰 `.agents/notes/`：
 `bash .meta/gates/adr-verify.sh` → **exit 0**（无暂存 ADR 变更，直接跳过）；
-`bash .meta/gates/ci-verify.sh` → **exit 1**（整树模式跑 1.9 报缺文档家）。
+`bash .meta/gates/ci-verify.sh` → **exit 1**（整树模式跑 1.9a 报缺文档家）。
 所以两层是**互补**关系（本地=窄而快，CI=全而慢），不是同一结论的两份拷贝。
 
 **判定真源唯一**：格式判据只存在于 `.agents/skills/write-adr/verify-note.sh`；
 A1 只做它做不到的三件事——TOCTOU 字节比对、`ACMR` 覆盖面、非普通文件（symlink/gitlink）拒绝——
 不在此目录复刻 1.1–1.10（复刻必然漂移，故 `ponygo gate adr` 子命令被否决）。
 A4 不是"再实现一遍"，它只是**编排**：真源整树 + 本目录的负样本 spec。
+
+### 1.9 的分工：A1/A4 绿 ≠ 1.9b PASS（诚实边界）
+
+判据 1.9 在实现上分三段，看守面**不同**，不得混着推断：
+
+| 子项 | 内容 | 谁判 |
+|---|---|---|
+| 1.9a | 文档标准家 `docs/AGENTS.md` 存在 | `verify-note.sh`（整树模式）→ 经 A1/A4；`ponygo status` 亦判 |
+| 1.9b | 根 `AGENTS.md` 链到 `docs/AGENTS.md`（**仅当** `meta.yaml` 声明 `ai-surface: on`；否则 SKIPPED 不计入 PASS） | **由 CLI 的 `verify_ladder` 判**：`ponygo status` 与 `ponygo audit` 共用同一函数，**两者都会报 1.9 FAIL**（勿低估判定面） |
+| 1.9c | 包/模块文档覆盖（`packages/` `crates/` `src/` 下每包有 `AGENTS.md`/`README.md`，或在 `.meta/docs-tier/exemptions` 豁免） | 同上（`verify_ladder`，status 与 audit 共用） |
+
+原因：1.9b 要读 `meta.yaml` 开关、1.9c 要扫包目录，二者是**实例状态**而非单条 ADR 的格式。
+所以：`bash .meta/gates/adr-verify.sh` 与 `bash .meta/gates/ci-verify.sh` 全绿，只证明
+「ADR 格式与归档封印没问题」，**不证明 AI 常载入口完好**——要证 1.9b，跑 `ponygo status`
+（或 `ponygo audit`，同一函数；两者的 fail 列表都会出现 1.9）。
+机器面（`status --json` / `audit --json`）的 `coverage` 块**同源**且**默认保守**：只有
+`verify_ladder` 真的判过 1.9b（`ai-surface: on`）才给 `verified:["1.1-1.9"]`；其余情形——
+含 off/未声明/值非法，以及**骨架缺口等根本没跑 ladder 的提前退出分支**——一律给
+`verified:["1.1-1.8"]` + `skipped:["1.9b"]`（未判定 = 未验证，不得宣称）。
 
 ### 挂载方式（非破坏性）
 
@@ -107,11 +135,22 @@ fi
 
 `adr-verify.spec.sh` 在 `mktemp -d` 临时仓里造样本（`trap … EXIT` 清理，仓库只读）：
 合法 ADR（带参/无参两路）→ 断言 A1 为 0；时态错位（`proposed` 带 `## Decision`）、
-`implemented` 带提案时代标题、`Status` 与目录不一致 → 断言 A1 非零；
+`implemented` 带提案时代标题、`implemented` 含中文提案时代标题（`## 验收`，以及**复合词**
+`## 验收清单`——中文按前缀匹配，防"无空格复合标题"绕过）、`Status` 与目录不一致
+→ 断言 A1 非零；`rejected` 缺一行理由（判据 1.7）→ 断言 A1 非零**且**文案含「缺一行理由」，
+补上 `— <理由>` → 断言放行；`implemented` 缺 `## Decision`（判据 1.8）→ 断言 A1 非零**且**文案含
+「缺 ## Decision」，补 `## Decision` → 断言放行；中文提案标题用例的拒绝文案须含「提案时代标题」；
 符号链接 ADR（`ln -s`，index 模式 `120000`）→ 断言 A1 非零**且**文案指向"必须是普通文件"；
 staged 后又在工作区改动（两个方向：暂存合法→工作区改、暂存非法→工作区改好但未 `git add`）
 → 断言 A1 非零**且**文案含「ADR 有未暂存改动，请先 git add」；
 无暂存 ADR / 无 `.agents/notes` → 断言放行。
+每个"必须被拒"的样本都配一个相邻的正向对照（补一行理由 / 补 `## Decision` → 放行），
+证明判据不是"一律拒绝"——只有负样本的 spec 分不清"门会响"和"门坏了"。
+
+**已知弱点（诚实条款）**：`verify-note.sh` 按**行**匹配标题、不解析 Markdown 结构——围栏代码块内
+（``` / ~~~ 之中）写的 `## Decision` / `## Alternatives considered` 同样被认作"在场"，
+故把标题塞进示例代码块可绕过 1.8/1.10 的在场判据（与 1.10 同型弱点）。修它需要真 Markdown 解析，
+收益低而回归面大；这道缝由 review 兜，spec 不冒充已闭。
 
 `## Alternatives considered` 曾是 notes/README 的强制契约而判定真源 1.1–1.9 不判（覆盖缺口），
 该 case 当时做成**探针**；**2026-10-29 起 1.10 落地为硬判据**，探针随之翻转为**硬断言**：

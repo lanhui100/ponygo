@@ -90,6 +90,30 @@ extra_classes() {
   sed 's/\r$//' "$DECISIONS_DIR/classes.local" | grep -vE '^[[:space:]]*(#|$)' | grep -E '^[a-z0-9][a-z0-9-]*$'
 }
 
+# ai-surface 开关状态（单一读取真源）：on / off / undeclared / invalid。
+# 读者有三处语义、一个值：2.6（AI 常载命约投影块）、1.9b（根 AGENTS.md 索引链）、status/audit 的
+# JSON coverage 与人类结论行。
+# 归一规则（2026-11-09 收口，防"写了值却被当没写"）：去首尾空白 → 去包裹引号（单/双）→ 大小写不敏感。
+# 故 `on` / `ON` / `"on"` / `'on'` / `on ` 全部兑现语义；有值但归一后不是 on|off → `invalid`
+# （按未声明处理，**不兑现** on/off 语义，并由调用方给「值非法（仅 on|off）」WARN——不得静默当没写）。
+# 只剥 \r 发生在归一之前（CRLF 防御）；键名本身仍严格顶格 `ai-surface:`（缩进键走非法键 WARN）。
+ai_surface_state() {
+  local raw="" norm=""
+  raw=$(sed -n 's/^ai-surface:[[:space:]]*//p' "$META_YAML" 2>/dev/null | head -n1 | tr -d '\r')
+  norm=$(printf '%s' "$raw" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')
+  case "$norm" in
+    \"*\") norm="${norm#\"}"; norm="${norm%\"}" ;;
+    \'*\') norm="${norm#\'}"; norm="${norm%\'}" ;;
+  esac
+  norm=$(printf '%s' "$norm" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  case "$norm" in
+    on)  printf 'on' ;;
+    off) printf 'off' ;;
+    "")  printf 'undeclared' ;;
+    *)   printf 'invalid' ;;
+  esac
+}
+
 # 读取当前成熟度级（缺 yaml 或缺 level 行视为 L0；把 "L2" 形式防御性归一为 2）
 # 注意：level 行存在但值为空/畸形时**不默认归 0**——返回空串交由 verify_ladder 0.4 判 FAIL，
 # 否则 "level: "（空值）会被宽放成假 L0 PASS（判据宽于 maturity-ladder 真源）。
@@ -201,14 +225,18 @@ notes/{lifecycle}/{class}/yyyy-mm-dd-topic-title.md
 Status: <status>
 ```
 
-- `Status:` 三选一，必须与所在文件夹一致：`proposed` / `implemented` / `rejected — <一行理由>`。
+- `Status:` 词表，必须与所在文件夹一致：`proposed` / `implemented` / `rejected — <一行理由>` /
+  `archived`。两条硬约束（判据 1.7 机械校验）：
+  - `rejected` **必须**带一行理由——`rejected` 之后跟分隔符（`—` / `-` / `:` 任一）且其后至少
+    2 个非空白字符；理由是否决理由唯一不可再生的载体，没有理由的 rejected 只是"有人不同意"；
+  - `archived/` 下 `Status:` 允许 `implemented`（**冻结保留原态**，归档不改一字）或 `archived`。
 - 正文从 `## Problem` 开始（先写动机，脱离方案也成立）。
 - **正文骨架按 lifecycle 分态**（时态与状态一致，判据 1.8 机械校验）：
 
   | lifecycle | 正文骨架 |
   |---|---|
   | `proposed/` | `## Proposal`（可将来时）→ `## Alternatives considered` → `## Acceptance criteria` → `## Risks`；禁止现在时 `## Decision` |
-  | `implemented/` | `## Decision`（现在时）→ `## Alternatives considered` → `## Consequences`（可选）；禁止提案时代标题（`## Proposal` / `## Plan` / `## Migration plan` / `## Acceptance criteria`） |
+  | `implemented/` | `## Decision`（现在时，**必须在场**——缺即 FAIL）→ `## Alternatives considered` → `## Consequences`（可选）；禁止提案时代标题（`## Proposal` / `## Plan` / `## Migration plan` / `## Acceptance criteria`），中文等价同样禁入（`## 提案` / `## 计划` / `## 迁移计划` / `## 验收标准` / `## 验收` / `## 风险` / `## 待办`） |
   | `rejected/` | 提案原文冻结（保留 `## Proposal`），verdict 只在 `Status:` 行；禁止现在时 `## Decision` |
   | `archived/` | 冻结豁免（保持归档时原貌，不改一字） |
 
@@ -249,9 +277,26 @@ Status: <status>
 
 读的结论只进两处：新 note 的链入/拆条，或评审报告的问题清单——不落盘等于没读。
 
+## 归档（退场）：git mv + Status 保持 + seal 同提交
+
+归档不是"挪个目录"，而是**一次带封印的状态迁移**——同一次变更内做完：
+
+1. `git mv implemented/<class>/<file>.md archived/<class>/<file>.md`（用 `git mv` 保留血缘；
+   移动即改写历史的入口，重命名信息必须是可追溯的提交事实）；
+2. `Status:` **保持原态**（`implemented` 冻结保留原值即可；写 `archived` 也合规，两种都不改正文）；
+3. 跑 `bash .meta/gates/archive-verify.sh seal` 追加封印——它只为**尚未登记**的归档件往
+   `archived/manifest.sha256` 追加 `<sha256><空格><空格><仓库相对路径>` 行，既有行一个字节都不改
+   （append-only；写入是「临时文件 + 同目录原子替换」）；
+4. 三件事**同一提交**。漏 seal → 本地层 A1（暂存区）与远端层 A4（全树）都以「未封印」拒绝提交。
+
+**封印意味着什么**：manifest 是归档件的唯一索引；`archive-verify.sh check` 逐条比对哈希，
+归档件改一字节即拒。`seal` 是唯一写路径，`check` 只读——钩子不在提交窗口里偷偷改工作区。
+`archived/` 另在 `.rgignore` 里隔离（`/.agents/notes/archived/`）：归档是冻结史，不该按词法
+命中挤掉当前结论的检索结果。
+
 ## 与下一级的关系
 
-有决策记录是 L1 的判据之一；是否"承诺可验"（L2）取决于 `gates/` 是否有非零退出门禁。
+有决策记录是 L1 的判据之一；是否"承诺可验"（L2）取决于 `.meta/gates/` 是否有非零退出门禁。
 PONYGO_EOF
   fi
 
@@ -292,6 +337,15 @@ PONYGO_EOF
 2. **不作现行权威**：引用 archived 结论前，先确认没有更新的 implemented 取代它；
    拿归档条当"当前就该这么做"的依据是状态误读。
 3. **引用方式**：链路径 + 注明"已归档（冻结快照）"，不复制正文。
+
+## 归档动作（把一条决策移进来时，同一次变更内做完）
+
+**归档 = `git mv` + `Status:` 保持 + `seal` 同提交**——三件事是一次变更，缺一件即欠账：
+
+1. `git mv <lifecycle>/<class>/<file>.md archived/<class>/<file>.md`（保血缘，别用 cp/mv 抹掉重命名事实）；
+2. `Status:` 保持原态（多为 `implemented`；写 `archived` 也合规）——正文一字不改；
+3. `bash .meta/gates/archive-verify.sh seal` 追加封印（append-only，manifest 是归档件的唯一索引）；
+4. 三件事同一提交。漏 seal 会被 A1（暂存区）与 A4（全树）以「未封印」拒绝，CI 不放行。
 
 ## 恢复流程
 
@@ -392,7 +446,7 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 
 | 资产 | 路径 | 角色 | 退出语义 |
 |---|---|---|---|
-| A1 | `.meta/gates/adr-verify.sh` | 暂存区 ADR 格式门（无参=暂存 ADR；带参=指定路径），末尾调 A6 `check` | 0 放行 / 非零拒绝 |
+| A1 | `.meta/gates/adr-verify.sh` | 暂存区 ADR 格式门（无参=暂存 ADR；带参=指定路径）；A6 `check` 在**任何跳过分支之前**早期 probe（见下「A6 的时序」） | 0 放行 / 非零拒绝 |
 | A2 | `.meta/gates/adr-verify.spec.sh` | A1 的负样本执行判据（非法→拒、合法→放行、TOCTOU→拒） | 0 = 自检通过 |
 | A3 | `.githooks/pre-commit`（或既有钩子内追加块） | 本地层挂载点 | 转发 A1 的退出码 |
 | A4 | `.meta/gates/ci-verify.sh` | forge 无关全树门（verify-note 整树 + A2 + A6/A7，三段） | 0 放行 / 非零拒绝 |
@@ -407,10 +461,10 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 
 | 承诺（maturity-ladder §5） | 命令 | 命中判据 |
 |---|---|---|
-| 落了 ADR 就必须过机械格式门（暂存区） | `bash .meta/gates/adr-verify.sh` | 1.5–1.8 |
+| 落了 ADR 就必须过机械格式门（暂存区） | `bash .meta/gates/adr-verify.sh` | 1.5–1.8 + 1.10（逐文件；1.9 只在整树模式判，带参模式不判） |
 | 暂存字节 = 校验字节（不许"暂存后偷改"） | 同上（内建 R6 比对） | R6 TOCTOU |
 | 重命名 ADR 不绕过门 | 同上（`--diff-filter=ACMR`） | R7 |
-| 全树 ADR 格式常绿 | `bash .agents/skills/write-adr/verify-note.sh` | 1.1–1.10 |
+| 全树 ADR 格式常绿 | `bash .agents/skills/write-adr/verify-note.sh` | 1.1–1.9a + 1.10（1.9b/1.9c 不在本门面，见「1.9 的分工」） |
 | 门自己会拒绝非法样本 | `bash .meta/gates/adr-verify.spec.sh` | A2 |
 | 归档件冻结（改一字节即拒） | `bash .meta/gates/archive-verify.sh check`（无参等价） | A6（manifest ↔ `archived/**/*.md` 双向一致） |
 | 归档必须显式封印 | `bash .meta/gates/archive-verify.sh seal` | A6（append-only 追加；新条目要求 `Status:` 首词 ∈ {`implemented`, `archived`}） |
@@ -434,6 +488,15 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 review 与 CI 的可追溯性，本门不冒充。
 **seal 是唯一写路径**，pre-commit 只 `check`——钩子不在提交窗口里偷偷改工作区/暂存区。
 
+### A6 的时序（为什么不是"末尾调 A6"）
+
+A1 里 A6 是**早期 probe**，不是末尾收口：判定在任何 `skip` 分支之前完成（`archive_probe`），
+输出与拒绝留在 ADR 段之后打印（`archive_finish`）。顺序语义没变（ADR 段在前、归档段在后），
+变的是**判定时机**——把 A6 留到末尾会把"本次没有暂存 ADR"变成绕过封印的门（实测缺陷：
+删除或移出归档件不产生暂存 ADR 变更，末尾调用的 A6 永远跑不到）。故：
+`archive_probe` 先算出 A6 的 rc 与输出 → ADR 段照常判 → `archive_finish` 打印归档段并按 rc
+fail-closed 收口。门缺失时优雅回退（不影响 ADR 判定）。
+
 ### 本地层与远端层：互补，**不等价**（B5 实测结论）
 
 两层跑的不是同一套判据，**不得**用"本地绿"推断"CI 也绿"，反之亦然：
@@ -441,19 +504,38 @@ review 与 CI 的可追溯性，本门不冒充。
 | | 本地层 `adr-verify.sh`（A3 → A1） | 远端层 `ci-verify.sh`（A4 → A5） |
 |---|---|---|
 | 输入面 | 暂存区**改动的 ADR 子集**（`--diff-filter=ACMR -- .agents/notes/*.md`） | `verify-note.sh` **整树**（`find .agents/notes -type f -name '*.md'`） |
-| 判据范围 | 1.5–1.8 + 1.10（逐文件）+ R6 字节比对 + R7 覆盖面 | 1.1–1.10（整树），**含 1.9「文档有家」等只在整树模式判的项** |
+| 判据范围 | 1.5–1.8 + 1.10（逐文件）+ R6 字节比对 + R7 覆盖面 | 1.1–1.9a + 1.10（整树；1.9a = 文档标准家 `docs/AGENTS.md` 存在）|
 | 定位 | 提交**前**拦截"这次改动" | 全仓**兜底**，抓历史债与整树不变量 |
 | 通过时能推什么 | 只说明"本次改动的 ADR 是合法的" | 只说明"整树此刻合法"，不校验暂存态 |
 
-**具体例子（实测）**：仓库缺 `docs/AGENTS.md`（1.9 违例），且这次提交没碰 `.agents/notes/`：
+**具体例子（实测）**：仓库缺 `docs/AGENTS.md`（1.9a 违例），且这次提交没碰 `.agents/notes/`：
 `bash .meta/gates/adr-verify.sh` → **exit 0**（无暂存 ADR 变更，直接跳过）；
-`bash .meta/gates/ci-verify.sh` → **exit 1**（整树模式跑 1.9 报缺文档家）。
+`bash .meta/gates/ci-verify.sh` → **exit 1**（整树模式跑 1.9a 报缺文档家）。
 所以两层是**互补**关系（本地=窄而快，CI=全而慢），不是同一结论的两份拷贝。
 
 **判定真源唯一**：格式判据只存在于 `.agents/skills/write-adr/verify-note.sh`；
 A1 只做它做不到的三件事——TOCTOU 字节比对、`ACMR` 覆盖面、非普通文件（symlink/gitlink）拒绝——
 不在此目录复刻 1.1–1.10（复刻必然漂移，故 `ponygo gate adr` 子命令被否决）。
 A4 不是"再实现一遍"，它只是**编排**：真源整树 + 本目录的负样本 spec。
+
+### 1.9 的分工：A1/A4 绿 ≠ 1.9b PASS（诚实边界）
+
+判据 1.9 在实现上分三段，看守面**不同**，不得混着推断：
+
+| 子项 | 内容 | 谁判 |
+|---|---|---|
+| 1.9a | 文档标准家 `docs/AGENTS.md` 存在 | `verify-note.sh`（整树模式）→ 经 A1/A4；`ponygo status` 亦判 |
+| 1.9b | 根 `AGENTS.md` 链到 `docs/AGENTS.md`（**仅当** `meta.yaml` 声明 `ai-surface: on`；否则 SKIPPED 不计入 PASS） | **由 CLI 的 `verify_ladder` 判**：`ponygo status` 与 `ponygo audit` 共用同一函数，**两者都会报 1.9 FAIL**（勿低估判定面） |
+| 1.9c | 包/模块文档覆盖（`packages/` `crates/` `src/` 下每包有 `AGENTS.md`/`README.md`，或在 `.meta/docs-tier/exemptions` 豁免） | 同上（`verify_ladder`，status 与 audit 共用） |
+
+原因：1.9b 要读 `meta.yaml` 开关、1.9c 要扫包目录，二者是**实例状态**而非单条 ADR 的格式。
+所以：`bash .meta/gates/adr-verify.sh` 与 `bash .meta/gates/ci-verify.sh` 全绿，只证明
+「ADR 格式与归档封印没问题」，**不证明 AI 常载入口完好**——要证 1.9b，跑 `ponygo status`
+（或 `ponygo audit`，同一函数；两者的 fail 列表都会出现 1.9）。
+机器面（`status --json` / `audit --json`）的 `coverage` 块**同源**且**默认保守**：只有
+`verify_ladder` 真的判过 1.9b（`ai-surface: on`）才给 `verified:["1.1-1.9"]`；其余情形——
+含 off/未声明/值非法，以及**骨架缺口等根本没跑 ladder 的提前退出分支**——一律给
+`verified:["1.1-1.8"]` + `skipped:["1.9b"]`（未判定 = 未验证，不得宣称）。
 
 ### 挂载方式（非破坏性）
 
@@ -488,11 +570,22 @@ fi
 
 `adr-verify.spec.sh` 在 `mktemp -d` 临时仓里造样本（`trap … EXIT` 清理，仓库只读）：
 合法 ADR（带参/无参两路）→ 断言 A1 为 0；时态错位（`proposed` 带 `## Decision`）、
-`implemented` 带提案时代标题、`Status` 与目录不一致 → 断言 A1 非零；
+`implemented` 带提案时代标题、`implemented` 含中文提案时代标题（`## 验收`，以及**复合词**
+`## 验收清单`——中文按前缀匹配，防"无空格复合标题"绕过）、`Status` 与目录不一致
+→ 断言 A1 非零；`rejected` 缺一行理由（判据 1.7）→ 断言 A1 非零**且**文案含「缺一行理由」，
+补上 `— <理由>` → 断言放行；`implemented` 缺 `## Decision`（判据 1.8）→ 断言 A1 非零**且**文案含
+「缺 ## Decision」，补 `## Decision` → 断言放行；中文提案标题用例的拒绝文案须含「提案时代标题」；
 符号链接 ADR（`ln -s`，index 模式 `120000`）→ 断言 A1 非零**且**文案指向"必须是普通文件"；
 staged 后又在工作区改动（两个方向：暂存合法→工作区改、暂存非法→工作区改好但未 `git add`）
 → 断言 A1 非零**且**文案含「ADR 有未暂存改动，请先 git add」；
 无暂存 ADR / 无 `.agents/notes` → 断言放行。
+每个"必须被拒"的样本都配一个相邻的正向对照（补一行理由 / 补 `## Decision` → 放行），
+证明判据不是"一律拒绝"——只有负样本的 spec 分不清"门会响"和"门坏了"。
+
+**已知弱点（诚实条款）**：`verify-note.sh` 按**行**匹配标题、不解析 Markdown 结构——围栏代码块内
+（``` / ~~~ 之中）写的 `## Decision` / `## Alternatives considered` 同样被认作"在场"，
+故把标题塞进示例代码块可绕过 1.8/1.10 的在场判据（与 1.10 同型弱点）。修它需要真 Markdown 解析，
+收益低而回归面大；这道缝由 review 兜，spec 不冒充已闭。
 
 `## Alternatives considered` 曾是 notes/README 的强制契约而判定真源 1.1–1.9 不判（覆盖缺口），
 该 case 当时做成**探针**；**2026-10-29 起 1.10 落地为硬判据**，探针随之翻转为**硬断言**：
@@ -752,15 +845,23 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 3. **选 lifecycle**：`proposed/`（未实现）或 `implemented/`（随本次变更落地）。
 4. **选 class**：`feature`（新能力）/ `bug-fix`（修缺陷）/ `simplification`（减复杂度）/ `architecture`（交付源码的结构）/ `process`（代码周围的工具与流程）/ `testing`（测试策略）。都不够 → 考虑在 `notes/classes.local` 登记领域扩展（扩展即一次治理决策，须评审）。
 5. **建文件**：`.agents/notes/{lifecycle}/{class}/$(date +%F)-<topic-title>.md`，topic 用 kebab-case。
-6. **头部**：第一行 `# Agent Note: <title>`，空行，`Status: <与所在目录一致>`（rejected 可带一行理由：`rejected — <理由>`）。
-7. **正文**：`## Problem` 开头（先写动机，脱离方案也成立），随后**按 lifecycle 选骨架**（判据 1.8 机械校验标题是否与 lifecycle 匹配，选错即 FAIL；判据 1.10 机械校验 `## Alternatives considered` 必须在场）：
+6. **头部**：第一行 `# Agent Note: <title>`，空行，`Status: <与所在目录一致>`。`rejected` 必须带一行理由：`Status: rejected — <为何否决>`（分隔符 `—` / `-` / `:` 任一，其后至少 2 个非空白字符；判据 1.7 机械校验，缺理由即 FAIL）。
+7. **正文**：`## Problem` 开头（先写动机，脱离方案也成立），随后**按 lifecycle 选骨架**（判据 1.8 机械校验标题是否与 lifecycle 匹配，选错即 FAIL：`implemented/` 缺 `## Decision` 即 FAIL，含提案时代标题——英文 `## Proposal`/`## Plan`/`## Migration plan`/`## Acceptance criteria` 或中文 `## 提案`/`## 计划`/`## 迁移计划`/`## 验收标准`/`## 验收`/`## 风险`/`## 待办`——同样 FAIL；判据 1.10 机械校验 `## Alternatives considered` 必须在场）：
 
    | lifecycle | 骨架 |
    |---|---|
    | `proposed/` | `## Proposal`（将来时）→ `## Alternatives considered` → `## Acceptance criteria` → `## Risks` |
-   | `implemented/` | `## Decision`（现在时）→ `## Alternatives considered`（必填）→ `## Consequences`（可选） |
-   | `rejected/` | 提案原文冻结（保留 `## Proposal`），verdict 只写 `Status:` 行 |
-8. **迁移状态** = 移动文件到目标 lifecycle + 改 `Status:` 行 + 把提案时代标题改写为现在时——三件事在同一次变更内完成。
+   | `implemented/` | `## Decision`（现在时，必须在场）→ `## Alternatives considered`（必填）→ `## Consequences`（可选） |
+   | `rejected/` | 提案原文冻结（保留 `## Proposal`），verdict 只写 `Status:` 行（含一行理由） |
+   | `archived/` | 冻结豁免：保持归档时原貌，一字不改（走第 8 步的归档动作） |
+8. **迁移/归档状态 = 四件事**，同一次变更内完成：
+   ① 移动文件到目标 lifecycle（`git mv`；落 `archived/` 时同样用 `git mv` 保血缘）；
+   ② 改 `Status:` 行（`archived/` 下保持原态 `implemented` 或写 `archived`，两种都合规）；
+   ③ 把提案时代标题改写为现在时（proposed → implemented 时；`## Proposal` → `## Decision`，
+   `## Acceptance criteria`/`## Risks` 折叠进 `## Consequences`）；
+   ④ **归档时追加封印**：`bash .meta/gates/archive-verify.sh seal`（append-only，只为**尚未登记**
+   的归档件追加 manifest 行；manifest 是归档件的唯一索引）。漏 ④ → 本地层 A1（暂存区）与远端层 A4（全树）
+   都以「未封印」拒绝提交，CI 不放行。正文**一字不改**（冻结即法律）。
 
 ## 校准样例
 
@@ -779,6 +880,7 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 ## 验证与报告
 
 - 跑 **`bash .agents/skills/write-adr/verify-note.sh`**（无参 = 整树；或跟单个相对路径）——机械影子 1.1–1.10（1.1–1.8：路径两轴/文件名/日期/Status/骨架标题；1.9：整树文档有家 docs/AGENTS.md 存在；1.10：必含 `## Alternatives considered`）全部通过，exit 0 才算完成；FAIL 项逐条修复重跑。
+- 归档/迁移落 `archived/` 时，再跑 **`bash .meta/gates/archive-verify.sh seal`**（追加封印，append-only）与 **`bash .meta/gates/archive-verify.sh check`**（只读校验：逐条比对归档件哈希，应为 exit 0；报「未封印」/「哈希不符」即欠账）。
 - 再跑 `ponygo status`：决策数 +1、L1 判据全绿、无卫生 WARN。
 - 报告格式：新记录路径 + lifecycle/class + 一句话 Problem + verify-note.sh 的通过输出。
 PONYGO_EOF
@@ -801,9 +903,10 @@ PONYGO_EOF
 # 退出码：全部通过 exit 0；任一违例 exit 1（逐项打印 FAIL）。
 # 对应判据：maturity-ladder §5 的 L1 判据 1.1–1.10，
 # 影子来自 DSH verify-agent-note-format / verify-agent-note-classification。
-# 1.1–1.9 与 ponygo verify_ladder 逐项对齐；1.10（必含 ## Alternatives considered）
-# 于 2026-10-29 新增为硬判据，**只由本脚本判定**——CLI 不重复实现（P9：一份判据一份实现，
-# 两份必然漂移），故 `ponygo status` 的 L1 段仍报 1.1–1.9 并明文声明该范围；
+# 1.1–1.8 与 ponygo verify_ladder 逐项对齐；1.9 只对齐 1.9a（详见下文「对齐契约」）；
+# 1.10（必含 ## Alternatives considered）于 2026-10-29 新增为硬判据，**只由本脚本判定**——
+# CLI 不重复实现（P9：一份判据一份实现，两份必然漂移），故 `ponygo status` 的 L1 段仍报
+# 「判据 1.1–1.9」（1.9b 条件未判定时收窄为 1.1–1.8）并明文声明该范围；
 # 1.10 的看守面由 A1 暂存区门与 A4 全树门承担（两者都经本脚本）。
 # 见 revisions/accepted/2026-10-29-alternatives-criterion-1-10.md。
 #
@@ -823,8 +926,16 @@ PONYGO_EOF
 # 不判"implemented 内容是否真的已落地"（真实性）与"多类是否该拆条"
 # （分类）——这两者是语义判断，靠 review + write-adr 校准样例。
 #
-# 对齐契约：本脚本的 1.1–1.9 与 CLI 的 verify_ladder 逐项对齐；若发现行为不一致，
-# 以 maturity-ladder §5 判据真源为准并回改两者。1.10 只在本脚本实现（CLI 不复刻，P9）。
+# 对齐契约（2026-11-09 改准，原文「1.1–1.9 逐项对齐」已不成立）：
+#   1.1–1.8：与 CLI 的 verify_ladder 逐项对齐（两道面同判、同文案关键字）；
+#   1.9：**只部分对齐**——本脚本只判 1.9a（`docs/AGENTS.md` 存在，且仅无参整树模式）。
+#         1.9b（根 `AGENTS.md` 是否链到 `docs/AGENTS.md`，条件于 `ai-surface: on`）与
+#         1.9c（包文档覆盖）**只由 CLI 的 verify_ladder 判定**（`ponygo status` 与 `ponygo audit`
+#         共用同一函数、都报 1.9 FAIL——不是只有 status 才判，勿低估判定面）：
+#         它们要读 meta.yaml 开关 + 扫描包目录，属实例状态而非单条 ADR 的格式。
+#         故 `A1/A4 绿 ≠ 1.9b PASS`——本地/远端门只证明 ADR 格式与归档封印，不证明 AI 常载入口完好。
+#   1.10：只在本脚本实现（CLI 不复刻，P9 一份判据一份实现）。
+# 若发现 1.1–1.8 行为不一致，以 maturity-ladder §5 判据真源为准并回改两者。
 # ============================================================
 set -u
 
@@ -860,7 +971,7 @@ DATE_OK=0
 date -d @0 '+%Y' >/dev/null 2>&1 && DATE_OK=1
 
 check_one() { # $1 = 决策文件路径
-  local f="$1" b rel lc slashes st d8
+  local f="$1" b rel lc slashes st stline rest sep reason_body d8
   b="${f##*/}"
   [ "$b" = "README.md" ] || [ "$b" = "AGENTS.md" ] && return 0
   rel="${f#"$NOTES_DIR"/}"
@@ -879,7 +990,13 @@ check_one() { # $1 = 决策文件路径
     date -d "$d8" >/dev/null 2>&1 || fail "1.6 $f：日期不合法（$d8）"
   fi
   # 1.7 Status 首词与所在 lifecycle 一致（archived 允许 implemented/archived）
-  st=$(sed -n 's/\r$//;s/^Status:[[:space:]]*//p' "$f" 2>/dev/null | head -n1 | awk '{print $1}')
+  # stline = Status: 行剥标记后的原文（供下面的 rejected 理由判据复用，避免二次读文件）
+  stline=$(sed -n 's/\r$//;s/^Status:[[:space:]]*//p' "$f" 2>/dev/null | head -n1)
+  st=$(printf '%s\n' "$stline" | awk '{print $1}')
+  # 容忍粘写冒号的理由分隔符：`Status: rejected: <理由>` 的首词是 `rejected:`——剥掉尾随冒号
+  # 再与目录比，否则「冒号分隔」这种写法会被误判成 Status 漂移（`—` / `-` 两种分隔符要求留空格，
+  # 无空格时仍按 Status 漂移拒绝——fail-closed，不会静默放行）。
+  st="${st%:}"
   if [ -z "$st" ]; then
     fail "1.7 $f：缺 Status: 行"
   elif [ "$lc" = "archived" ]; then
@@ -887,15 +1004,68 @@ check_one() { # $1 = 决策文件路径
   elif [ "$st" != "$lc" ]; then
     fail "1.7 $f：Status($st) 与目录($lc) 不一致"
   fi
+  # 1.7（判据补强）rejected 必须带一行理由：`rejected` 之后须有分隔符（`—` / `-` / `:`）
+  # 且剥掉分隔符与空白后**剩余正文**至少 2 个非空白字节。为什么是硬判据：否决理由是这条记录唯一不可再生的信息——
+  # 没有理由的 rejected 只是"有人不同意"，重新面对同一岔路时既不能避免重开争执，
+  # 也不能解释现状为何是现在这样（状态轴有位置、没有内容）。
+  # 豁免：`archived/`（冻结，与 1.8/1.10 同口径）、README.md / AGENTS.md（函数入口早退）、
+  # `*.zh.md`（双语配对，随母语版同批补齐，不独立判——与 1.10 同口径）。
+  # 计数口径（2026-11-09 收紧）：剥掉**分隔符本身**与空白/ASCII 标点/em dash 后，剩余正文 ≥2 字节。
+  # 旧口径只数非空白字节 → `Status: rejected ——`（纯分隔符）被放行——分隔符不是理由。纯标点同理。
+  # 残留边界（诚实条款）：CJK 标点（如单独一个 `。`）不被本口径剥离（C locale 下按字节匹配会误删汉字），
+  # 故"仅一个中文句号"仍可能过——属已知残余，靠 review 兜。
+  if [ "$st" = "rejected" ] && [ "$lc" != "archived" ]; then
+    case "$b" in
+      *.zh.md) ;;
+      *)
+        rest="${stline#"$st"}"
+        rest="${rest#"${rest%%[![:space:]]*}"}"   # 剥前导空白（纯字节操作，不依赖 locale）
+        sep=0
+        case "$rest" in
+          —*|--*|-*|:*) sep=1 ;;
+        esac
+        if [ "$sep" = "1" ]; then
+          case "$rest" in
+            —*) rest="${rest#—}" ;;
+            -*) rest="${rest#-}"; rest="${rest#-}" ;;
+            :*) rest="${rest#:}" ;;
+          esac
+        fi
+        # 正文 = 剥掉 ASCII 空白/标点（含 - 与 :）与 em dash 之后的剩余字节。
+        # `——` / `--` / `:` / `?!` 之类的"纯分隔符/纯标点"在这里归零 → 缺一行理由。
+        reason_body=$(printf '%s' "$rest" | tr -d '[:space:][:punct:]' | sed 's/—//g')
+        if [ "$sep" != "1" ] || [ "$(printf '%s' "$reason_body" | wc -c | tr -d ' ')" -lt 2 ]; then
+          fail "1.7 $f：rejected 缺一行理由（Status: rejected — <为何否决>）"
+        fi
+        ;;
+    esac
+  fi
   # 1.8 骨架标题与 lifecycle 匹配
+  # implemented/：现在时 `## Decision` 必须在场（迁移即改写——proposed→implemented 的
+  # 那次变更必须把 `## Proposal` 改写为 `## Decision`，否则正文层状态轴失真）；
+  # 并禁提案时代标题——英文等价与**中文等价**都算（中文标题同样是提案态残留：
+  # 标题语言不该成为绕过判据的后门）。中文清单：提案/计划/迁移计划/验收标准/验收/风险/待办。
+  # 匹配口径（2026-11-09 收口）：英文按**边界**匹配（标题词后有空白或行尾）；中文按**前缀**匹配
+  # ——中文标题无词间空格，边界匹配会让 `## 验收清单` / `## 风险与缓解` / `## 待办事项` 等复合词
+  # 全部放行（等于开个洞）。前缀匹配的代价：`## 计划性…` 这类以禁词开头的标题也一并拒（fail-closed，可接受）。
+  # 豁免：archived/ 冻结（详见 `.agents/notes/README.md` 格式契约与 write-adr 技能）。
   case "$lc" in
     implemented)
+      grep -qE '^## Decision([[:space:]]|$)' "$f" \
+        || fail "1.8 $f：implemented 缺 ## Decision（迁移即改写：现在时 Decision 必须在场）"
       grep -qE '^## (Proposal|Plan|Migration plan|Acceptance criteria)([[:space:]]|$)' "$f" \
-        && fail "1.8 $f：implemented 含提案时代标题（## Proposal/## Plan/## Migration plan/## Acceptance criteria）" ;;
+        && fail "1.8 $f：implemented 含提案时代标题（## Proposal/## Plan/## Migration plan/## Acceptance criteria）"
+      grep -qE '^## (提案|计划|迁移计划|验收标准|验收|风险|待办)' "$f" \
+        && fail "1.8 $f：implemented 含提案时代标题（中文提案时代标题：## 提案/## 计划/## 迁移计划/## 验收标准/## 验收/## 风险/## 待办，按前缀匹配含复合词）"
+      ;;
     proposed|rejected)
       grep -qE '^## Proposal([[:space:]]|$)' "$f" || fail "1.8 $f：$lc 缺 ## Proposal"
       grep -qE '^## Decision([[:space:]]|$)' "$f" && fail "1.8 $f：$lc 含现在时 ## Decision（提案伪装成决定）" ;;
   esac
+  # 已知弱点（诚实条款，不修解析器）：本脚本按**行**匹配标题，不解析 Markdown 结构——
+  # 围栏代码块（``` 或 ~~~ 内）里出现的 `## Decision` / `## Alternatives considered` 同样会被认作在场，
+  # 故"把标题塞进示例代码块"可绕过 1.8/1.10 的在场判据。为什么不修：修它需要真正的 Markdown 解析
+  # （bash 里即半个解析器），收益低而回归面大；这道缝由 review（人看全文）兜，本脚本不冒充已闭。
   # 1.10 必含 ## Alternatives considered（2026-10-29 起为硬判据，不是 WARN）
   # 为何是硬判据：备选与落选理由是"非平凡决策"的实质内容——只写 Decision 的 ADR 会退化为
   # 事后记录，重新面对同一岔路时答不出"为什么不选另一条"；契约本就在 .agents/notes/README.md
@@ -1192,7 +1362,9 @@ PONYGO_EOF
 
 do_sync() {
   # AI 适配开关：meta.yaml 里 ai-surface: off 时，不生成 AGENTS.md / CLAUDE.md（禁 AI 团队整体退场）
-  if grep -qiE '^ai-surface:[[:space:]]*off' "$META_YAML" 2>/dev/null; then
+  # 开关读取走 ai_surface_state（与 1.9b/2.6 同一真源）：`off` / `OFF` / `"off"` / `off ` 一律跳过投影，
+  # 不得出现「status 说 off、sync 照投影」的双面（归一规则见 ai_surface_state 注释）。
+  if [ "$(ai_surface_state)" = "off" ]; then
     info "ai-surface: off —— 跳过 AGENTS.md / CLAUDE.md 投影（未生成任何 AI 投影文件）。"
     return 0
   fi
@@ -1399,7 +1571,10 @@ verify_ladder() {
   DT_OFF=0; DT_SKIP=0
   # 2.6 条件判据状态（F9，完全仿 2.5）：AS_OFF=1 → 显式 opt-out（结论禁写「全部 PASS」）；
   # AS_SKIP=1 → 未声明 ai-surface（2.6 不计入 PASS，WARN 催声明）。
-  AS_OFF=0; AS_SKIP=0
+  AS_OFF=0; AS_SKIP=0; AS_WHY=""
+  # 1.9b 条件子项状态（C3，与 2.6 同一开关 ai-surface）：AS19_SKIP=1 → off 或未声明 →
+  # 根 AGENTS.md 索引链不计入 PASS，结论行把 "1.1–1.9 PASS" 改写为 "1.1–1.8 PASS；1.9b SKIPPED…"。
+  AS19_SKIP=0; AS19_WHY=""; AS19_JUDGED=0
   # 归一后不匹配 ^[0-5]$ → 只验 L0、报 0.4 FAIL、跳过 L1/L2（不对未验证值做算术比较）
   local validated=0
   case "$lv" in
@@ -1409,7 +1584,7 @@ verify_ladder() {
   local DATE_OK=0
   date -d @0 '+%Y' >/dev/null 2>&1 && DATE_OK=1
   local verified_range="L0"
-  local f rel slashes b d8 st lc d
+  local f rel slashes b d8 st stline rest sep reason_body lc d
 
   # ---- L0（0.1-0.5）----
   [ -d "$META_DIR" ] || vl_fail "0.1 .meta/ 缺失 → 跑 'ponygo init'"
@@ -1468,13 +1643,21 @@ verify_ladder() {
       [ "$n16" -eq 0 ] || vl_fail "1.6 文件名不符合 yyyy-mm-dd-topic.md（如：${names16%;}）→ 按日期前缀规范改名"
       [ "$n16d" -eq 0 ] || vl_fail "1.6 日期不合法（如：${names16d%;}）→ 改为真实存在的 yyyy-mm-dd"
       # 1.7 Status 首词（trim、剥 \r、区分大小写）与所在 lifecycle 一致；archived/ 下 implemented/archived 均判过；README 豁免
-      local n17=0 names17=""
+      # 1.7b（与判定真源 verify-note.sh 同步，2026-11-09）：rejected 必须带一行理由——
+      #   `rejected` 之后跟分隔符（— / - / : 任一），且**剥掉分隔符与空白后**剩余正文 ≥2 字节
+      #   （纯分隔符 / 纯 ASCII 标点 = 没有理由，如 `Status: rejected ——`）。豁免口径同真源：
+      #   archived/（冻结）、README.md/AGENTS.md（循环内已跳过）、*.zh.md（双语配对，不独立判）。
+      # 为什么影子必须跟：1.10 当年的事故形态就是「真源判、CLI 不判」→ status 打全绿而 A1/A4 红，
+      #   报告面与判据面错位（同一仓两个结论）。故两道面共用同一批关键字（缺一行理由 / 缺 ## Decision）。
+      local n17=0 n17r=0 names17="" names17r=""
       while IFS= read -r -d '' f; do
         b="${f##*/}"
         [ "$b" = "README.md" ] || [ "$b" = "AGENTS.md" ] && continue
         rel="${f#"$DECISIONS_DIR"/}"
         lc="${rel%%/*}"
-        st=$(sed -n 's/\r$//;s/^Status:[[:space:]]*//p' "$f" 2>/dev/null | head -n1 | awk '{print $1}')
+        stline=$(sed -n 's/\r$//;s/^Status:[[:space:]]*//p' "$f" 2>/dev/null | head -n1)
+        st=$(printf '%s\n' "$stline" | awk '{print $1}')
+        st="${st%:}"   # 粘写冒号分隔符（Status: rejected: 理由）剥尾随冒号再比目录，与真源同口径
         if [ -z "$st" ]; then
           n17=$((n17+1)); [ "$n17" -le 3 ] && names17="${names17}${b}(缺 Status:行)；"
         elif [ "$lc" = "archived" ]; then
@@ -1484,12 +1667,44 @@ verify_ladder() {
         elif [ "$st" != "$lc" ]; then
           n17=$((n17+1)); [ "$n17" -le 3 ] && names17="${names17}${b}(Status: $st)；"
         fi
+        # 1.7b rejected 理由（计数独立：与 1.7 的 Status 漂移是不同成因，合并会丢掉补救动作）
+        if [ "$st" = "rejected" ] && [ "$lc" != "archived" ]; then
+          case "$b" in
+            *.zh.md) ;;
+            *)
+              rest="${stline#"$st"}"
+              rest="${rest#"${rest%%[![:space:]]*}"}"   # 剥前导空白（纯字节操作，不依赖 locale）
+              sep=0
+              case "$rest" in
+                —*|--*|-*|:*) sep=1 ;;
+              esac
+              if [ "$sep" = "1" ]; then
+                case "$rest" in
+                  —*) rest="${rest#—}" ;;
+                  -*) rest="${rest#-}"; rest="${rest#-}" ;;
+                  :*) rest="${rest#:}" ;;
+                esac
+              fi
+              # 正文 = 剥掉 ASCII 空白/标点（含 - 与 :）与 em dash 后的剩余字节（与真源同一口径）：
+              # `Status: rejected ——` / `--` / `:` 这类纯分隔符必须归零，分隔符本身不是理由。
+              reason_body=$(printf '%s' "$rest" | tr -d '[:space:][:punct:]' | sed 's/—//g')
+              if [ "$sep" != "1" ] || [ "$(printf '%s' "$reason_body" | wc -c | tr -d ' ')" -lt 2 ]; then
+                n17r=$((n17r+1)); [ "$n17r" -le 3 ] && names17r="${names17r}${b}；"
+              fi
+              ;;
+          esac
+        fi
       done < <(find "$DECISIONS_DIR" -type f -name '*.md' -print0 2>/dev/null)
       [ "$n17" -eq 0 ] || vl_fail "1.7 Status 首词与所在目录不符（如：${names17%;}）→ 改 Status 首词与所在 lifecycle 一致（archived/ 允许 implemented 或 archived）"
+      [ "$n17r" -eq 0 ] || vl_fail "1.7 rejected 缺一行理由（如：${names17r%;}）→ Status 行补「rejected — <为何否决>」（剥掉分隔符 —/-/: 与空白后剩余正文 ≥2 字节；纯分隔符/纯标点不算理由；判据与 verify-note.sh 同源）"
       # 1.8 正文骨架与 lifecycle 匹配（README 豁免；archived 冻结豁免）：
       # proposed/rejected 必须含 ## Proposal 且无现在时 ## Decision；
-      # implemented 禁止提案时代标题（## Proposal/## Plan/## Migration plan/## Acceptance criteria）
-      local n18=0 names18=""
+      # implemented 必须含现在时 ## Decision（迁移即改写），且禁止提案时代标题
+      #   （英文 ## Proposal/## Plan/## Migration plan/## Acceptance criteria 按边界匹配；
+      #    中文 提案/计划/迁移计划/验收标准/验收/风险/待办 按**前缀**匹配——中文标题无词间空格，
+      #    边界匹配会让 `## 验收清单`/`## 风险与缓解`/`## 待办事项` 等复合词全部放行，等于开个洞）。
+      # 与真源 verify-note.sh 同文案关键字：「缺 ## Decision」「提案时代标题」。
+      local n18=0 n18d=0 names18="" names18d=""
       while IFS= read -r -d '' f; do
         b="${f##*/}"
         [ "$b" = "README.md" ] || [ "$b" = "AGENTS.md" ] && continue
@@ -1497,7 +1712,11 @@ verify_ladder() {
         lc="${rel%%/*}"
         case "$lc" in
           implemented)
-            if grep -qE '^## (Proposal|Plan|Migration plan|Acceptance criteria)([[:space:]]|$)' "$f"; then
+            if ! grep -qE '^## Decision([[:space:]]|$)' "$f"; then
+              n18d=$((n18d+1)); [ "$n18d" -le 3 ] && names18d="${names18d}${b}；"
+            fi
+            if grep -qE '^## (Proposal|Plan|Migration plan|Acceptance criteria)([[:space:]]|$)' "$f" \
+               || grep -qE '^## (提案|计划|迁移计划|验收标准|验收|风险|待办)' "$f"; then
               n18=$((n18+1)); [ "$n18" -le 3 ] && names18="${names18}${b}(implemented 含提案时代标题)；"
             fi ;;
           proposed|rejected)
@@ -1508,13 +1727,46 @@ verify_ladder() {
             fi ;;
         esac
       done < <(find "$DECISIONS_DIR" -type f -name '*.md' ! -name 'README.md' -print0 2>/dev/null)
-      [ "$n18" -eq 0 ] || vl_fail "1.8 正文骨架与 lifecycle 不匹配（如：${names18%;}）→ proposed/rejected 用 ## Proposal（将来时），implemented 用现在时 ## Decision（proposed→implemented 迁移时改写）"
+      [ "$n18d" -eq 0 ] || vl_fail "1.8 implemented 缺 ## Decision（迁移即改写：现在时 Decision 必须在场，如：${names18d%;}）→ proposed→implemented 迁移时把 ## Proposal 改写为 ## Decision"
+      [ "$n18" -eq 0 ] || vl_fail "1.8 正文骨架与 lifecycle 不匹配（如：${names18%;}）→ proposed/rejected 用 ## Proposal（将来时），implemented 用现在时 ## Decision；implemented 含提案时代标题（英文或中文等价）即 FAIL"
       # 1.9 文档有家（v2.0）：docs/AGENTS.md 存在（文档标准的家）+ 根 AGENTS.md 含 docs/AGENTS.md 索引链
       # + 包/模块文档覆盖（每个包目录有 AGENTS.md 或 README.md，或列入 .meta/docs-tier/exemptions 豁免）
       [ -f "docs/AGENTS.md" ] || vl_fail "1.9 缺文档标准家 docs/AGENTS.md（agent 自动加载）→ 补 docs/AGENTS.md（tier 分类 + 写作规则 + slop checklist）"
-      if [ -f "AGENTS.md" ] && ! grep -q 'docs/AGENTS.md' "AGENTS.md"; then
-        vl_fail "1.9 根 AGENTS.md 未链到文档标准家 docs/AGENTS.md → 加一行索引（'文档标准 → docs/AGENTS.md'，重跑 'ponygo sync' 自动带）"
-      fi
+      # 1.9b 根 AGENTS.md 索引链 = **条件子项**（C3：fail-closed 仅当声明 ai-surface，与 2.6 同一开关）：
+      #   ai-surface: on          → 声明即承诺：根 AGENTS.md 缺失或无 docs/AGENTS.md 字面链 = 1.9 FAIL；
+      #   ai-surface: off / 未声明 → 1.9b SKIPPED（不计入 PASS；WARN 催声明，结论行由 AS19_SKIP 改写）。
+      # 为什么挂开关而不是无条件判：不生成 AI 投影的实例（off/未声明）没有「常载入口」这个对象，
+      # 无条件判等于要求一个不存在的载体；但一旦声明 on（承诺有 AI 常载面），缺文件静默 PASS 就是假绿
+      # ——旧实现 `[ -f ] && ! grep -q` 恰是这个漏洞（缺文件 → 条件为假 → 不报错 → 静默通过）。
+      # 判定面（勿低估）：1.9b 由**本函数**判——`ponygo status` 与 `ponygo audit` 共用 verify_ladder，
+      # 两者都会报 1.9 FAIL；不是"只有 status 才判"。
+      local ai19_state=""
+      ai19_state=$(ai_surface_state)
+      case "$ai19_state" in
+        on)
+          AS19_JUDGED=1   # 1.9b 真被判过（判成 FAIL 也算判过）→ JSON coverage 才可写 verified 1.1-1.9
+          if [ ! -f "AGENTS.md" ]; then
+            vl_fail "1.9 已声明 ai-surface: on 但根 AGENTS.md 不存在（声明即承诺：AI 常载入口缺位，docs/AGENTS.md 索引链无处安放）→ 补救：跑 'ponygo sync' 生成根 AGENTS.md 与 CLAUDE.md"
+          elif ! grep -q 'docs/AGENTS.md' "AGENTS.md"; then
+            vl_fail "1.9 根 AGENTS.md 未链到文档标准家 docs/AGENTS.md → 加一行索引（'文档标准 → docs/AGENTS.md'，重跑 'ponygo sync' 自动带）"
+          fi
+          ;;
+        off)
+          AS19_SKIP=1; AS19_WHY="ai-surface: off（显式 opt-out）"
+          printf 'ponygo: WARN ai-surface: off（显式 opt-out）→ 1.9b SKIPPED——根 AGENTS.md 索引链不计入 PASS；想启用 AI 常载面请把 meta.yaml 改为 ai-surface: on\n' >&2
+          ;;
+        invalid)
+          # 有值但归一后不是 on|off（如 `ai-surface: yes`）：不得静默当"没写"——旧文案说"缺 ai-surface"
+          # 而文件里明明有值，属误导（且静默失去 fail-closed）。按未声明处理 + 明说值非法。
+          AS19_SKIP=1; AS19_WHY="ai-surface 值非法（仅 on|off）"
+          printf 'ponygo: WARN ai-surface 值非法（仅 on|off，收到：%s）→ 按未声明处理，1.9b SKIPPED——根 AGENTS.md 索引链不计入 PASS；改为 ai-surface: on|off\n' \
+            "$(sed -n 's/^ai-surface:[[:space:]]*//p' "$META_YAML" 2>/dev/null | head -n1 | tr -d '\r' | tr -d '[:space:]')" >&2
+          ;;
+        *)
+          AS19_SKIP=1; AS19_WHY="未声明 ai-surface"
+          printf 'ponygo: WARN 未声明 ai-surface（meta.yaml 缺 ai-surface: on|off）→ 1.9b SKIPPED——根 AGENTS.md 索引链不计入 PASS；想启用 AI 常载面请加 ai-surface: on\n' >&2
+          ;;
+      esac
       # 1.9c 包文档覆盖：探测常见包根（packages/crates/src 的直接子目录），每个须有 AGENTS.md 或 README.md 或入豁免清单
       local pkg_root="" pkg_d="" pkg_missing=0 pkg_names="" exempt_file=".meta/docs-tier/exemptions"
       for pkg_root in packages crates src; do
@@ -1630,13 +1882,9 @@ verify_ladder() {
       #   off        → 显式 opt-out（结论行禁写「全部 PASS」）
       #   on         → 校验根 AGENTS.md 含**成对**投影哨兵块；常量共用 SYNC_BEGIN/SYNC_END
       #                （= do_sync 写标记区用的同一真值，禁第二副本）。本判据只读、不投影。
-      local ai_raw="" ai_state="undeclared" ai_proj=0
-      ai_raw=$(sed -n 's/^ai-surface:[[:space:]]*//p' "$META_YAML" 2>/dev/null | head -n1 | tr -d '\r')
-      case "$ai_raw" in
-        on)  ai_state="on" ;;
-        off) ai_state="off" ;;
-        *)   ai_state="undeclared" ;;  # 缺键/空/畸形值（含引号/大小写变体）→ 按未声明处理
-      esac
+      local ai_state="" ai_proj=0
+      # 开关值读取收敛到 ai_surface_state（与 1.9b 同一读取真源，禁第二副本）
+      ai_state=$(ai_surface_state)
       case "$ai_state" in
         on)
           # W9-A2：成对性严格判定——恰一个 BEGIN、恰一个 END、BEGIN 行号 < END 行号、块内非空；
@@ -1673,9 +1921,13 @@ verify_ladder() {
           # 显式 opt-out：不判 FAIL；结论行由 AS_OFF 改写（不得出现「全部 PASS」）
           AS_OFF=1
           ;;
+        invalid)
+          # 值非法已在 L1 段（1.9b）打过「值非法」WARN——这里只记 SKIP，不重复误导文案
+          AS_SKIP=1; AS_WHY="ai-surface 值非法（仅 on|off）"
+          ;;
         *)
           printf 'ponygo: WARN 未声明 ai-surface（meta.yaml 缺 ai-surface: on|off）→ 2.6 SKIPPED 不计入 PASS；想启用 AI 常载命约请加 ai-surface: on\n' >&2
-          AS_SKIP=1
+          AS_SKIP=1; AS_WHY="未声明 ai-surface"
           ;;
       esac
     fi
@@ -1717,17 +1969,24 @@ verify_ladder() {
   #   任一条件判据 off（显式 opt-out）→ 基线改写为"2.1–2.4 PASS"并逐条列「未启用」，**禁写「全部 PASS」**；
   #   任一未声明 → 该判据 SKIPPED 不计入 PASS（WARN 已在对应分支输出）；
   #   两者皆无 → 基线 =「${verified_range} 判据 1.1–1.9 PASS」+ 覆盖边界声明。
+  # 1.9b 条件子项（C3）：off / 未声明 ai-surface → 该子项 SKIPPED，L1 基线必须从
+  #   「1.1–1.9 PASS」改写为「1.1–1.8 PASS」并附「1.9b SKIPPED……不计入 PASS」——
+  #   只加一行 SKIP 不改基线，等于让"1.9 PASS"字样冒充一个未判的子项（假绿）。
   #
   # 判据覆盖声明（Wave13 P0-2）：本命令的机械影子只覆盖 1.1–1.9；1.10（必含
   # `## Alternatives considered`）由判定真源 verify-note.sh / A1 / A4 判定，**本命令不执行仓库脚本**
   # 故无法验证它。未验证不得计为 PASS——结论行必须点明这条边界，且整行禁用「全部 PASS」。
   # 无门禁**接线**载体（无可执行 pre-commit、无 CI 适配器）时改称「无门禁载体」，并单独打一行 + WARN；
   # 载体是接线点而非资产存在性（A1/A4 文件在场但没人跑它，等于 1.10 无人验证）。
-  local base_txt="" cond_txt="" cond_off="" cond_skip=""
+  local base_txt="" cond_txt="" cond_off="" cond_skip="" b19="" l1_range="1.1–1.9"
+  if [ "${AS19_SKIP:-0}" = "1" ]; then
+    l1_range="1.1–1.8"
+    b19="；1.9b SKIPPED——根 AGENTS.md 索引链未判定（${AS19_WHY:-未声明 ai-surface}），不计入 PASS"
+  fi
   if [ "${DT_OFF:-0}" = "1" ]; then cond_off="${cond_off}；2.5 未启用"; fi
   if [ "${AS_OFF:-0}" = "1" ]; then cond_off="${cond_off}；2.6 未启用"; fi
   if [ "${DT_SKIP:-0}" = "1" ]; then cond_skip="${cond_skip}；2.5 SKIPPED——未声明 docs-tier，不计入 PASS"; fi
-  if [ "${AS_SKIP:-0}" = "1" ]; then cond_skip="${cond_skip}；2.6 SKIPPED——未声明 ai-surface，不计入 PASS"; fi
+  if [ "${AS_SKIP:-0}" = "1" ]; then cond_skip="${cond_skip}；2.6 SKIPPED——${AS_WHY:-未声明 ai-surface}，不计入 PASS"; fi
   local cover_txt="" carrier=0
   if lv110_carrier; then carrier=1; fi
   if [ "$carrier" = "1" ]; then
@@ -1739,11 +1998,12 @@ verify_ladder() {
   VL_VERDICT="pass"
   if [ -n "$cond_off" ]; then
     # 显式 opt-out 分支：基线必须仍是「2.1–2.4 PASS；<判据> 未启用」（既有断言逐字节不变），
-    # 覆盖声明与 SKIPPED 子句排在其后。
-    pass_txt="级自洽验证：通过（2.1–2.4 PASS${cond_off}${cond_skip}${cover_txt}${spec_note}）"
+    # 1.9b 子句紧跟基线（它也是子项状态，不是覆盖声明），覆盖声明与 SKIPPED 子句排在其后。
+    pass_txt="级自洽验证：通过（2.1–2.4 PASS${cond_off}${b19}${cond_skip}${cover_txt}${spec_note}）"
   else
-    # 覆盖声明紧跟「1.1–1.9 PASS」，条件子句（若有）排在其后（COV-1 冻结主体为前缀）。
-    pass_txt="级自洽验证：通过（${verified_range} 判据 1.1–1.9 PASS${cover_txt}${cond_skip}${spec_note}）"
+    # 覆盖声明紧跟「1.1–1.9 PASS」（1.9b 未判定时退为「1.1–1.8 PASS」+ 紧随的 1.9b SKIPPED 子句）；
+    # 其余条件子句（若有）排在覆盖声明之后。
+    pass_txt="级自洽验证：通过（${verified_range} 判据 ${l1_range} PASS${b19}${cover_txt}${cond_skip}${spec_note}）"
   fi
   echo ""
   if [ "$lv" = "0" ]; then
@@ -2407,11 +2667,151 @@ cp "$GATE" "$R/.meta/gates/adr-verify.sh"
 git -C "$R" -c init.defaultBranch=main init -q
 expect_accept "无 .agents/notes 放行" "$R"
 
+# ---------- 11. 判据 1.7 补强：rejected 必须带一行理由（拒 → 补理由 → 放行） ----------
+# 断言关键词与 tests/run.sh 场景 79 逐字一致（「缺一行理由」）：门禁侧镜像是同一契约的
+# 第二执行面，两边文案漂移即等于两种判据。本 case 只证明"门会响"，判据实现仍在 verify-note.sh。
+R=$(new_repo rejected-no-reason)
+write_adr "$R" .agents/notes/rejected/process/2026-10-29-no-reason.md '# Agent Note: 否决无理由
+
+Status: rejected
+
+## Problem
+
+样本：rejected 却没写为什么否决。
+
+## Proposal
+
+样本提案。
+
+## Alternatives considered
+
+- 样本。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_reject_with "rejected 缺一行理由拒绝（文案带「缺一行理由」）" "$R" '缺一行理由'
+# 正向对照：同一行补理由（分隔符 — + 非空理由）→ 放行（证明判据不是"一律拒绝"）
+write_adr "$R" .agents/notes/rejected/process/2026-10-29-no-reason.md '# Agent Note: 否决带理由
+
+Status: rejected — 与 X 冲突
+
+## Problem
+
+样本：rejected 带一行理由。
+
+## Proposal
+
+样本提案。
+
+## Alternatives considered
+
+- 样本。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_accept "rejected 带一行理由放行" "$R"
+# 负样本：**纯分隔符**不是理由——旧口径只数「非空白字节」，`——` 有 6 字节 → 被放行（实测漏洞）。
+# 新口径：剥掉分隔符与空白/ASCII 标点/em dash 后，剩余正文须 ≥2 字节。
+write_adr "$R" .agents/notes/rejected/process/2026-10-29-no-reason.md '# Agent Note: 只有分隔符
+
+Status: rejected ——
+
+## Problem
+
+样本：Status 行只有一个双破折号，没有理由。
+
+## Proposal
+
+样本提案。
+
+## Alternatives considered
+
+- 样本。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_reject_with "rejected 只有分隔符（—— ）拒绝（文案带「缺一行理由」）" "$R" '缺一行理由'
+# 正向对照：理由带句尾标点仍放行（证明确实是"剥标点后看正文"，不是"见标点就拒"）
+write_adr "$R" .agents/notes/rejected/process/2026-10-29-no-reason.md '# Agent Note: 否决带理由与句号
+
+Status: rejected — 与 X 冲突。
+
+## Problem
+
+样本：理由带句尾标点。
+
+## Proposal
+
+样本提案。
+
+## Alternatives considered
+
+- 样本。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_accept "rejected 理由带句尾标点放行" "$R"
+
+# ---------- 12. 判据 1.8 补强：implemented 必须含 ## Decision；中文提案时代标题禁入 ----------
+R=$(new_repo implemented-no-decision)
+write_adr "$R" .agents/notes/implemented/process/2026-10-29-no-decision.md '# Agent Note: 缺现在时 Decision
+
+Status: implemented
+
+## Problem
+
+样本：迁移到 implemented 却没写现在时 ## Decision。
+
+## Alternatives considered
+
+- 样本。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_reject_with "implemented 缺 ## Decision 拒绝（文案带「缺 ## Decision」）" "$R" '缺 ## Decision'
+# 中文提案时代标题：## Decision 在场也拒——标题语言不该成为绕过判据的后门（判据 1.8 中文等价禁入）
+R=$(new_repo implemented-chinese-proposal-title)
+write_adr "$R" .agents/notes/implemented/process/2026-10-29-cn-title.md '# Agent Note: 中文提案标题残留
+
+Status: implemented
+
+## Problem
+
+样本：迁移后正文里还留着 ## 验收。
+
+## Decision
+
+样本决定。
+
+## 验收
+
+样本验收条目。
+
+## Alternatives considered
+
+- 样本。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_reject_with "implemented 含中文提案时代标题拒绝（文案带「提案时代标题」）" "$R" '提案时代标题'
+# 复合词同一语义：中文标题无词间空格，边界匹配（`([[:space:]]|$)`）会让 `## 验收清单` 过关——
+# 故 CJK 分支按**前缀**匹配。本 case 是该收口的执行判据（不做它，前缀匹配退化回边界匹配即红）。
+R=$(new_repo implemented-chinese-compound-title)
+write_adr "$R" .agents/notes/implemented/process/2026-10-29-cn-compound.md '# Agent Note: 中文复合提案标题残留
+
+Status: implemented
+
+## Problem
+
+样本：迁移后正文里还留着 ## 验收清单（复合词，无空格）。
+
+## Decision
+
+样本决定。
+
+## 验收清单
+
+样本验收清单。
+
+## Alternatives considered
+
+- 样本。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_reject_with "implemented 含中文复合提案标题（## 验收清单）拒绝" "$R" '提案时代标题'
+
 if [ "$FAIL" -ne 0 ]; then
   printf '[%s] 未通过：门禁的拒绝/放行语义与预期不符（见上方 FAIL）\n' "$SPEC" >&2
   exit 1
 fi
-printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节均已证明（exit 0）\n' "$SPEC"
+printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节 + 1.7 rejected 理由 + 1.8 ## Decision/中文提案标题（含复合词）均已证明（exit 0）\n' "$SPEC"
 exit 0
 PONYGO_EOF
   # 已有但丢执行位（如经 Windows/zip 转手）→ 补回；A1/A2/A4 是框架不可变资产，改权限不改字节
@@ -4293,23 +4693,40 @@ json_path_list() { # <空格分隔的仓库相对路径> → "a","b"（空 → �
   for v in $1; do out="${out}${out:+,}\"$(json_escape "$v")\""; done
   printf '%s' "$out"
 }
+json_coverage() { # 判据覆盖块 → "coverage":{...}（status / audit **同源**，禁第二副本）
+  # 口径（Lead 裁决 2026-11-09 B + 修复轮收口）：**默认保守**——
+  #   只有 verify_ladder 真的判过 1.9b（AS19_JUDGED=1：ai-surface: on 且走完 1.9b 检查）才给
+  #   verified:["1.1-1.9"] 且不带 skipped 键；
+  #   其余一律（off / 未声明 / 值非法 / **ladder 根本没跑**）给
+  #   verified:["1.1-1.8"] + skipped:["1.9b"]——机器面不得宣称一个没跑的子项已验证（SKIPPED ≠ PASS）。
+  # 为什么默认要保守：status 有骨架缺口/无 meta 等**提前退出**分支（不跑 ladder），旧默认会给
+  # 1.1-1.9 而同一实例的 audit 给 1.1-1.8+skipped —— 同源契约当场破。未判定 = 未验证。
+  # unverified 恒为 ["1.10"]：1.10 的归属不变（本命令不执行仓库脚本，故不由它验证）。
+  # 人类结论行与此同源（都读 AS19_SKIP，后者由 ai_surface_state() 派生；AS19_JUDGED 只在
+  # ai-surface: on 分支置 1，即 1.9b 真被判过——判成 FAIL 也算判过）。
+  if [ "${AS19_JUDGED:-0}" = "1" ]; then
+    printf '%s' '"coverage":{"verified":["1.1-1.9"],"unverified":["1.10"],"reason":"readonly-no-repo-exec"}'
+  else
+    printf '%s' '"coverage":{"verified":["1.1-1.8"],"unverified":["1.10"],"skipped":["1.9b"],"reason":"readonly-no-repo-exec"}'
+  fi
+}
 audit_json_line() { # <exit code> → 单行 JSON
   # coverage：判据覆盖固定词表（1.10 不由本命令验证）；drift：骨架漂移观察项（不参与退出码）。
   # 键序不作为契约（只保证字段存在/值正确），但保持**单行**。
-  printf '{"schema":"ponygo.audit/1","command":"audit","tier":"%s","hits":%s,"total":%s,"level":%s,"ladder":{"verdict":"%s","fails":[%s]},"gates":{"local":"%s","remote":"%s"},"gaps":[%s],"coverage":{"verified":["1.1-1.9"],"unverified":["1.10"],"reason":"readonly-no-repo-exec"},"drift":{"count":%s,"files":[%s]},"exit":%s}\n' \
+  printf '{"schema":"ponygo.audit/1","command":"audit","tier":"%s","hits":%s,"total":%s,"level":%s,"ladder":{"verdict":"%s","fails":[%s]},"gates":{"local":"%s","remote":"%s"},"gaps":[%s],%s,"drift":{"count":%s,"files":[%s]},"exit":%s}\n' \
     "${AUDIT_TIER:-S}" "${AUDIT_HIT:-0}" "${AUDIT_TOTAL:-0}" "${AUDIT_LEVEL_INT:--1}" \
     "${VL_VERDICT:-unverified}" "$(json_id_list "${VL_FAIL_IDS:-}")" \
     "$(gates_local_state)" "$(gates_remote_state)" \
-    "$(json_id_list "${AUDIT_GAP_IDS:-}")" \
+    "$(json_id_list "${AUDIT_GAP_IDS:-}")" "$(json_coverage)" \
     "${AUDIT_DRIFT_COUNT:-0}" "$(json_path_list "${AUDIT_DRIFT_FILES:-}")" "$1"
 }
 status_json_line() { # <exit code> → 单行 JSON（W9-B2：skeleton 三字段是**仓库相对路径数组**，非计数）
   # coverage：判据覆盖固定词表（lv=0 也带，词表不随级别变化）；drift 在 skeleton 内（与人类输出同源）。
-  printf '{"schema":"ponygo.status/1","command":"status","level":%s,"skeleton":{"missing_dirs":[%s],"missing_files":[%s],"drift":[%s]},"gates":{"local":"%s","remote":"%s"},"ladder":{"verdict":"%s","fails":[%s]},"coverage":{"verified":["1.1-1.9"],"unverified":["1.10"],"reason":"readonly-no-repo-exec"},"exit":%s}\n' \
+  printf '{"schema":"ponygo.status/1","command":"status","level":%s,"skeleton":{"missing_dirs":[%s],"missing_files":[%s],"drift":[%s]},"gates":{"local":"%s","remote":"%s"},"ladder":{"verdict":"%s","fails":[%s]},%s,"exit":%s}\n' \
     "${STATUS_LEVEL_INT:--1}" "$(json_path_list "${STATUS_MISSING_DIRS:-}")" \
     "$(json_path_list "${STATUS_MISSING_FILES:-}")" "$(json_path_list "${STATUS_DRIFT:-}")" \
     "$(gates_local_state)" "$(gates_remote_state)" \
-    "${VL_VERDICT:-unverified}" "$(json_id_list "${VL_FAIL_IDS:-}")" "$1"
+    "${VL_VERDICT:-unverified}" "$(json_id_list "${VL_FAIL_IDS:-}")" "$(json_coverage)" "$1"
 }
 json_verdict_fallback() { # <exit code>：ladder 未落 verdict 时的兜底（W9-A3）
   # 未跑 ladder 不代表「证据不足」：进程以硬失败退出（非 0）时必须报 fail，不得把失败洗成 unverified。
@@ -4459,9 +4876,17 @@ cmd_audit() {
   total=$((total+1))
   [ -d "$SKILLS_DIR" ] && [ -n "$(ls -A "$SKILLS_DIR" 2>/dev/null | grep -vE '^(README\.md|\.gitkeep)$')" ] && hit=$((hit+1))
 
-  # 问④ 过时怎么退场
+  # 问④ 过时怎么退场：**形态不是证据**——`archived/` 目录存在（init 就预建）证明不了任何东西。
+  # 只认「已封印归档件」：`archived/manifest.sha256` 存在且含 ≥1 条非空登记
+  # （行格式 `<64hex><空格><空格><仓库相对路径>`，与 A6 seal 写入口径一致）。
+  # 空 archived / 有件但未封印（无 manifest 或全空行）一律不计分——否则「建了个空目录」就白送一分。
+  # 只读纪律：这里只判 manifest 文件的形状，**不执行** archive-verify.sh（判定优先只读，见文件头）。
   total=$((total+1))
-  [ -d "$DECISIONS_DIR/archived" ] && hit=$((hit+1))
+  if [ -f "$DECISIONS_DIR/archived/manifest.sha256" ] \
+     && sed 's/\r$//' "$DECISIONS_DIR/archived/manifest.sha256" 2>/dev/null \
+        | grep -qE '^[0-9a-f]{64}  .+'; then
+    hit=$((hit+1))
+  fi
 
   # ---- 输出 ----
   AUDIT_HIT="$hit"; AUDIT_TOTAL="$total"
@@ -4882,7 +5307,7 @@ cmd_upgrade() {
   local dt_skip=0
   if [ -f "$META_DIR/docs-tier/README.md" ] && grep -q '## 已激活文档家清单' "$META_DIR/docs-tier/README.md"; then
     dt_skip=1
-    echo "注：docs-tier 已激活实例——.meta/docs-tier/README.md 不参与漂移比对（本仓该文件是激活版，模板基准仍是 heredoc 提供的模板态）；其余九文件照常比对。"
+    echo "注：docs-tier 已激活实例——.meta/docs-tier/README.md 不参与漂移比对（本仓该文件是激活版，模板基准仍是 heredoc 提供的模板态）；其余十四文件照常比对（宇宙 15 − 本文件 1）。"
   fi
   # 生成模板基准（临时目录，用 write_skeleton 同源 heredoc；eol 归一后逐字节比对）。
   # write_skeleton 是当前进程内的函数（相对路径常量），在子 shell cd 后调用即生成一套模板骨架。
@@ -6292,7 +6717,7 @@ observe 选项（仅 observe 接受，其余命令拒绝）：
 
 退出码白话：0=已达目标级/兼容；1=未达目标级或用法错；2=工具或输入错误（不是"未达标"）；3=证据不足。
 
-已知局限：ob1 只判「声明与巡检一致」；四维全 false 的声明同样 PASS（识别谎言是非机械项，见 revisions/proposed/2026-10-25-observe-dimension.md K4）。
+已知局限：ob1 只判「声明与巡检一致」；四维全 false 的声明同样 PASS（识别谎言是非机械项，见 revisions/accepted/2026-10-25-observe-dimension.md K4；revisions/ 轨道已冻结，仅作历史只读）。
 已知局限：ob2 的挂载证据是形状判据（grep 载体，**已排除纯注释行**；仍不解析 AST，也不验证钩子是否真被执行），真执行证据是 audit-diff 本身（K7）。
 已知局限：kind 是单值。同目录多形态靠附加声明 docs/observability.d/*.yaml（主声明 docs/observability.yaml 定 ob 级；附加声明只扩覆盖，逐份巡检后不一致进 backlog，--strict 才影响退出码）；多组件仓仍按项目根拆目录，audit 会逐份巡检子组件声明（front_end/ web/ client/ …）并列出各自 rc。
 EOF

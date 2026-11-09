@@ -9,9 +9,10 @@
 # 退出码：全部通过 exit 0；任一违例 exit 1（逐项打印 FAIL）。
 # 对应判据：maturity-ladder §5 的 L1 判据 1.1–1.10，
 # 影子来自 DSH verify-agent-note-format / verify-agent-note-classification。
-# 1.1–1.9 与 ponygo verify_ladder 逐项对齐；1.10（必含 ## Alternatives considered）
-# 于 2026-10-29 新增为硬判据，**只由本脚本判定**——CLI 不重复实现（P9：一份判据一份实现，
-# 两份必然漂移），故 `ponygo status` 的 L1 段仍报 1.1–1.9 并明文声明该范围；
+# 1.1–1.8 与 ponygo verify_ladder 逐项对齐；1.9 只对齐 1.9a（详见下文「对齐契约」）；
+# 1.10（必含 ## Alternatives considered）于 2026-10-29 新增为硬判据，**只由本脚本判定**——
+# CLI 不重复实现（P9：一份判据一份实现，两份必然漂移），故 `ponygo status` 的 L1 段仍报
+# 「判据 1.1–1.9」（1.9b 条件未判定时收窄为 1.1–1.8）并明文声明该范围；
 # 1.10 的看守面由 A1 暂存区门与 A4 全树门承担（两者都经本脚本）。
 # 见 revisions/accepted/2026-10-29-alternatives-criterion-1-10.md。
 #
@@ -31,8 +32,16 @@
 # 不判"implemented 内容是否真的已落地"（真实性）与"多类是否该拆条"
 # （分类）——这两者是语义判断，靠 review + write-adr 校准样例。
 #
-# 对齐契约：本脚本的 1.1–1.9 与 CLI 的 verify_ladder 逐项对齐；若发现行为不一致，
-# 以 maturity-ladder §5 判据真源为准并回改两者。1.10 只在本脚本实现（CLI 不复刻，P9）。
+# 对齐契约（2026-11-09 改准，原文「1.1–1.9 逐项对齐」已不成立）：
+#   1.1–1.8：与 CLI 的 verify_ladder 逐项对齐（两道面同判、同文案关键字）；
+#   1.9：**只部分对齐**——本脚本只判 1.9a（`docs/AGENTS.md` 存在，且仅无参整树模式）。
+#         1.9b（根 `AGENTS.md` 是否链到 `docs/AGENTS.md`，条件于 `ai-surface: on`）与
+#         1.9c（包文档覆盖）**只由 CLI 的 verify_ladder 判定**（`ponygo status` 与 `ponygo audit`
+#         共用同一函数、都报 1.9 FAIL——不是只有 status 才判，勿低估判定面）：
+#         它们要读 meta.yaml 开关 + 扫描包目录，属实例状态而非单条 ADR 的格式。
+#         故 `A1/A4 绿 ≠ 1.9b PASS`——本地/远端门只证明 ADR 格式与归档封印，不证明 AI 常载入口完好。
+#   1.10：只在本脚本实现（CLI 不复刻，P9 一份判据一份实现）。
+# 若发现 1.1–1.8 行为不一致，以 maturity-ladder §5 判据真源为准并回改两者。
 # ============================================================
 set -u
 
@@ -68,7 +77,7 @@ DATE_OK=0
 date -d @0 '+%Y' >/dev/null 2>&1 && DATE_OK=1
 
 check_one() { # $1 = 决策文件路径
-  local f="$1" b rel lc slashes st d8
+  local f="$1" b rel lc slashes st stline rest sep reason_body d8
   b="${f##*/}"
   [ "$b" = "README.md" ] || [ "$b" = "AGENTS.md" ] && return 0
   rel="${f#"$NOTES_DIR"/}"
@@ -87,7 +96,13 @@ check_one() { # $1 = 决策文件路径
     date -d "$d8" >/dev/null 2>&1 || fail "1.6 $f：日期不合法（$d8）"
   fi
   # 1.7 Status 首词与所在 lifecycle 一致（archived 允许 implemented/archived）
-  st=$(sed -n 's/\r$//;s/^Status:[[:space:]]*//p' "$f" 2>/dev/null | head -n1 | awk '{print $1}')
+  # stline = Status: 行剥标记后的原文（供下面的 rejected 理由判据复用，避免二次读文件）
+  stline=$(sed -n 's/\r$//;s/^Status:[[:space:]]*//p' "$f" 2>/dev/null | head -n1)
+  st=$(printf '%s\n' "$stline" | awk '{print $1}')
+  # 容忍粘写冒号的理由分隔符：`Status: rejected: <理由>` 的首词是 `rejected:`——剥掉尾随冒号
+  # 再与目录比，否则「冒号分隔」这种写法会被误判成 Status 漂移（`—` / `-` 两种分隔符要求留空格，
+  # 无空格时仍按 Status 漂移拒绝——fail-closed，不会静默放行）。
+  st="${st%:}"
   if [ -z "$st" ]; then
     fail "1.7 $f：缺 Status: 行"
   elif [ "$lc" = "archived" ]; then
@@ -95,15 +110,68 @@ check_one() { # $1 = 决策文件路径
   elif [ "$st" != "$lc" ]; then
     fail "1.7 $f：Status($st) 与目录($lc) 不一致"
   fi
+  # 1.7（判据补强）rejected 必须带一行理由：`rejected` 之后须有分隔符（`—` / `-` / `:`）
+  # 且剥掉分隔符与空白后**剩余正文**至少 2 个非空白字节。为什么是硬判据：否决理由是这条记录唯一不可再生的信息——
+  # 没有理由的 rejected 只是"有人不同意"，重新面对同一岔路时既不能避免重开争执，
+  # 也不能解释现状为何是现在这样（状态轴有位置、没有内容）。
+  # 豁免：`archived/`（冻结，与 1.8/1.10 同口径）、README.md / AGENTS.md（函数入口早退）、
+  # `*.zh.md`（双语配对，随母语版同批补齐，不独立判——与 1.10 同口径）。
+  # 计数口径（2026-11-09 收紧）：剥掉**分隔符本身**与空白/ASCII 标点/em dash 后，剩余正文 ≥2 字节。
+  # 旧口径只数非空白字节 → `Status: rejected ——`（纯分隔符）被放行——分隔符不是理由。纯标点同理。
+  # 残留边界（诚实条款）：CJK 标点（如单独一个 `。`）不被本口径剥离（C locale 下按字节匹配会误删汉字），
+  # 故"仅一个中文句号"仍可能过——属已知残余，靠 review 兜。
+  if [ "$st" = "rejected" ] && [ "$lc" != "archived" ]; then
+    case "$b" in
+      *.zh.md) ;;
+      *)
+        rest="${stline#"$st"}"
+        rest="${rest#"${rest%%[![:space:]]*}"}"   # 剥前导空白（纯字节操作，不依赖 locale）
+        sep=0
+        case "$rest" in
+          —*|--*|-*|:*) sep=1 ;;
+        esac
+        if [ "$sep" = "1" ]; then
+          case "$rest" in
+            —*) rest="${rest#—}" ;;
+            -*) rest="${rest#-}"; rest="${rest#-}" ;;
+            :*) rest="${rest#:}" ;;
+          esac
+        fi
+        # 正文 = 剥掉 ASCII 空白/标点（含 - 与 :）与 em dash 之后的剩余字节。
+        # `——` / `--` / `:` / `?!` 之类的"纯分隔符/纯标点"在这里归零 → 缺一行理由。
+        reason_body=$(printf '%s' "$rest" | tr -d '[:space:][:punct:]' | sed 's/—//g')
+        if [ "$sep" != "1" ] || [ "$(printf '%s' "$reason_body" | wc -c | tr -d ' ')" -lt 2 ]; then
+          fail "1.7 $f：rejected 缺一行理由（Status: rejected — <为何否决>）"
+        fi
+        ;;
+    esac
+  fi
   # 1.8 骨架标题与 lifecycle 匹配
+  # implemented/：现在时 `## Decision` 必须在场（迁移即改写——proposed→implemented 的
+  # 那次变更必须把 `## Proposal` 改写为 `## Decision`，否则正文层状态轴失真）；
+  # 并禁提案时代标题——英文等价与**中文等价**都算（中文标题同样是提案态残留：
+  # 标题语言不该成为绕过判据的后门）。中文清单：提案/计划/迁移计划/验收标准/验收/风险/待办。
+  # 匹配口径（2026-11-09 收口）：英文按**边界**匹配（标题词后有空白或行尾）；中文按**前缀**匹配
+  # ——中文标题无词间空格，边界匹配会让 `## 验收清单` / `## 风险与缓解` / `## 待办事项` 等复合词
+  # 全部放行（等于开个洞）。前缀匹配的代价：`## 计划性…` 这类以禁词开头的标题也一并拒（fail-closed，可接受）。
+  # 豁免：archived/ 冻结（详见 `.agents/notes/README.md` 格式契约与 write-adr 技能）。
   case "$lc" in
     implemented)
+      grep -qE '^## Decision([[:space:]]|$)' "$f" \
+        || fail "1.8 $f：implemented 缺 ## Decision（迁移即改写：现在时 Decision 必须在场）"
       grep -qE '^## (Proposal|Plan|Migration plan|Acceptance criteria)([[:space:]]|$)' "$f" \
-        && fail "1.8 $f：implemented 含提案时代标题（## Proposal/## Plan/## Migration plan/## Acceptance criteria）" ;;
+        && fail "1.8 $f：implemented 含提案时代标题（## Proposal/## Plan/## Migration plan/## Acceptance criteria）"
+      grep -qE '^## (提案|计划|迁移计划|验收标准|验收|风险|待办)' "$f" \
+        && fail "1.8 $f：implemented 含提案时代标题（中文提案时代标题：## 提案/## 计划/## 迁移计划/## 验收标准/## 验收/## 风险/## 待办，按前缀匹配含复合词）"
+      ;;
     proposed|rejected)
       grep -qE '^## Proposal([[:space:]]|$)' "$f" || fail "1.8 $f：$lc 缺 ## Proposal"
       grep -qE '^## Decision([[:space:]]|$)' "$f" && fail "1.8 $f：$lc 含现在时 ## Decision（提案伪装成决定）" ;;
   esac
+  # 已知弱点（诚实条款，不修解析器）：本脚本按**行**匹配标题，不解析 Markdown 结构——
+  # 围栏代码块（``` 或 ~~~ 内）里出现的 `## Decision` / `## Alternatives considered` 同样会被认作在场，
+  # 故"把标题塞进示例代码块"可绕过 1.8/1.10 的在场判据。为什么不修：修它需要真正的 Markdown 解析
+  # （bash 里即半个解析器），收益低而回归面大；这道缝由 review（人看全文）兜，本脚本不冒充已闭。
   # 1.10 必含 ## Alternatives considered（2026-10-29 起为硬判据，不是 WARN）
   # 为何是硬判据：备选与落选理由是"非平凡决策"的实质内容——只写 Decision 的 ADR 会退化为
   # 事后记录，重新面对同一岔路时答不出"为什么不选另一条"；契约本就在 .agents/notes/README.md

@@ -37,14 +37,18 @@ notes/{lifecycle}/{class}/yyyy-mm-dd-topic-title.md
 Status: <status>
 ```
 
-- `Status:` 三选一，必须与所在文件夹一致：`proposed` / `implemented` / `rejected — <一行理由>`。
+- `Status:` 词表，必须与所在文件夹一致：`proposed` / `implemented` / `rejected — <一行理由>` /
+  `archived`。两条硬约束（判据 1.7 机械校验）：
+  - `rejected` **必须**带一行理由——`rejected` 之后跟分隔符（`—` / `-` / `:` 任一）且其后至少
+    2 个非空白字符；理由是否决理由唯一不可再生的载体，没有理由的 rejected 只是"有人不同意"；
+  - `archived/` 下 `Status:` 允许 `implemented`（**冻结保留原态**，归档不改一字）或 `archived`。
 - 正文从 `## Problem` 开始（先写动机，脱离方案也成立）。
 - **正文骨架按 lifecycle 分态**（时态与状态一致，判据 1.8 机械校验）：
 
   | lifecycle | 正文骨架 |
   |---|---|
   | `proposed/` | `## Proposal`（可将来时）→ `## Alternatives considered` → `## Acceptance criteria` → `## Risks`；禁止现在时 `## Decision` |
-  | `implemented/` | `## Decision`（现在时）→ `## Alternatives considered` → `## Consequences`（可选）；禁止提案时代标题（`## Proposal` / `## Plan` / `## Migration plan` / `## Acceptance criteria`） |
+  | `implemented/` | `## Decision`（现在时，**必须在场**——缺即 FAIL）→ `## Alternatives considered` → `## Consequences`（可选）；禁止提案时代标题（`## Proposal` / `## Plan` / `## Migration plan` / `## Acceptance criteria`），中文等价同样禁入（`## 提案` / `## 计划` / `## 迁移计划` / `## 验收标准` / `## 验收` / `## 风险` / `## 待办`） |
   | `rejected/` | 提案原文冻结（保留 `## Proposal`），verdict 只在 `Status:` 行；禁止现在时 `## Decision` |
   | `archived/` | 冻结豁免（保持归档时原貌，不改一字） |
 
@@ -85,6 +89,23 @@ Status: <status>
 
 读的结论只进两处：新 note 的链入/拆条，或评审报告的问题清单——不落盘等于没读。
 
+## 归档（退场）：git mv + Status 保持 + seal 同提交
+
+归档不是"挪个目录"，而是**一次带封印的状态迁移**——同一次变更内做完：
+
+1. `git mv implemented/<class>/<file>.md archived/<class>/<file>.md`（用 `git mv` 保留血缘；
+   移动即改写历史的入口，重命名信息必须是可追溯的提交事实）；
+2. `Status:` **保持原态**（`implemented` 冻结保留原值即可；写 `archived` 也合规，两种都不改正文）；
+3. 跑 `bash .meta/gates/archive-verify.sh seal` 追加封印——它只为**尚未登记**的归档件往
+   `archived/manifest.sha256` 追加 `<sha256><空格><空格><仓库相对路径>` 行，既有行一个字节都不改
+   （append-only；写入是「临时文件 + 同目录原子替换」）；
+4. 三件事**同一提交**。漏 seal → 本地层 A1（暂存区）与远端层 A4（全树）都以「未封印」拒绝提交。
+
+**封印意味着什么**：manifest 是归档件的唯一索引；`archive-verify.sh check` 逐条比对哈希，
+归档件改一字节即拒。`seal` 是唯一写路径，`check` 只读——钩子不在提交窗口里偷偷改工作区。
+`archived/` 另在 `.rgignore` 里隔离（`/.agents/notes/archived/`）：归档是冻结史，不该按词法
+命中挤掉当前结论的检索结果。
+
 ## 与下一级的关系
 
-有决策记录是 L1 的判据之一；是否"承诺可验"（L2）取决于 `gates/` 是否有非零退出门禁。
+有决策记录是 L1 的判据之一；是否"承诺可验"（L2）取决于 `.meta/gates/` 是否有非零退出门禁。

@@ -60,15 +60,23 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 3. **选 lifecycle**：`proposed/`（未实现）或 `implemented/`（随本次变更落地）。
 4. **选 class**：`feature`（新能力）/ `bug-fix`（修缺陷）/ `simplification`（减复杂度）/ `architecture`（交付源码的结构）/ `process`（代码周围的工具与流程）/ `testing`（测试策略）。都不够 → 考虑在 `notes/classes.local` 登记领域扩展（扩展即一次治理决策，须评审）。
 5. **建文件**：`.agents/notes/{lifecycle}/{class}/$(date +%F)-<topic-title>.md`，topic 用 kebab-case。
-6. **头部**：第一行 `# Agent Note: <title>`，空行，`Status: <与所在目录一致>`（rejected 可带一行理由：`rejected — <理由>`）。
-7. **正文**：`## Problem` 开头（先写动机，脱离方案也成立），随后**按 lifecycle 选骨架**（判据 1.8 机械校验标题是否与 lifecycle 匹配，选错即 FAIL；判据 1.10 机械校验 `## Alternatives considered` 必须在场）：
+6. **头部**：第一行 `# Agent Note: <title>`，空行，`Status: <与所在目录一致>`。`rejected` 必须带一行理由：`Status: rejected — <为何否决>`（分隔符 `—` / `-` / `:` 任一，其后至少 2 个非空白字符；判据 1.7 机械校验，缺理由即 FAIL）。
+7. **正文**：`## Problem` 开头（先写动机，脱离方案也成立），随后**按 lifecycle 选骨架**（判据 1.8 机械校验标题是否与 lifecycle 匹配，选错即 FAIL：`implemented/` 缺 `## Decision` 即 FAIL，含提案时代标题——英文 `## Proposal`/`## Plan`/`## Migration plan`/`## Acceptance criteria` 或中文 `## 提案`/`## 计划`/`## 迁移计划`/`## 验收标准`/`## 验收`/`## 风险`/`## 待办`——同样 FAIL；判据 1.10 机械校验 `## Alternatives considered` 必须在场）：
 
    | lifecycle | 骨架 |
    |---|---|
    | `proposed/` | `## Proposal`（将来时）→ `## Alternatives considered` → `## Acceptance criteria` → `## Risks` |
-   | `implemented/` | `## Decision`（现在时）→ `## Alternatives considered`（必填）→ `## Consequences`（可选） |
-   | `rejected/` | 提案原文冻结（保留 `## Proposal`），verdict 只写 `Status:` 行 |
-8. **迁移状态** = 移动文件到目标 lifecycle + 改 `Status:` 行 + 把提案时代标题改写为现在时——三件事在同一次变更内完成。
+   | `implemented/` | `## Decision`（现在时，必须在场）→ `## Alternatives considered`（必填）→ `## Consequences`（可选） |
+   | `rejected/` | 提案原文冻结（保留 `## Proposal`），verdict 只写 `Status:` 行（含一行理由） |
+   | `archived/` | 冻结豁免：保持归档时原貌，一字不改（走第 8 步的归档动作） |
+8. **迁移/归档状态 = 四件事**，同一次变更内完成：
+   ① 移动文件到目标 lifecycle（`git mv`；落 `archived/` 时同样用 `git mv` 保血缘）；
+   ② 改 `Status:` 行（`archived/` 下保持原态 `implemented` 或写 `archived`，两种都合规）；
+   ③ 把提案时代标题改写为现在时（proposed → implemented 时；`## Proposal` → `## Decision`，
+   `## Acceptance criteria`/`## Risks` 折叠进 `## Consequences`）；
+   ④ **归档时追加封印**：`bash .meta/gates/archive-verify.sh seal`（append-only，只为**尚未登记**
+   的归档件追加 manifest 行；manifest 是归档件的唯一索引）。漏 ④ → 本地层 A1（暂存区）与远端层 A4（全树）
+   都以「未封印」拒绝提交，CI 不放行。正文**一字不改**（冻结即法律）。
 
 ## 校准样例
 
@@ -87,5 +95,6 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 ## 验证与报告
 
 - 跑 **`bash .agents/skills/write-adr/verify-note.sh`**（无参 = 整树；或跟单个相对路径）——机械影子 1.1–1.10（1.1–1.8：路径两轴/文件名/日期/Status/骨架标题；1.9：整树文档有家 docs/AGENTS.md 存在；1.10：必含 `## Alternatives considered`）全部通过，exit 0 才算完成；FAIL 项逐条修复重跑。
+- 归档/迁移落 `archived/` 时，再跑 **`bash .meta/gates/archive-verify.sh seal`**（追加封印，append-only）与 **`bash .meta/gates/archive-verify.sh check`**（只读校验：逐条比对归档件哈希，应为 exit 0；报「未封印」/「哈希不符」即欠账）。
 - 再跑 `ponygo status`：决策数 +1、L1 判据全绿、无卫生 WARN。
 - 报告格式：新记录路径 + lifecycle/class + 一句话 Problem + verify-note.sh 的通过输出。

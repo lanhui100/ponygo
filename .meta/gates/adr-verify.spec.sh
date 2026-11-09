@@ -314,9 +314,149 @@ cp "$GATE" "$R/.meta/gates/adr-verify.sh"
 git -C "$R" -c init.defaultBranch=main init -q
 expect_accept "无 .agents/notes 放行" "$R"
 
+# ---------- 11. 判据 1.7 补强：rejected 必须带一行理由（拒 → 补理由 → 放行） ----------
+# 断言关键词与 tests/run.sh 场景 79 逐字一致（「缺一行理由」）：门禁侧镜像是同一契约的
+# 第二执行面，两边文案漂移即等于两种判据。本 case 只证明"门会响"，判据实现仍在 verify-note.sh。
+R=$(new_repo rejected-no-reason)
+write_adr "$R" .agents/notes/rejected/process/2026-10-29-no-reason.md '# Agent Note: 否决无理由
+
+Status: rejected
+
+## Problem
+
+样本：rejected 却没写为什么否决。
+
+## Proposal
+
+样本提案。
+
+## Alternatives considered
+
+- 样本。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_reject_with "rejected 缺一行理由拒绝（文案带「缺一行理由」）" "$R" '缺一行理由'
+# 正向对照：同一行补理由（分隔符 — + 非空理由）→ 放行（证明判据不是"一律拒绝"）
+write_adr "$R" .agents/notes/rejected/process/2026-10-29-no-reason.md '# Agent Note: 否决带理由
+
+Status: rejected — 与 X 冲突
+
+## Problem
+
+样本：rejected 带一行理由。
+
+## Proposal
+
+样本提案。
+
+## Alternatives considered
+
+- 样本。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_accept "rejected 带一行理由放行" "$R"
+# 负样本：**纯分隔符**不是理由——旧口径只数「非空白字节」，`——` 有 6 字节 → 被放行（实测漏洞）。
+# 新口径：剥掉分隔符与空白/ASCII 标点/em dash 后，剩余正文须 ≥2 字节。
+write_adr "$R" .agents/notes/rejected/process/2026-10-29-no-reason.md '# Agent Note: 只有分隔符
+
+Status: rejected ——
+
+## Problem
+
+样本：Status 行只有一个双破折号，没有理由。
+
+## Proposal
+
+样本提案。
+
+## Alternatives considered
+
+- 样本。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_reject_with "rejected 只有分隔符（—— ）拒绝（文案带「缺一行理由」）" "$R" '缺一行理由'
+# 正向对照：理由带句尾标点仍放行（证明确实是"剥标点后看正文"，不是"见标点就拒"）
+write_adr "$R" .agents/notes/rejected/process/2026-10-29-no-reason.md '# Agent Note: 否决带理由与句号
+
+Status: rejected — 与 X 冲突。
+
+## Problem
+
+样本：理由带句尾标点。
+
+## Proposal
+
+样本提案。
+
+## Alternatives considered
+
+- 样本。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_accept "rejected 理由带句尾标点放行" "$R"
+
+# ---------- 12. 判据 1.8 补强：implemented 必须含 ## Decision；中文提案时代标题禁入 ----------
+R=$(new_repo implemented-no-decision)
+write_adr "$R" .agents/notes/implemented/process/2026-10-29-no-decision.md '# Agent Note: 缺现在时 Decision
+
+Status: implemented
+
+## Problem
+
+样本：迁移到 implemented 却没写现在时 ## Decision。
+
+## Alternatives considered
+
+- 样本。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_reject_with "implemented 缺 ## Decision 拒绝（文案带「缺 ## Decision」）" "$R" '缺 ## Decision'
+# 中文提案时代标题：## Decision 在场也拒——标题语言不该成为绕过判据的后门（判据 1.8 中文等价禁入）
+R=$(new_repo implemented-chinese-proposal-title)
+write_adr "$R" .agents/notes/implemented/process/2026-10-29-cn-title.md '# Agent Note: 中文提案标题残留
+
+Status: implemented
+
+## Problem
+
+样本：迁移后正文里还留着 ## 验收。
+
+## Decision
+
+样本决定。
+
+## 验收
+
+样本验收条目。
+
+## Alternatives considered
+
+- 样本。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_reject_with "implemented 含中文提案时代标题拒绝（文案带「提案时代标题」）" "$R" '提案时代标题'
+# 复合词同一语义：中文标题无词间空格，边界匹配（`([[:space:]]|$)`）会让 `## 验收清单` 过关——
+# 故 CJK 分支按**前缀**匹配。本 case 是该收口的执行判据（不做它，前缀匹配退化回边界匹配即红）。
+R=$(new_repo implemented-chinese-compound-title)
+write_adr "$R" .agents/notes/implemented/process/2026-10-29-cn-compound.md '# Agent Note: 中文复合提案标题残留
+
+Status: implemented
+
+## Problem
+
+样本：迁移后正文里还留着 ## 验收清单（复合词，无空格）。
+
+## Decision
+
+样本决定。
+
+## 验收清单
+
+样本验收清单。
+
+## Alternatives considered
+
+- 样本。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_reject_with "implemented 含中文复合提案标题（## 验收清单）拒绝" "$R" '提案时代标题'
+
 if [ "$FAIL" -ne 0 ]; then
   printf '[%s] 未通过：门禁的拒绝/放行语义与预期不符（见上方 FAIL）\n' "$SPEC" >&2
   exit 1
 fi
-printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节均已证明（exit 0）\n' "$SPEC"
+printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节 + 1.7 rejected 理由 + 1.8 ## Decision/中文提案标题（含复合词）均已证明（exit 0）\n' "$SPEC"
 exit 0
