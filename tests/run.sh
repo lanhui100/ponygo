@@ -4194,6 +4194,185 @@ EOF
   assert_not_contains "R3④ 放行后不再报「缺一行理由」" "$S_OUT" "缺一行理由"
 }
 
+# ============================================================
+# Wave-2 契约验收（s80）—— Test Agent 冻结件（红相），实现方只读
+#
+# 契约真源：.dev-team/wave-2-contract.md §D1 / §D2 / §D4（Lead 裁决唯一）。
+# 本场景是该契约的**可执行判据**：断言只能由契约修订驱动，不得为实现让路。
+#
+# 覆盖面与断言关键词（Executor 镜像门禁侧 spec 时必须与本处一字一致）：
+#   D1 判据 1.7：理由剥离分隔符/空白/ASCII 标点/CJK 标点后须 ≥2 字节
+#      `Status: rejected — 。` → exit 1，关键词「缺一行理由」；`— 与 X 冲突。` → exit 0
+#   D2 判据 1.8/1.10：所有 `## ` 标题判定忽略 ``` 围栏内的行（未闭合 = 其后全在围栏内，fail-closed）
+#      Decision 只在围栏内 → exit 1 +「缺 ## Decision」；移出围栏 → exit 0；
+#      Alternatives 只在围栏内 → exit 1 +「缺 ## Alternatives considered」；未闭合围栏 → 缺 Decision 判红
+#   D4 位置子命令 `ponygo upgrade apply`：修好宇宙文件漂移、幂等（第二轮「零变更」）、
+#      docs-tier 激活版不被覆盖、非法位置参数/组合 exit 1 +「用法」、无参 upgrade 行为不变
+#
+# 为什么 D1/D2 走 A1（.meta/gates/adr-verify.sh）：被测事实是「门会拒绝」，真源只是判据来源；
+# 门在带参模式下要求 ADR 已暂存（否则先走 TOCTOU 拒绝，测到的不是判据）→ 夹具先
+# git_seed_repo + git add（与 s77/s79 同构），再用文案关键词区分成因。
+# 为什么 D4 用真实临时实例：`upgrade apply` 会**写盘**，必须在 mktemp 实例里验，
+# 且要求「改坏 → 修好 → 再查零漂移 → 再跑零变更」的完整闭环（只跑一次无法证明幂等）。
+# ============================================================
+s80_wave2_contract_d1_d2_d4() {
+  echo "--- 场景80：Wave-2 契约 D1/D2/D4（中文标点不充理由 · 围栏标题不计入 · upgrade apply）"
+  local T F
+
+  # ---- D1 判据 1.7：中文标点不得充作理由（§D1）----
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init
+  F=".agents/notes/rejected/process/2026-02-01-punct-only.md"
+  mkdir -p "$T/.agents/notes/rejected/process"
+  cat > "$T/$F" <<'EOF'
+# Agent Note: reason is a single CJK period
+
+Status: rejected — 。
+
+## Proposal
+what
+
+## Alternatives considered
+other
+EOF
+  git_local "$T" add "$F" >/dev/null 2>&1
+  run_script "$T" .meta/gates/adr-verify.sh "$F"
+  assert_eq "D1① 理由只有一个中文句号（。充理由）→ adr-verify exit 1" 1 "$S_RC"
+  assert_contains "D1② 且文案含「缺一行理由」" "$S_OUT" "缺一行理由"
+  # 正向对照：真实理由 + 句末标点 → 放行（剥离标点不得误伤正文）
+  sed -i 's/^Status: rejected — 。$/Status: rejected — 与 X 冲突。/' "$T/$F"
+  git_local "$T" add "$F" >/dev/null 2>&1
+  run_script "$T" .meta/gates/adr-verify.sh "$F"
+  assert_eq "D1③ 真实理由带句末句号 → adr-verify exit 0（放行）" 0 "$S_RC"
+  assert_not_contains "D1④ 放行后不再报「缺一行理由」" "$S_OUT" "缺一行理由"
+
+  # ---- D2 判据 1.8/1.10：围栏代码块内的标题不计入（§D2）----
+  T=$(new_case); git_seed_repo "$T"; run_cli "$T" init
+  F=".agents/notes/implemented/feature/2026-02-01-fenced-decision.md"
+  mkdir -p "$T/.agents/notes/implemented/feature"
+  cat > "$T/$F" <<'EOF'
+# Agent Note: Decision only inside a fenced block
+
+Status: implemented
+
+## Problem
+why
+
+```text
+## Decision
+what
+```
+
+## Alternatives considered
+other
+EOF
+  git_local "$T" add "$F" >/dev/null 2>&1
+  run_script "$T" .meta/gates/adr-verify.sh "$F"
+  assert_eq 'D2① ## Decision 只在 ``` 围栏内 → adr-verify exit 1' 1 "$S_RC"
+  assert_contains "D2② 且文案含「缺 ## Decision」" "$S_OUT" "缺 ## Decision"
+  # 正向对照：把 ## Decision 移到围栏外 → 放行（围栏外的真标题必须仍被认）
+  cat > "$T/$F" <<'EOF'
+# Agent Note: Decision outside a fenced block
+
+Status: implemented
+
+## Problem
+why
+
+## Decision
+what
+
+```text
+示例片段，不含标题语义
+```
+
+## Alternatives considered
+other
+EOF
+  git_local "$T" add "$F" >/dev/null 2>&1
+  run_script "$T" .meta/gates/adr-verify.sh "$F"
+  assert_eq "D2③ ## Decision 在围栏外（围栏内只有示例）→ exit 0（放行）" 0 "$S_RC"
+  assert_not_contains "D2④ 放行后不再报「缺 ## Decision」" "$S_OUT" "缺 ## Decision"
+  # proposed 样本：## Alternatives considered 只在围栏内 → 1.10 缺节
+  F=".agents/notes/proposed/feature/2026-02-02-fenced-alt.md"
+  mkdir -p "$T/.agents/notes/proposed/feature"
+  cat > "$T/$F" <<'EOF'
+# Agent Note: Alternatives only inside a fenced block
+
+Status: proposed
+
+## Problem
+why
+
+## Proposal
+what
+
+```text
+## Alternatives considered
+other
+```
+EOF
+  git_local "$T" add "$F" >/dev/null 2>&1
+  run_script "$T" .meta/gates/adr-verify.sh "$F"
+  assert_eq "D2⑤ ## Alternatives considered 只在围栏内 → adr-verify exit 1" 1 "$S_RC"
+  assert_contains "D2⑥ 且文案含「缺 ## Alternatives considered」" "$S_OUT" "缺 ## Alternatives considered"
+  # 未闭合围栏（只有开头 ```）：其后所有标题视为围栏内（fail-closed，不认里面的标题）
+  F=".agents/notes/implemented/feature/2026-02-03-unclosed-fence.md"
+  cat > "$T/$F" <<'EOF'
+# Agent Note: unclosed fence swallows following headings
+
+Status: implemented
+
+## Problem
+why
+
+```text
+## Decision
+what
+
+## Alternatives considered
+other
+EOF
+  git_local "$T" add "$F" >/dev/null 2>&1
+  run_script "$T" .meta/gates/adr-verify.sh "$F"
+  assert_eq "D2⑦ 未闭合围栏后的 ## Decision 不算在场 → adr-verify exit 1" 1 "$S_RC"
+  assert_contains "D2⑧ 且文案含「缺 ## Decision」" "$S_OUT" "缺 ## Decision"
+
+  # ---- D4 位置子命令 `ponygo upgrade apply`（§D4）----
+  # 闭环：改坏宇宙文件 → --check 非零 → apply 修好 → --check 零漂移 → 再 apply 零变更（幂等）
+  T=$(new_case); run_cli "$T" init
+  printf '\n<!-- W2 drift marker（人为改坏宇宙文件）-->\n' >> "$T/.agents/notes/README.md"
+  run_cli "$T" upgrade --check
+  assert_nonzero "D4① 改坏宇宙文件 → upgrade --check 非零" "$R_RC"
+  run_cli "$T" upgrade apply
+  assert_eq "D4② upgrade apply → exit 0" 0 "$R_RC"
+  assert_contains "D4③ 输出含「应用」（报告实际写入数）" "$R_OUT" "应用"
+  run_cli "$T" upgrade --check
+  assert_eq "D4④ apply 后 --check 零漂移 → exit 0" 0 "$R_RC"
+  assert_contains "D4⑤ 且报告零漂移" "$R_OUT" "零漂移"
+  run_cli "$T" upgrade apply
+  assert_eq "D4⑥ 第二次 apply → exit 0（幂等）" 0 "$R_RC"
+  assert_contains "D4⑦ 且输出「零变更」" "$R_OUT" "零变更"
+  # docs-tier 激活版不被覆盖（与 --check 同口径：激活必改写该文件，覆盖即抹掉实例申报）
+  T=$(new_case); run_cli "$T" init
+  printf '\n## 已激活文档家清单\n\n<!-- W2-keep-marker -->\n' >> "$T/.meta/docs-tier/README.md"
+  assert_file_has "D4⑧ 前置取证：已造出 docs-tier 激活态" "$T/.meta/docs-tier/README.md" "W2-keep-marker"
+  run_cli "$T" upgrade --check
+  assert_eq "D4⑨ docs-tier 激活实例：--check exit 0（该文件不参与漂移比对）" 0 "$R_RC"
+  run_cli "$T" upgrade apply
+  assert_eq "D4⑩ docs-tier 激活实例：apply → exit 0" 0 "$R_RC"
+  assert_file_has "D4⑪ 激活版 docs-tier README 未被模板覆盖（标记仍在）" "$T/.meta/docs-tier/README.md" "W2-keep-marker"
+  # 非法位置参数 / 旗标组合 / 无参行为不变
+  T=$(new_case); run_cli "$T" init
+  run_cli "$T" upgrade bogus
+  assert_eq "D4⑫ upgrade bogus（未识别位置参数）→ exit 1" 1 "$R_RC"
+  assert_contains "D4⑬ 且打印 usage（用法）" "$R_OUT" "用法"
+  run_cli "$T" upgrade --check apply
+  assert_eq "D4⑭ upgrade --check apply（旗标+位置参数组合）→ exit 1" 1 "$R_RC"
+  run_cli "$T" upgrade
+  assert_eq "D4⑮ upgrade（无参）行为不变 → exit 0（只报告）" 0 "$R_RC"
+  assert_contains "D4⑯ 且仍报零漂移" "$R_OUT" "零漂移"
+}
+
 s42_observe_monorepo_subcomponents
 s43_observe_pipeline_awareness
 s44_observe_subcomponent_blocking
@@ -4232,6 +4411,7 @@ s76_alternatives_exemptions
 s77_gate_chain_alternatives
 s78_wave13_acceptance
 s79_wave1_contract_c1_c2_c3_c6
+s80_wave2_contract_d1_d2_d4
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
 [ "$FAIL" -eq 0 ] || exit 1
