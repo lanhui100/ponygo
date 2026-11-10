@@ -153,7 +153,9 @@ gov_repo() { # <dir> [level] → 打印是否成功（0/1）
   make_gov_repo "$1" "${2:-1}" || return 1
   run_in "$1" status
   assert_zero "夹具自检：等价基线 ponygo status exit 0" "$R_RC"
-  assert_contains "夹具自检：等价基线打印机械判据 PASS" "$R_OUT" "机械判据全部 PASS"
+  # 覆盖诚实化后人读结论不再写「机械判据全部 PASS」；保持原自检强度，钉死通过态与 1.10 边界。
+  assert_contains "夹具自检：等价基线级自洽通过" "$R_OUT" "级自洽验证：通过（L0-L"
+  assert_contains "夹具自检：等价基线保留 1.10 未由本命令验证边界" "$R_OUT" "1.10 未由本命令验证"
   return 0
 }
 

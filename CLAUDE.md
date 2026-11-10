@@ -5,7 +5,7 @@
 > 每条命约 1-3 行，必须是"约定"而非"故事"；每条链到原理层——指 ponygo 框架仓库的
 > `docs/methodology.md`：<https://github.com/lanhui100/ponygo/blob/main/docs/methodology.md>。
 > 原理层唯一真相源在框架仓库，实例不复制——复制即漂移。
-> 这是每次会话必载、不可被后续指令覆盖的**常驻约束**。下方 6 条为最普适的预设，实例化时可增删，但保留最少 3 条。
+> 这是每次会话必载、不可被后续指令覆盖的**常驻约束**。下方 7 条为本仓命约，实例化时可增删，但保留最少 3 条。
 
 1. **决策必须入册且带 Alternatives**——任何非平凡变更（行为 / 架构 / 契约 / 流程 / 测试策略变更，命中任一）都要落到 `.agents/notes/{lifecycle}/{class}/` 下的一条决策记录，且必含 `## Alternatives considered`（候选方案与落选原因）。口头决定、只存在于聊天/PR 讨论里的"为什么这样/为什么不那样"视为未发生。
    链：P1 记忆瓶颈原理、methodology §2.5 触发规则、§2.4 格式契约。
@@ -24,6 +24,9 @@
 
 6. **文档有家**——文档标准与写作规则的家是 `docs/AGENTS.md`（agent 处理 `docs/` 子树时自动加载，故改文档规范就改它，不另立第二份）；每个事实、层级说明与 how-to 必须有唯一可寻址的家，改行为/契约/配置的那次提交同步更新对应文档的家（same-commit），不留"只在聊天里说过"的文档。
    链：P3 载体分工原理、methodology §5.1「文档的家」（AGENTS.md 自动加载 vs README 人读契约的分工）。
+
+7. **临时产物统一下沉**——中间脚本、日志与截图必须进入 `.scratch/<yyyy-mm-dd>-<topic>/`，不得平铺源码旁；完整契约见 `docs/AGENTS.md`「Scratch Hygiene」，由 `bash .meta/gates/scratch-hygiene.sh` 非零拦截。
+   链：P3 载体分工原理、P2 可验证性原理。
 
 ---
 
@@ -49,6 +52,7 @@
 
 - **状态**：`on`（本仓显式开启，声明载体 = `.meta/meta.yaml` 的 `ai-surface: on`；判据 2.6 据此 fail-closed）。
 - 开启后的登记项：
+  - **常驻载荷来源**：本文件「常载命约」节（投影锚点之后的正文）→ `ponygo sync`
     投影到根 `AGENTS.md` / `CLAUDE.md` 的 `<!-- BEGIN constitution -->` … `<!-- END constitution -->` 哨兵块；
   - **允许自主路由的 skill 白名单**：`.agents/skills/` 下的 `write-adr`、`change-review`、
     `governance-review`（其余 skill 仅用户点名可用）；

@@ -172,6 +172,10 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
 > 判据 2.3 的**执行侧**（跑 `gates/*.spec.sh` 并断言 exit 0）由显式开关承担：`ponygo audit --run-specs`，
 > 或在 CI / pre-push 层逐个跑 `bash .meta/gates/<name>.spec.sh`（**勿写 `*.spec.sh` 通配**——
 > shell 只会把第一个匹配当命令、其余沦为参数，静默漏跑）。`--dry-run` 下一律跳过。
+>
+> `audit --json` 保持 `ponygo.audit/1`：`drift.count=-1` 表示模板基准不可得、漂移**未判定**（不是零漂移）；
+> 未实际运行 L1 判据时 `coverage.verified=[]`，且 `coverage.unverified` 包含 `1.1-1.10`。
+> 普通实例没有框架专属 `revisions/` 轨道时，其冻结检查不适用，不输出 WARN。
 
 ### 4.4 可观测性维度（observe）
 

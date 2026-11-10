@@ -25,14 +25,14 @@
 
 ## 0. 全景：这套体系由什么构成
 
-一个依赖编码代理（AI agent）为主要开发者的大型仓库，其工程化可析出为五个相互咬合的子系统。本文以 deepseek-harness（workspace 约 260 个包、Node 引擎范围、Python SDK（软件开发工具包）、原生层）为**实证案例**陈述；每个子系统都有一个**机械可验证的影子（mechanical shadow，即"可被命令检验的痕迹"）**——这是本文全部方法论的支点。
+一个依赖编码代理（AI agent）为主要开发者的大型仓库，其工程化可析出为五个相互咬合的子系统。本文以 deepseek-harness（workspace 500+ 个包、Node 引擎范围、Python SDK（软件开发工具包）、原生层）为**实证案例**陈述；每个子系统都有一个**机械可验证的影子（mechanical shadow，即"可被命令检验的痕迹"）**——这是本文全部方法论的支点。
 
 | 子系统 | 落地载体（dsh 实例） | 规模证据 | 守护者（机械验证面） | 本人验证命令 |
 |---|---|---|---|---|
-| 决策记忆 | `.agents/notes/` | implemented 604 英 / proposed 26 / rejected 10 / archived 169（均含中文配对） | verify-agent-note-format / classification / archived | `git ls-files .agents/notes \| wc -l`；依赖 dsh 脚本 |
-| 流程资产 | `.agents/skills/`（10 个 dsh-* 技能） | 覆盖评审/推送/文档/归档/简化/翻译/CoT（思维链）清理/栈式 PR（拉取请求）/GIF（动图格式）证据 | skill 元数据门禁 | 靠 review（本文档未附通用 skill 门禁） |
+| 决策记忆 | `.agents/notes/` | implemented ~300 活态 / proposed ~40 / rejected ~10 / archived 900+ 冻结（均含双语配对） | verify-agent-note-format / classification / archived | `git ls-files .agents/notes \| wc -l`；依赖 dsh 脚本 |
+| 流程资产 | `.agents/skills/`（19 个流程技能） | 覆盖体验/UI/评审/测试可靠性/推送/文档/归档/简化/翻译/性能/升版/升级指南等 | skill 元数据门禁 | 靠 review（本文档未附通用 skill 门禁） |
 | 强制体系 | lefthook（L1/L2）+ GitHub Actions（L3） | pre-commit 6 项、pre-push typecheck、CI（持续集成）9 个聚合 job | run-gates + 负样本 spec | `git config core.hooksPath` + 本地 `lefthook run` |
-| 文档分层 | `docs/AGENTS.md` + 各 AGENTS.md | tier 分类法、词数预算、slop checklist、双语配对 | doc-sync 约 30 门 | `pnpm run doc-sync`（dsh 实例） |
+| 文档分层 | `docs/AGENTS.md` + 各 AGENTS.md | 14-Tier 分类法、词数预算、slop checklist、双语配对 | doc-sync 约 30 门 | `pnpm run doc-sync`（dsh 实例） |
 | 架构不变量 | `AGENTS.md` 约定 + packages/AGENTS.md | 注册即 effect、branded id、fail loud 等 | 类型 + 运行时常驻 + 语义评审 | 类型层可 `tsc`；语义层靠 review |
 
 **核心观察**：这不是"写了文档再靠自觉执行"的体系，而是**每个子系统都把约定转成可执行命令**（P2 可验证性原理的极端实践）。全文要点一句话——**凡机械可查的承诺，必配非零退出的命令；凡语义判断，必配校准样例；凡不可判，诚实标注"靠自觉"。**
@@ -56,7 +56,7 @@
 约定的生命力 = 它的可验证性。靠自觉遵守的约定在规模和人员变化下必然衰减。凡机械可查的承诺，配一条非零退出的命令。这一原理的极端形式是：**甚至门禁本身也被门禁检验**（负样本 spec（negative sample 规格，构造非法样例证明门会拒绝），见 §4.7）。
 
 ### P3 载体分工原理
-一次性判断（note，决策记录）、当前事实（doc，文档）、重复程序（skill，技能）、恒定约束（gate，门禁）必须分开存放。此原理的完整展开见 §5.1 的 tier（分层）分类法。
+一次性判断（note，决策记录）、当前事实（doc，文档）、重复程序（skill，技能）、恒定约束（gate，门禁）必须分开存放。四类载体分别展开见 §2（决策记忆）、§5（文档分层）、§3（流程资产）、§4（门禁强制）。
 
 ### P6 形意分离原理
 语义规范定义"什么是好的"；结构设计把语义承诺转成可检验的影子（状态入路径、哈希冻结、强制链接化）；机械门禁只锁影子、从不判断语义。机器到不了的地方（真实性、意义、价值判断），用显式标记承认盲区、用校准样例（calibration examples，正反例成对）传递判断力——唯独不写假门禁制造虚假安全感。
@@ -93,14 +93,14 @@
   - `archived/` — 冻结历史快照（只有 implemented 能进入，§2.3）
 - **Class**（类别轴，嵌套文件夹）来自**封闭集合**（`scripts/agent-note-tree.ts` 定义，分类门禁拒绝其它文件夹）：
 
-| Class | 覆盖 | dsh 规模（implemented 英） |
+| Class | 覆盖 | dsh 规模（implemented 英，当前快照） |
 |---|---|---|
-| `feature` | 新用户/模型可见能力 | 198 |
-| `bug-fix` | 修正缺陷或闭合 postmortem（事故复盘）暴露的缺口 | 97 |
-| `simplification` | 移除代码/行为/表面积，不加能力 | 47 |
-| `architecture` | **交付源码**的结构决策（包关系、运行时词汇） | 172 |
-| `process` | **代码周围**的工具/政策/工作流（门禁、包管理、vendoring（第三方代码收编）） | 75 |
-| `testing` | 测试基础设施与策略 | 15 |
+| `feature` | 新用户/模型可见能力 | 40 |
+| `bug-fix` | 修正缺陷或闭合 postmortem（事故复盘）暴露的缺口 | 11 |
+| `simplification` | 移除代码/行为/表面积，不加能力 | 13 |
+| `architecture` | **交付源码**的结构决策（包关系、运行时词汇） | 180 |
+| `process` | **代码周围**的工具/政策/工作流（门禁、包管理、vendoring（第三方代码收编）） | 34 |
+| `testing` | 测试基础设施与策略 | 18 |
 
 **architecture / process 分界线**：architecture 是关于交付的源码，process 是周边工具与工作流。`refactor`（重构）刻意缺席——它与 `simplification` 重叠，判别器"可观察行为是否改变"已被后者覆盖。
 
@@ -199,7 +199,7 @@ Status: <status>
 
 ---
 
-## 3. 流程资产化：10 个技能
+## 3. 流程资产化：19 个技能
 
 ### 3.1 SKILL.md 解剖（五要素 + dsh 新增模式）
 
@@ -207,7 +207,7 @@ Status: <status>
 
 description 自足性原则：技能路由发生在"只有摘要可见"的懒加载时刻，因此**触发条件必须内联**进 description（用变更本身的可见特征），权威出处放正文，宪法层（AGENTS.md 常载）兜底漏触发。
 
-### 3.2 十个技能清单（触发条件 → 核心模式）
+### 3.2 流程技能清单（触发条件 → 核心模式）
 
 | 技能 | 触发式 description（何时用） | 核心模式 |
 |---|---|---|
@@ -221,6 +221,15 @@ description 自足性原则：技能路由发生在"只有摘要可见"的懒加
 | `dsh-merging-stacked-prs` | 落一栈依赖 PR 到 master，或提及 stacked PR | **硬停条款**：无官方 stack 支持就停、不手动 retarget 复刻；要求 PullRequest.stack 对象为权威（GraphQL 查询）；`gh stack merge <stack-number>` 全栈合并；落栈后验证每 PR 报 MERGED，删分支前验证零依赖 |
 | `dsh-translate-docs` | 显式用户点名运行扩展双语工作流 | **`disable-model-invocation: true`**——只许用户点名、禁模型自主路由（重型流程防误入）；briefing-driven 更新路径；whole-document 路径委托子代理（read, don't re-summarize）；术语表先行加载 |
 | `record-browser-gif` | 录制浏览器/Web 交互 GIF，且每个改 GUI（图形用户界面）行为的 PR 必须带 | **证据链完整性**：一次演示=一次孤立运行、真实 server + 真实模型轮、禁 fixture/mock/合成事件；发布到 assets 分支（永久引用不变性：branch 永不重写） |
+| `agent-experience` | 编写或变更模型可见工具定义（name/desc/schema/prompt），设计上下文与工作流 | **上下文效率与发现性**：最小上下文启动；参数规则就近写在参数上；行为描述禁实现细节；单事实只说一次；量化首轮 Prompt Token 变化 |
+| `dsh-create-upgrade-guide` | 变更破坏对外可感知契约（CLI/配置/持久化数据/SDK/包导出）或修订单一升级指南 | **破坏性变更显式引导**：统一在 `docs/upgrade-guide/` 维护单调向后的迁移方案；包含受影响表面、破坏原因、前置检查与确定性迁移操作 |
+| `dsh-error-handling` | 设计或评审错误分支、恢复策略、重试、后台任务与用户可见报错 | **非防御性吞错与因果可追溯**：禁止隐式吞异常；区分可恢复（降级/重试带退避）与致命故障；错误信息必须携带定位上下文与补救动作 |
+| `dsh-ci-test-reliability` | 设计、评审与排查高并发/共享资源/时钟/全局状态/异步回收下的 Flaky 测试 | **并发与环境确定性**：隔离进程级状态；时钟与异步清理显式 await；真实端口与资源带生命周期销毁；禁止靠加 `sleep` 掩盖竞态 |
+| `dsh-speed-up-perf` | 排查或优化 Harness 运行时性能、长会话内存与 Web 响应度，设计基准测试 | **实测驱动的无损优化**：先 profile 拿基线热点再动手；保留语义与不变量不变；必须提供量化收据对比（CPU/内存/时延前后对照） |
+| `dsh-client-ui-ux` | 设计与审查 Web/客户端界面变更（视觉 Token、复用、反馈面、弹窗、加载态） | **反馈表面纪律与设计系统复用**：遵循既有视觉 Token；轻反馈（Toast）vs 原地提示 vs 破坏性操作模态的严格边界；加载中骨架与错误文案就近归属 |
+| `dsh-responsive-ui` | 设计或评审响应式布局、文本截断、标题折行、无障碍与移动端触控交互 | **极窄/宽屏无损适配**：禁硬编码固定像素宽高导致溢出；长文本有策略截断或 tooltip 展开；小屏下自动降级为折叠或抽屉，键盘导航焦点闭环 |
+| `dsh-official-plugin-artwork` | 绘制与审查官方/实验性插件的图标与预览视觉资产 | **视觉规范与包清单同步**：像素网格对齐、矢量比例、SVG 语义化透明度与高低色模式适配；同步登记至插件元数据清单 |
+| `cordis-styling-nitpicking` | 审查 Cordis 插件及入口可达模块的代码质量、单例与生命周期挂载 | **Cordis 生命周期洁癖**：单例状态显式释放、副作用双向清理对称（mount/unmount 必配对）、清理依赖在消费者退出前禁止提前销毁 |
 
 ### 3.3 设计模式提炼（超越原笔记）
 
@@ -258,11 +267,11 @@ description 自足性原则：技能路由发生在"只有摘要可见"的懒加
 | 1 | `*.i18n.yaml`（排除 archived） | `verify-translation-pairing.ts --cached` | 暂存 i18n 配对与源/中文三件套的 git 索引字节哈希一致 |
 | 2 | `.agents/notes/archived/**` | `verify-archived-agent-notes.ts` | 冻结归档封印不可改/删，新增须先 `--write` |
 | 3 | `*.{ts,tsx,mts,cts,mjs}`（排除 `vendor/*/src/**`） | `run-oxlint.ts --config .oxlintrc.staged.json --fix` + `stage_fixed: true` | 项目无关的暂存 lint 自动修复后重新暂存 |
-| 4 | 依赖清单变化 | `gen-third-party-notices.ts && git add` | **再生成而非拒绝**（依赖变化时重写 THIRD_PARTY_NOTICES.md） |
-| 5 | 全部 | `git diff --cached --check` | 空白错误/冲突标记 |
+| 4 | 全部 | `git diff --cached --check` | 空白错误/冲突标记 |
+| 5 | 提供者元数据与配置相关 | `gen-provider-data.ts --check --cached` | 模型 provider 元数据定义生成代码与 lockfile 强一致 |
 | 6 | 无 glob（每次 pre-commit 必跑） | `check-vendor-manifest.sh` | 改 `vendor/*/src` 或 `bin.js` 必须同提交改 `vendor/README.md` |
 
-另有 `pre-merge-commit` 复用 1、2 两项，保证 merge 提交也过冻结门。
+另有 `pre-merge-commit` 复用 1、2 两项，保证 merge 提交也过冻结门。依赖变更时的第三方声明验证（`verify-third-party-notices`）已收拢至 CI 静态检查流水线。
 
 ### 4.3 L2 pre-push（十秒级）
 
@@ -295,6 +304,9 @@ description 自足性原则：技能路由发生在"只有摘要可见"的懒加
 
 - **门被门检验**：每个验收路径有负样本 spec（`archived-agent-notes.spec.ts` 构造"删 sidecar + 错头"拒绝 incomplete triplet、"改 content"拒绝 sealed hash changed）；`ci-workflow.spec.ts` 把整个 CI 形状钉死——门本身也是代码，配置变更像任何变更一样评审；
 - **窄例外优于全局关闭**（`.oxlintrc.staged.json` 是 staged 专用精简档，非全仓降标）；
+- **门与负样本同名配对**：实例 `foo.sh` / `foo.ps1` 分别由 `foo.spec.sh` / `foo.spec.ps1` 承担负样本证明；`ci-verify.sh` 仅是编排器，不要求同名 spec，框架内置 A1/A2/A6/A7 与实例门分边界。`audit` 只读检出缺配对门并给出稳定 `gate_spec_missing` 缺口且非零拒绝；`--run-specs` 只执行受支持的 `.sh`，`.ps1` 的执行证据由其平台 CI 或 review 提供，不冒充已运行；
+- **聚合覆盖治理执行面**：承载 `all-checks-passed` 的 workflow 必须在同一文件定义治理 job，并把其 `needs.<job>.result` 纳入只允许全部 `success` 的聚合；跨 workflow 的独立检查不能替代可聚合依赖；
+- **spec 不得自我跳过**：`PONYGO_IN_SPEC` 仅是兼容环境信息；CLI 用 `PONYGO_AUDIT_SPEC_DEPTH` 拦截嵌套执行，A2 与实例 spec 不得用旧变量把直接调用或 CI 调用洗成 `SKIPPED`；编排器还必须把 spec 输出中的 `SKIPPED` 判为失败；
 - **只读判定不执行仓库代码**：`status`/`audit` 这类判定命令默认只读——不执行实例里的脚本
   （对陌生遗留仓库执行脚本 = 任意代码执行）。执行型判据（跑负样本 spec 证明门会拒绝）须显式
   opt-in（`ponygo audit --run-specs`）或挂在 CI/pre-push 层；护栏命中时如实报 `SKIPPED`，
@@ -346,7 +358,7 @@ docs/ 的家是 AGENTS.md（自动加载），包契约的家是 README（人读
 
 ### 5.1 Tier 分类法：每个事实一个家
 
-dsh 把"事实"按职责分到 12 个 tier，**每一 tier 的 Job 与该 tier 不承载的东西都写死**：
+dsh 把"事实"按职责分到 14 个 tier，**每一 tier 的 Job 与该 tier 不承载的东西都写死**：
 
 | Tier | Job | 不承载 |
 |---|---|---|
@@ -355,7 +367,9 @@ dsh 把"事实"按职责分到 12 个 tier，**每一 tier 的 Job 与该 tier �
 | architecture.md | 有序地图：组合、核心包、环、接缝、扩展点 | 类型定义/单包细节/决策理由/状态标注 |
 | subsystems/ | 每子系统一参考页（类型定义 + 生成 API） | 行为叙事 |
 | Agent Notes | 活动决策记录（当前态现在时） | 迁移计划/验收清单/spec-speak |
+| defensive-patterns/ | 审查中捍卫的规则集（通用缺陷类与按工件划分的防御规则） | 类型定义/运行时理由（→ subsystems / Agent Notes） |
 | postmortem/ | 事故故事（唯一允许战争叙事层） | —— |
+| Persistence 历史与格式 | 类型变更记录、发布差异对比与持久化历史格式 Schema | 纯运行时行为变更/当前契约 |
 | cookbook/ | 带编号验证步的 how-to | 设计理由（→ note） |
 | user/ | 产品面向指南（文档站发布） | 生成表/贡献流程/决策史 |
 | 包 README | 单包契约：配置/语义/限制/扩展点/Model Experience | JSDoc 复述/生成目录复述 |
@@ -363,7 +377,7 @@ dsh 把"事实"按职责分到 12 个 tier，**每一 tier 的 Job 与该 tier �
 | 生成参考 | 从源码再生成的穷尽英文源 + 新鲜度门禁 | 手编生成源 |
 | Skills | 可复用工作流 | 产品/运行时契约 |
 
-**放置速查**：bug→postmortem；理由→note；过程→cookbook；类型定义→subsystems；包契约→README；standing orders→根 AGENTS.md + 理由链。
+**放置速查**：bug→postmortem；理由→note；过程→cookbook；类型定义→subsystems；包契约→README；standing orders→根 AGENTS.md + 理由链；审查防御模式→defensive-patterns/；持久化演进→Persistence 历史。
 
 ### 5.2 写作规则
 
@@ -375,7 +389,7 @@ dsh 把"事实"按职责分到 12 个 tier，**每一 tier 的 Job 与该 tier �
 
 ### 5.3 Wordcount budgets
 
-`scripts/doc-budgets.manifest.json` 定 standing-doc 上限；`verify-doc-budgets` 拒绝超限/缺文件。红门按 **relocate → condense → raise** 顺序处理（raise 须在 PR 里 justify manifest diff）。**上限是护栏不是压减目标**：目标线下保留至少 5% 余量。manifest 实测 8 项上限：根 AGENTS.md ≤1950、docs/AGENTS.md ≤1320、docs/architecture.md ≤2400、docs/cordis-primer.md ≤600、docs/defensive-patterns.md ≤550、docs/testing.md ≤1150、packages/AGENTS.md ≤675、packages/README.md ≤994（另 `docs/AGENTS.md` 提到 `examples/AGENTS.md` ≤310）。
+`scripts/doc-budgets.manifest.json` 定 standing-doc 上限；`verify-doc-budgets` 拒绝超限/缺文件。红门按 **relocate → condense → raise** 顺序处理（raise 须在 PR 里 justify manifest diff）。**上限是护栏不是压减目标**：目标线下保留至少 5% 余量。manifest 核心清单实测：根 AGENTS.md ≤2080、docs/AGENTS.md ≤1430、docs/architecture.md ≤2410、docs/cordis-primer.md ≤600、docs/testing.md ≤1350、packages/AGENTS.md ≤810、packages/README.md ≤994（另 `docs/AGENTS.md` 约束子树 AGENTS.md 默认 ≤600，`examples/AGENTS.md` ≤310）。
 
 ### 5.4 Slop checklist（审计清单）
 

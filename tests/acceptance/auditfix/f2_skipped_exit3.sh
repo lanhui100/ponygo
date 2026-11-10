@@ -136,8 +136,10 @@ if gov_repo "$T" 1; then
   assert_not_contains "F2-1 NOGO：全部真通过时不得出现「自报 SKIPPED」" "$R_OUT" "自报 SKIPPED"
   CONC=$(conclusion_of "$R_OUT")
   assert_contains "F2-1 GO：结论行含「2.3 执行判据」" "$CONC" "2.3 执行判据"
-  assert_not_contains "F2-1 NOGO：结论行不得含 SKIPPED" "$CONC" "SKIPPED"
-  assert_not_contains "F2-1 NOGO：结论行不得含「未验证」" "$CONC" "未验证"
+  # 未声明 ai-surface 的合法夹具会有 1.9b SKIPPED；此处禁止的是 2.3 执行证据被跳过，不是抹掉该条件子项。
+  assert_contains "F2-1 GO：结论行明确 2.3 已真跑并通过" "$CONC" "2.3 执行判据 已真跑并通过"
+  assert_not_contains "F2-1 NOGO：2.3 不得含 SKIPPED" "$CONC" "2.3 执行判据 SKIPPED"
+  assert_not_contains "F2-1 NOGO：2.3 不得含「未验证」" "$CONC" "2.3 执行判据 未验证"
 fi
 
 # ---- F2-5：多个 spec 失败必须聚合报出 ----

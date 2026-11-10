@@ -3905,8 +3905,10 @@ s78_wave13_acceptance() {
 #      implemented 含中文提案标题（## 验收）→ exit 1，关键词「提案时代标题」
 #   C3 1.9b 根 AGENTS.md fail-closed 三态：on+缺=exit 1 且含「1.9」；on+有链=exit 0 且含「1.9 PASS」；
 #      未声明=exit 0 且含「1.9b SKIPPED」「不计入 PASS」、且不得含「1.9 PASS」「全部 PASS」
-#   C6 audit 问④：空 archived（无 manifest）/ 有件未封印 → 不计命中；seal 后 → 命中数较
-#      「无 archived」基线恰 +1（只比「命中 N / M 项」文本里的 N，不读内部字段）
+#   C6 audit 四态结构分 + 问④「退场」：四态 {proposed,implemented,rejected,archived} 齐全
+#      独立 +1（移走 archived/ 即 3/4，较 4/4 基线少 1）；空 archived / 有件未封印 → 问④ 仍 0
+#      （较「无 archived」基线 +1 只来自四态分）；seal 后 → 较「无 archived」基线 +2
+#      （只比「命中 N / M 项」文本里的 N，不读内部字段）
 #
 # 为什么 C1/C2 走 A1（.meta/gates/adr-verify.sh）而不是直接跑真源：被测事实是「门会拒绝」，
 # 真源只是门的判据来源。门在带参模式下要求该 ADR 已暂存（否则先走 TOCTOU 拒绝，测到的就
@@ -4079,9 +4081,16 @@ EOF
   assert_not_contains "C3⑨ 未声明时不得声称 1.9 PASS" "$R_OUT" "1.9 PASS"
   assert_not_contains "C3⑩ 且禁写「全部 PASS」" "$R_OUT" "全部 PASS"
 
-  # ---- C6 audit 问④「退场」：空 archived 不得分；已封印归档件才得分（§C6）----
+  # ---- C6 四态结构分（CA-06）与问④「退场」：四态齐全独立 1 分；封印归档件另 1 分（§C6）----
+  # 计分口径（S 档逐项 +1，两项互不代偿）：
+  #   ① 问① 的「四态 {proposed,implemented,rejected,archived} 齐全」是**独立结构项**，
+  #      不附加 n_dec / bad_status 条件——archived/ 一移走（3/4）就该少这 1 分；
+  #   ② 问④ 只认「已封印归档件」（archived/manifest.sha256 含格式合法登记行），
+  #      空 archived/、有件但无 manifest 一律 0 分（形态不是证据）。
+  # 四个基线由此两两隔离：无 archived（3/4，无四态分、无退场分）
+  # → 空 archived（4/4，+四态分）→ 有件未封印（4/4，退场分仍 0）→ 封印后（+退场分）。
   T=$(new_case); run_cli "$T" init
-  # 先把问①「有至少一条决策」打成命中，隔离「问④」这唯一的变量
+  # 先把问①「有至少一条决策」打成命中，隔离「四态结构项」与「问④」两个变量
   write_valid_decision "$T" "implemented/feature/2026-01-02-ok.md"
   G=$(sanitize_git)
   assert_missing "C6⓪ 前置取证：init 后 archived/ 为空（无 manifest）" "$T/.agents/notes/archived/manifest.sha256"
@@ -4089,15 +4098,17 @@ EOF
   run_cli_env "$T" $G audit --level S
   H_base=$(audit_hit_n "$R_OUT")
   [ -n "$H_base" ] && ok "C6⓪b 前置取证：audit 命中行可解析（N=$H_base）" || bad "C6⓪b 前置取证：audit 输出无「命中 N / M 项」行"
-  # 对照组：整个 archived/ 移走 → 命中数应与之相等（目录存在本身不是「退场」证据）
+  # 对照组：整个 archived/ 移走 → 四态降为 3/4，命中数只该少「四态结构项」这 1 分
   mv "$T/.agents/notes/archived" "$T/archived.aside"
+  assert_missing "C6⓪d 对照前置取证：archived/ 已移出（四态 3/4）" "$T/.agents/notes/archived"
   # shellcheck disable=SC2046
   run_cli_env "$T" $G audit --level S
   H_noarch=$(audit_hit_n "$R_OUT")
   [ -n "$H_noarch" ] && ok "C6⓪c 前置取证：无 archived 对照可解析（N=$H_noarch）" || bad "C6⓪c 前置取证：对照 audit 无命中行"
-  assert_eq "C6① 空 archived/（无 manifest）不计「退场」——与无 archived 同分" "$H_noarch" "$H_base"
+  assert_eq "C6① 四态齐全本身独立计 1 分——移走 archived/（3/4）后命中数恰少 1" "$((H_noarch + 1))" "$H_base"
   mv "$T/archived.aside" "$T/.agents/notes/archived"
-  # 有归档件但未封印（无 manifest）→ 仍不得分（fail-closed：形态不是证据）
+  # 有归档件但未封印（无 manifest）→ 四态分（4/4）照拿、问④ 退场分仍为 0
+  # （fail-closed：形态不是证据——「建了目录 / 放了文件」都不等于封印）
   mkdir -p "$T/.agents/notes/archived/process"
   cat > "$T/.agents/notes/archived/process/2026-01-01-old.md" <<'EOF'
 # Agent Note: archived old
@@ -4113,15 +4124,15 @@ EOF
   # shellcheck disable=SC2046
   run_cli_env "$T" $G audit --level S
   H_unsealed=$(audit_hit_n "$R_OUT")
-  assert_eq "C6② 归档件未封印（无 manifest）→ 仍不计「退场」" "$H_noarch" "$H_unsealed"
-  # 封印后 → 计为命中（相对「无 archived」基线恰 +1）
+  assert_eq "C6② 归档件未封印（无 manifest）→ 与空 archived/ 同分（只拿四态分 = 无 archived 基线 +1）" "$((H_noarch + 1))" "$H_unsealed"
+  # 封印后 → 问④ 计为命中（相对「无 archived」基线 +2 = 四态结构分 1 + 封印项 1）
   run_script "$T" .meta/gates/archive-verify.sh seal
   assert_eq "C6③ 归档封印 seal exit 0" 0 "$S_RC"
   assert_file_has "C6④ manifest 真登记该归档件" "$T/.agents/notes/archived/manifest.sha256" "2026-01-01-old.md"
   # shellcheck disable=SC2046
   run_cli_env "$T" $G audit --level S
   H_sealed=$(audit_hit_n "$R_OUT")
-  assert_eq "C6⑤ 已封印归档件 → 计「退场」（无 archived 基线 +1）" "$((H_noarch + 1))" "$H_sealed"
+  assert_eq "C6⑤ 已封印归档件 → 计「退场」（无 archived 基线 +2：四态结构分 1 + 封印项 1）" "$((H_noarch + 2))" "$H_sealed"
 
   # ---- 契约收口回归（契约已在 T4 落地，**非红相**）----
   # 这两条不是新契约，而是 C2/C3 判定器落地后的「写法不可绕过」边界：

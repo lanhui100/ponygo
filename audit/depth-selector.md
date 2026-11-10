@@ -21,7 +21,7 @@
 
 | # | 探测信号 | 命令 | 重型阈值 |
 |---|---|---|---|
-| 1 | 贡献者规模 | `git shortlog -sne \| wc -l` | ≥ 3 |
+| 1 | 贡献者规模 | `git rev-parse --is-inside-work-tree` 且 `git rev-parse --verify HEAD` 成功后跑 `git shortlog -sne HEAD \| wc -l`（兼容 linked worktree） | ≥ 3 |
 | 2 | 多技术栈 | `for f in package.json Cargo.toml go.mod pyproject.toml pom.xml; do [ -e $f ] && echo; done \| wc -l` | ≥ 2 种 manifest |
 | 3 | monorepo | `find packages -maxdepth 2 -name package.json \| wc -l` | ≥ 3 包 |
 | 4 | 治理已有痕迹 | `for g in .github .githooks; do [ -e $g ] && echo; done \| wc -l` | ≥ 1（已有治理，值得深查） |

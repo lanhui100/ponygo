@@ -24,6 +24,9 @@ if gov_repo "$T" 2; then
   : > "$T/.meta/gates/adr-verify.sh"
   : > "$T/.meta/gates/adr-verify.spec.sh"
   : > "$T/.meta/gates/ci-verify.sh"
+  # 新增 A6/A7 同属骨架门禁资产；若保留有效内容，本负样本根本走不到「无实质门禁」分支。
+  : > "$T/.meta/gates/archive-verify.sh"
+  : > "$T/.meta/gates/archive-verify.spec.sh"
   printf '%s\n' "$COMMENT_ONLY" > "$T/.meta/gates/comment-only-gate.sh"
   chmod +x "$T/.meta/gates/comment-only-gate.sh"
   run_in "$T" status
@@ -46,7 +49,9 @@ T=$(new_case)
 if gov_repo "$T" 2; then
   # 骨架文件在位（不早退），但唯一的 *.spec.* 只有注释 → 2.3 形状判据不成立
   printf '%s\n' "$COMMENT_ONLY" > "$T/.meta/gates/adr-verify.spec.sh"
-  chmod +x "$T/.meta/gates/adr-verify.spec.sh"
+  # A7 也是负样本 spec；必须同步为注释-only，才能继续检验「仓内无任何有效 spec」的 2.3 分支。
+  printf '%s\n' "$COMMENT_ONLY" > "$T/.meta/gates/archive-verify.spec.sh"
+  chmod +x "$T/.meta/gates/adr-verify.spec.sh" "$T/.meta/gates/archive-verify.spec.sh"
   run_in "$T" status
   assert_rc_is "F9-2 注释-only spec → status exit 1（2.3 形状不成立）" 1 "$R_RC"
   assert_contains "F9-2 GO：报「2.3 gates/ 无负样本 spec」" "$R_OUT" "2.3 gates/ 无负样本 spec"

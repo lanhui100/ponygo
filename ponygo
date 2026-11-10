@@ -628,11 +628,6 @@ staged 后又在工作区改动（两个方向：暂存合法→工作区改、�
 每个"必须被拒"的样本都配一个相邻的正向对照（补一行理由 / 补 `## Decision` → 放行），
 证明判据不是"一律拒绝"——只有负样本的 spec 分不清"门会响"和"门坏了"。
 
-**已知弱点（诚实条款）**：`verify-note.sh` 按**行**匹配标题、不解析 Markdown 结构——围栏代码块内
-（``` / ~~~ 之中）写的 `## Decision` / `## Alternatives considered` 同样被认作"在场"，
-故把标题塞进示例代码块可绕过 1.8/1.10 的在场判据（与 1.10 同型弱点）。修它需要真 Markdown 解析，
-收益低而回归面大；这道缝由 review 兜，spec 不冒充已闭。
-
 **围栏感知（Wave-2 §D2）**：1.8/1.10 的标题判定只认**围栏外**的 `## 标题`——``` 围栏内的标题是示例文本，
 不算在场；未闭合围栏 → 其后全部视为围栏内（fail-closed）。故"把 `## Decision` 塞进示例代码块"不再能骗过
 A1/A2/A4，spec 用「围栏内 Decision / 围栏内 Alternatives / 未闭合围栏」三负样本 + 一条"围栏外真标题"正向对照看守。
@@ -1566,6 +1561,7 @@ audit_revisions_frozen() { # 0=PASS 1=WARN 2=SKIPPED；结果写 REV_STATUS/REV_
 
 # 打印 D5 守卫结果（audit 报告段调用；PASS 一行、WARN 逐条、SKIPPED 明说不计入 PASS）
 audit_revisions_report() {
+  [ -d revisions ] || return 0
   audit_revisions_frozen || true
   case "$REV_STATUS" in
     pass)
@@ -1704,6 +1700,7 @@ verify_ladder() {
   local lv="$1"
   VL_FAILS=""
   VL_FAIL_IDS=""
+  L1_JUDGED=0
   # 2.5 条件判据状态（Q1=A）：DT_OFF=1 → 结论行改写为"2.1–2.4 PASS；2.5 未启用"；
   # DT_SKIP=1 → 未声明 docs-tier（2.5 不计入 PASS，WARN 催声明）。
   DT_OFF=0; DT_SKIP=0
@@ -1738,6 +1735,7 @@ verify_ladder() {
     # 判据范围诚实条款：本命令的机械影子覆盖 1.1–1.9；1.10（必含 ## Alternatives considered）
     # 由判定真源 .agents/skills/write-adr/verify-note.sh 判定，本命令不重复实现（P9）。
     if [ "$lv" -ge 1 ]; then
+      L1_JUDGED=1
       verified_range="L0-L1"
       [ -d "$DECISIONS_DIR" ] || vl_fail "1.1 .agents/notes/ 缺失 → 建 notes/ 与四态子目录"
       local n_dec=0
@@ -4958,23 +4956,16 @@ json_path_list() { # <空格分隔的仓库相对路径> → "a","b"（空 → �
   for v in $1; do out="${out}${out:+,}\"$(json_escape "$v")\""; done
   printf '%s' "$out"
 }
-json_coverage() { # 判据覆盖块 → "coverage":{...}（status / audit **同源**，禁第二副本）
-  # 口径（Lead 裁决 2026-11-09 B + 修复轮收口）：**默认保守**——
-  #   只有 verify_ladder 真的判过 1.9b（AS19_JUDGED=1：ai-surface: on 且走完 1.9b 检查）才给
-  #   verified:["1.1-1.9"] 且不带 skipped 键；
-  #   其余一律（off / 未声明 / 值非法 / **ladder 根本没跑**）给
-  #   verified:["1.1-1.8"] + skipped:["1.9b"]——机器面不得宣称一个没跑的子项已验证（SKIPPED ≠ PASS）。
-  # 为什么默认要保守：status 有骨架缺口/无 meta 等**提前退出**分支（不跑 ladder），旧默认会给
-  # 1.1-1.9 而同一实例的 audit 给 1.1-1.8+skipped —— 同源契约当场破。未判定 = 未验证。
-  # unverified 恒为 ["1.10"]：1.10 的归属不变（本命令不执行仓库脚本，故不由它验证）。
-  # 人类结论行与此同源（都读 AS19_SKIP，后者由 ai_surface_state() 派生；AS19_JUDGED 只在
-  # ai-surface: on 分支置 1，即 1.9b 真被判过——判成 FAIL 也算判过）。
-  if [ "${AS19_JUDGED:-0}" = "1" ]; then
+json_coverage() {
+  if [ "${L1_JUDGED:-0}" != "1" ]; then
+    printf '%s' '"coverage":{"verified":[],"unverified":["1.1-1.10"],"reason":"l1-not-run"}'
+  elif [ "${AS19_JUDGED:-0}" = "1" ]; then
     printf '%s' '"coverage":{"verified":["1.1-1.9"],"unverified":["1.10"],"reason":"readonly-no-repo-exec"}'
   else
     printf '%s' '"coverage":{"verified":["1.1-1.8"],"unverified":["1.10"],"skipped":["1.9b"],"reason":"readonly-no-repo-exec"}'
   fi
 }
+
 audit_json_line() { # <exit code> → 单行 JSON
   # coverage：判据覆盖固定词表（1.10 不由本命令验证）；drift：骨架漂移观察项（不参与退出码）。
   # 键序不作为契约（只保证字段存在/值正确），但保持**单行**。
@@ -4983,7 +4974,7 @@ audit_json_line() { # <exit code> → 单行 JSON
     "${VL_VERDICT:-unverified}" "$(json_id_list "${VL_FAIL_IDS:-}")" \
     "$(gates_local_state)" "$(gates_remote_state)" \
     "$(json_id_list "${AUDIT_GAP_IDS:-}")" "$(json_coverage)" \
-    "${AUDIT_DRIFT_COUNT:-0}" "$(json_path_list "${AUDIT_DRIFT_FILES:-}")" "$1"
+    "${AUDIT_DRIFT_COUNT:--1}" "$(json_path_list "${AUDIT_DRIFT_FILES:-}")" "$1"
 }
 status_json_line() { # <exit code> → 单行 JSON（W9-B2：skeleton 三字段是**仓库相对路径数组**，非计数）
   # coverage：判据覆盖固定词表（lv=0 也带，词表不随级别变化）；drift 在 skeleton 内（与人类输出同源）。
@@ -4996,7 +4987,9 @@ status_json_line() { # <exit code> → 单行 JSON（W9-B2：skeleton 三字段�
 json_verdict_fallback() { # <exit code>：ladder 未落 verdict 时的兜底（W9-A3）
   # 未跑 ladder 不代表「证据不足」：进程以硬失败退出（非 0）时必须报 fail，不得把失败洗成 unverified。
   if [ -z "${VL_VERDICT:-}" ]; then
-    if [ "$1" != "0" ]; then VL_VERDICT="fail"; else VL_VERDICT="unverified"; fi
+    if [ "$1" = "3" ]; then VL_VERDICT="unverified";
+    elif [ "$1" != "0" ]; then VL_VERDICT="fail";
+    else VL_VERDICT="unverified"; fi
   fi
 }
 audit_done() { # <exit code>：JSON 模式先把单行 JSON 送到原 stdout（fd 3），再按真实码退出
@@ -5016,12 +5009,12 @@ cmd_audit() {
   # F8：--json 机读面。人类报告整体改道 stderr，fd 3 保留原 stdout 只给单行 JSON。
   # W9-8：fd 3 是 JSON 通道，绝不能让**仓库脚本**（*.spec.sh，任意代码执行面）继承——
   # 否则它往 fd3 写一行就会破坏「stdout 恰一行 JSON」；故 run_gate_specs 的每次调用都 `3>&-`。
-  AUDIT_JSON="${OBSERVE_JSON:-0}"; AUDIT_GAP_IDS=""; VL_VERDICT=""; VL_FAIL_IDS=""
-  AUDIT_DRIFT_FILES=""; AUDIT_DRIFT_COUNT=0
+  AUDIT_JSON="${OBSERVE_JSON:-0}"; AUDIT_GAP_IDS=""; VL_VERDICT=""; VL_FAIL_IDS=""; L1_JUDGED=0
+  AUDIT_DRIFT_FILES=""; AUDIT_DRIFT_COUNT=-1
   if [ "$AUDIT_JSON" = "1" ]; then exec 3>&1 1>&2; fi
   # 信号1：贡献者数 >= 3
   local contrib=0
-  if [ -d .git ] && git rev-parse --verify HEAD >/dev/null 2>&1; then contrib=$(git shortlog -sne HEAD 2>/dev/null | wc -l | tr -d ' '); fi
+  if [ -e .git ] && git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git rev-parse --verify HEAD >/dev/null 2>&1; then contrib=$(git shortlog -sne HEAD 2>/dev/null | wc -l | tr -d ' '); fi
   [ "${contrib:-0}" -ge 3 ] && { heavy=1; reasons="$reasons 贡献者≥3($contrib)"; }
   # 信号2：多技术栈（多种 manifest 并存）
   local manifests=0
@@ -5064,13 +5057,14 @@ cmd_audit() {
   [ "${LEVEL_CHOICE}" = "M" ] && { info "M 档——机制层判定（判「对不对」）。"; }
 
   # ---- 四问打分（S 档查骨架层，M 档追加机制层；每项一条现成命令，命中+1）----
-  local hit=0 total=0
+  local hit=0 total=0 hook_ok=0
+  if gate_24_probe; then hook_ok=1; fi
 
   # 问① 决策记在哪
   total=$((total+1)); [ -d "$DECISIONS_DIR" ] && hit=$((hit+1))
   total=$((total+1))
-  found=0; for lc in $LIFECYCLES; do [ -d "$DECISIONS_DIR/$lc" ] && found=1; done
-  [ "$found" = "1" ] && hit=$((hit+1))
+  found=0; for lc in $LIFECYCLES; do [ -d "$DECISIONS_DIR/$lc" ] && found=$((found+1)); done
+  [ "$found" -eq 4 ] && hit=$((hit+1))
   total=$((total+1))
   n_dec=$(count_decisions)
   [ "${n_dec:-0}" -gt 0 ] && hit=$((hit+1))   # 有至少一条决策
@@ -5079,13 +5073,13 @@ cmd_audit() {
   total=$((total+1))
   # 状态与内容一致：反向查缺 Status 头的 md（允许义务外的 README/AGENTS.md 豁免）
   bad_status=$(find "$DECISIONS_DIR" -name '*.md' ! -name 'README.md' ! -name 'AGENTS.md' -exec grep -L '^Status:' {} + 2>/dev/null | wc -l | tr -d ' ')
-  [ "${bad_status:-0}" -eq 0 ] && hit=$((hit+1))
+  [ "${n_dec:-0}" -gt 0 ] && [ "${bad_status:-0}" -eq 0 ] && hit=$((hit+1))
 
   if [ "$LEVEL_CHOICE" = "M" ]; then
     total=$((total+1))
     n_alt=$(grep -rl 'Alternatives' "$DECISIONS_DIR" 2>/dev/null | grep -v '/README\.md$' | wc -l | tr -d ' ')
     [ "${n_alt:-0}" -gt 0 ] && hit=$((hit+1))  # 有 Alternatives 节
-    total=$((total+1)); [ -f .git/hooks/pre-commit ] || [ -f .githooks/pre-commit ] && hit=$((hit+1))  # 触发条件/门禁痕迹
+    total=$((total+1)); [ "$hook_ok" = "1" ] && hit=$((hit+1))  # 触发条件/门禁痕迹
   fi
 
   # 问② 承诺怎么强制
@@ -5105,11 +5099,7 @@ cmd_audit() {
   [ "$g2" = "1" ] && hit=$((hit+1))
   total=$((total+1))
   # 本地钩子已挂：仅在 git 仓库内判定（非 git 目录读到的全局配置与本项目无关）
-  hook_path=""
-  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    hook_path=$(git config core.hooksPath 2>/dev/null)
-  fi
-  if [ -n "$hook_path" ] && [ -d "$hook_path" ]; then hit=$((hit+1)); fi  # 本地钩子已挂
+  [ "$hook_ok" = "1" ] && hit=$((hit+1))  # 本地钩子已挂
   total=$((total+1))
   # CI 存在：跨平台探测（GitHub/GitLab/Bitbucket/Azure/Drone/Jenkins/通用 ci 目录）
   has_ci=0
@@ -5175,8 +5165,8 @@ cmd_audit() {
     gap_txt="${gap_txt}  - notes/ 无任何决策 → 写第一篇 ADR，落 proposed/ 或 implemented/"$'\n'
     AUDIT_GAP_IDS="${AUDIT_GAP_IDS}${AUDIT_GAP_IDS:+ }no_decisions"
   fi
-  if [ -z "${hook_path:-}" ] && [ ! -f .githooks/pre-commit ]; then
-    gap_txt="${gap_txt}  - 无本地钩子（core.hooksPath 未设）→ 这是「强制层」缺口，优先补（放大器）"$'\n'
+  if [ "$hook_ok" != "1" ]; then
+    gap_txt="${gap_txt}  - 本地 ADR 门未接线（${G24_CAUSE:-gate_24_probe 未通过}）→ 这是「强制层」缺口，优先补（放大器）"$'\n'
     AUDIT_GAP_IDS="${AUDIT_GAP_IDS}${AUDIT_GAP_IDS:+ }no_local_hook"
   fi
   echo ""
@@ -5210,7 +5200,12 @@ cmd_audit() {
   echo "===== 骨架漂移（观察项，不改退出码） ====="
   skeleton_drift
   AUDIT_DRIFT_FILES="$SKEL_DRIFT_LIST"
-  AUDIT_DRIFT_COUNT=$(skel_drift_count "$SKEL_DRIFT_LIST")
+  if [ "${SKEL_CMP_OK:-0}" = "1" ]; then
+    AUDIT_DRIFT_COUNT=$(skel_drift_count "$SKEL_DRIFT_LIST")
+  else
+    AUDIT_DRIFT_COUNT=-1
+    AUDIT_DRIFT_FILES=""
+  fi
   if [ "${SKEL_CMP_OK:-0}" != "1" ]; then
     echo "漂移未判定（模板基准不可得）——用 'ponygo upgrade' 看漂移"
   elif [ "${AUDIT_DRIFT_COUNT:-0}" -eq 0 ]; then
@@ -5299,8 +5294,14 @@ skeleton_drift() {
       [ "$st_dt" = "1" ] && [ "$stf" = ".meta/docs-tier/README.md" ] && continue
       [ -f "$SKEL_TMP/$stf" ] || continue
       [ -f "$stf" ] || continue
-      if ! cmp -s <(tr -d '\r' < "$stf") <(tr -d '\r' < "$SKEL_TMP/$stf"); then
+      cmp -s <(tr -d '\r' < "$stf") <(tr -d '\r' < "$SKEL_TMP/$stf")
+      cmp_rc=$?
+      if [ "$cmp_rc" -eq 1 ]; then
         SKEL_DRIFT_LIST="${SKEL_DRIFT_LIST}${SKEL_DRIFT_LIST:+ }$stf"
+      elif [ "$cmp_rc" -ge 2 ]; then
+        SKEL_CMP_OK=0
+        SKEL_DRIFT_LIST=""
+        break
       fi
     done
   fi
@@ -5323,7 +5324,7 @@ cmd_status() {
   STATUS_JSON="${OBSERVE_JSON:-0}"; STATUS_LEVEL_INT="$(level_as_int "$lv")"
   # W9-B2/B3：JSON 的 skeleton 与人类清单**同源**——三者都存「仓库相对路径列表」，
   # 计数由列表长度派生（禁两套口径：数组与「骨架文件缺口：N」必须同数）。
-  STATUS_MISSING_DIRS=""; STATUS_MISSING_FILES=""; STATUS_DRIFT=""; VL_VERDICT=""; VL_FAIL_IDS=""
+  STATUS_MISSING_DIRS=""; STATUS_MISSING_FILES=""; STATUS_DRIFT=""; VL_VERDICT=""; VL_FAIL_IDS=""; L1_JUDGED=0
   if [ "$STATUS_JSON" = "1" ]; then exec 3>&1 1>&2; fi
   echo "===== ponygo status ====="
   echo "治理级：$(fmt_level "$lv")"
