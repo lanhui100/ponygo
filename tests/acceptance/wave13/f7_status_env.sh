@@ -33,7 +33,14 @@ assert_contains "ENV-4 [GO] 本机全绿：git ✓" "$EL" "git ✓"
 assert_contains "ENV-4 [GO] 本机全绿：GNU date ✓" "$EL" "GNU date ✓"
 assert_contains "ENV-4 [GO] 本机全绿：find -printf ✓" "$EL" "find -printf ✓"
 assert_contains "ENV-4 [GO] 本机全绿：sed -i ✓" "$EL" "sed -i ✓"
-assert_contains "ENV-4 [GO] 本机全绿：observe skill ✓" "$EL" "observe skill ✓"
+# observe skill 是可选本机依赖：按当前 HOME 的实际探测值断言（CI 未装时为 ✗）。
+if [ -d "$HOME/.agents/skills/observability-onboarding/references" ] \
+   && [ -f "$HOME/.agents/skills/observability-onboarding/references/contract.json" ]; then
+  OBS_ENV='✓'
+else
+  OBS_ENV='✗'
+fi
+assert_contains "ENV-4 [GO] 本机环境实测：observe skill $OBS_ENV" "$EL" "observe skill $OBS_ENV"
 NR_GOV=$(printf '%s\n' "$R_OUT" | grep -n '^治理级' | head -n1 | cut -d: -f1)
 NR_ENV=$(printf '%s\n' "$R_OUT" | grep -n '^环境：' | head -n1 | cut -d: -f1)
 if [ -n "$NR_GOV" ] && [ -n "$NR_ENV" ] && [ "$NR_ENV" -eq "$((NR_GOV + 1))" ]; then
@@ -62,7 +69,7 @@ assert_eq "ENV-5 [NOGO] 缺项时整行不得消失" 1 "$(printf '%s\n' "$R_OUT"
 assert_no_crash "ENV-5 [NOGO] 缺项时不得崩溃" "$R_OUT"
 # 反向控制：默认 HOME 下同一仓回到 ✓（排除残留/顺序导致的假 ✗）
 run_in "$T2" status
-assert_contains "ENV-5 [GO] 默认 HOME 下 observe skill 回到 ✓（反向控制）" "$(env_line_of "$R_OUT")" "observe skill ✓"
+assert_contains "ENV-5 [GO] 默认 HOME 下 observe skill 回到 $OBS_ENV（与 ENV-4 同源）" "$(env_line_of "$R_OUT")" "observe skill $OBS_ENV"
 
 # ---------- ENV-7：只读（不执行门禁脚本、零写入）----------
 T3=$(new_case)

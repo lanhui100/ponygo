@@ -17,6 +17,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+      - name: 配置本地治理钩子路径（git config 不入库）
+        run: git config core.hooksPath .githooks
       - name: bash tests/run.sh
         run: bash tests/run.sh
 
@@ -26,6 +28,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+      - name: 配置本地治理钩子路径（git config 不入库）
+        shell: bash
+        run: git config core.hooksPath .githooks
       - name: bash tests/run.sh (Git Bash)
         shell: bash
         run: bash tests/run.sh
