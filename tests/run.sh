@@ -394,7 +394,7 @@ s09_audit_counts() {
   assert_contains "S 档命中 3 / 10（空 notes 不送 Status；未封印 archived 不计问④）" "$R_OUT" "命中 3 / 10"
   # shellcheck disable=SC2046
   run_cli_env "$T" $G audit --level M
-  assert_contains "M 档命中 3 / 14（空 notes 不送 Status；未封印 archived 不计问④）" "$R_OUT" "命中 3 / 14"
+  assert_contains "M 档命中 3 / 15（空 notes 不送 Status；未封印 archived 不计问④）" "$R_OUT" "命中 3 / 15"
 }
 
 s10_audit_level_arg() {
@@ -560,7 +560,7 @@ s12_l2_criteria() {
   # + 执行位 + <root>/.meta/gates/adr-verify.sh；断言一条未删、未弱化。
   wire_gate_fixture "$T"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
-  printf 'purpose: negative sample spec\n' > "$T/.meta/gates/format.spec.md"
+  printf 'purpose: negative sample spec\n' > "$T/.meta/gates/format.spec.sh"
   # 分支：未声明 docs-tier + 已激活 → PASS（实际做到优先于声明）
   printf '## 已激活文档家清单\n' >> "$T/.meta/docs-tier/README.md"
   run_cli "$T" status
@@ -574,7 +574,7 @@ s12_l2_criteria() {
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
   printf 'level: 2\n' > "$T/.meta/meta.yaml"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
-  printf 'x\n' > "$T/.meta/gates/format.spec.md"
+  printf 'x\n' > "$T/.meta/gates/format.spec.sh"
   # 消毒：非 git 目录下全局 core.hooksPath 与本项目无关，不得假 PASS（reviewer-b P1-1）
   # shellcheck disable=SC2046
   run_cli_env "$T" $(sanitize_git) status
@@ -592,7 +592,7 @@ s12_l2_criteria() {
   # + 执行位 + <root>/.meta/gates/adr-verify.sh；断言一条未删、未弱化。
   wire_gate_fixture "$T"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
-  printf 'x\n' > "$T/.meta/gates/format.spec.md"
+  printf 'x\n' > "$T/.meta/gates/format.spec.sh"
   run_cli "$T" status
   assert_eq "未声明+模板态（SKIP）→ exit 0" 0 "$R_RC"
   assert_contains "催声明 WARN" "$R_OUT" "未声明 docs-tier"
@@ -610,7 +610,7 @@ s12_l2_criteria() {
   # + 执行位 + <root>/.meta/gates/adr-verify.sh；断言一条未删、未弱化。
   wire_gate_fixture "$T"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
-  printf 'x\n' > "$T/.meta/gates/format.spec.md"
+  printf 'x\n' > "$T/.meta/gates/format.spec.sh"
   run_cli "$T" status
   assert_eq "docs-tier: off → exit 0" 0 "$R_RC"
   assert_contains "off 改写结论行" "$R_OUT" "2.1–2.4 PASS；2.5 未启用"
@@ -628,7 +628,7 @@ s12_l2_criteria() {
   # + 执行位 + <root>/.meta/gates/adr-verify.sh；断言一条未删、未弱化。
   wire_gate_fixture "$T"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
-  printf 'x\n' > "$T/.meta/gates/format.spec.md"
+  printf 'x\n' > "$T/.meta/gates/format.spec.sh"
   # 模板态 docs-tier/README.md 未激活（无已激活锚点）
   run_cli "$T" status
   assert_eq "docs-tier: on + 模板态 → exit 1" 1 "$R_RC"
@@ -654,7 +654,7 @@ s12_l2_criteria() {
   # + 执行位 + <root>/.meta/gates/adr-verify.sh；断言一条未删、未弱化。
   wire_gate_fixture "$T"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
-  printf 'x\n' > "$T/.meta/gates/format.spec.md"
+  printf 'x\n' > "$T/.meta/gates/format.spec.sh"
   printf '## 已激活文档家清单\n\n| tier | 家 |\n|---|---|\n| 决策记录 | .agents/notes/ |\n' > "$T/.meta/docs-tier/README.md"
   run_cli "$T" status
   assert_eq "off + 已激活（矛盾 WARN）→ exit 0" 0 "$R_RC"
@@ -674,7 +674,7 @@ s12_l2_criteria() {
   # + 执行位 + <root>/.meta/gates/adr-verify.sh；断言一条未删、未弱化。
   wire_gate_fixture "$T"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
-  printf 'x\n' > "$T/.meta/gates/format.spec.md"
+  printf 'x\n' > "$T/.meta/gates/format.spec.sh"
   # 清零模板态 TODO：重写为已激活清单（无 TODO 残留）
   printf '## 已激活文档家清单\n\n| tier | 家 |\n|---|---|\n| 决策记录 | .agents/notes/ |\n' > "$T/.meta/docs-tier/README.md"
   run_cli "$T" status
@@ -693,7 +693,7 @@ s12_l2_criteria() {
   # + 执行位 + <root>/.meta/gates/adr-verify.sh；断言一条未删、未弱化。
   wire_gate_fixture "$T"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
-  printf 'x\n' > "$T/.meta/gates/format.spec.md"
+  printf 'x\n' > "$T/.meta/gates/format.spec.sh"
   run_cli "$T" status
   assert_eq "引号值不兑现 off → exit 0（未声明 SKIP）" 0 "$R_RC"
   assert_contains "引号值报非法键 WARN" "$R_OUT" "非法键"
@@ -2901,7 +2901,7 @@ s55_ladder_24_strong() {
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
   # 2.1–2.3 隔离：保证 FAIL 只能归因到 2.4（否则「报 2.4」断言会被别的原因顶掉）
   printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
-  printf 'x\n' > "$T/.meta/gates/format.spec.md"
+  printf 'x\n' > "$T/.meta/gates/format.spec.sh"
   git_local "$T" config core.hooksPath .githooks >/dev/null 2>&1
   mkdir -p "$T/.githooks"
 

@@ -46,7 +46,7 @@
 
 1. **非零退出命令的密度**：约定数与"能 `exit 1` 拦截违例的门禁数"之比。凡机械可查的承诺没配命令 = 0 分点。
 2. **单点还是分层**：是只在本地一个 hook（pre-commit），还是本地 + CI 分层（P7 分层强制原理：本地窄、CI 全）。
-3. **门有没有负样本证明**：门禁有没有配套"构造非法样例证明门会拒绝"的 negative sample spec，还是"写了门但没人证明它能抓"。
+3. **门有没有负样本证明**：每个实例门有没有同 Stem、同语言后缀的 negative sample spec（`foo.sh ↔ foo.spec.sh`、`foo.ps1 ↔ foo.spec.ps1`），还是"写了门但没人证明它能抓"；`ci-verify.sh` 是编排器而非实例门，框架内置 A1/A2/A6/A7 与实例门分开计分。
 4. **门本身有没有被管**：CI workflow 的形状是否被断言的（门也是代码，配置变更像任何变更一样要评审）。
 
 **对照标杆**（dsh 实例，§4）：lefthook（L1 pre-commit 6 项）+ GitHub Actions（L3 CI 9 个聚合 job）+ `scripts/` 机械验证脚本家族，**每个门通常配一个负样本 spec**（§4.5），`ci-workflow.spec.ts` 把整个 CI 形状钉死（§4.6）。

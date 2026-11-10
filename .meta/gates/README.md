@@ -15,7 +15,7 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 | A2 | `.meta/gates/adr-verify.spec.sh` | A1 的负样本执行判据（非法→拒、合法→放行、TOCTOU→拒） | 0 = 自检通过 |
 | A3 | `.githooks/pre-commit`（或既有钩子内追加块） | 本地层挂载点 | 转发 A1 的退出码 |
 | A4 | `.meta/gates/ci-verify.sh` | forge 无关全树门（verify-note 整树 + A2 + A6/A7，三段） | 0 放行 / 非零拒绝 |
-| A5 | `.github/workflows/ponygo-governance.yml` | GitHub 薄适配器（checkout + A4） | 同 A4 |
+| A5 | `.github/workflows/ponygo-governance.yml` | GitHub 薄适配器（checkout + A4）；等价形态是主 `ci.yml` 内 `governance` job 直接跑 A4——只有同 workflow 的 job 才能被聚合门 `needs` 消费 | 同 A4 |
 | A6 | `.meta/gates/archive-verify.sh` | 归档 SHA-256 封印门：`check`（默认，只读）/ `seal`（追加封印，互斥 + 原子替换），零旗标 | 0 通过 / 1 拒绝 |
 | A7 | `.meta/gates/archive-verify.spec.sh` | A6 的负样本执行判据（篡改/缺条目/孤儿/重复/非追加 → 必须拒；合法样本 → 放行） | 0 = 自检通过 |
 
@@ -224,6 +224,14 @@ bash .meta/gates/ci-verify.sh
 ponygo audit --run-specs          # 跑 gates/*.spec.sh，断言各自 exit 0
 bash .meta/gates/<name>.spec.sh   # CI / pre-push 层的等价写法
 ```
+
+### 2.3 门与负样本配对（实例门）
+
+- 每个实例门（`*.sh` / `*.ps1`）必须有**同 Stem、同语言后缀**的负样本 spec：
+  `foo.sh ↔ foo.spec.sh`、`foo.ps1 ↔ foo.spec.ps1`；空文件不算配对。
+- `ci-verify.sh` 是唯一编排器豁免；框架内置 A1/A2/A6/A7 不冒充实例门计分。
+- 默认只读 `audit` 即核对配对，缺口以 `gate_spec_missing` 非零；`--run-specs` 仍只执行
+  `*.spec.sh`，`.ps1` 只作结构配对，其执行语义由对应平台 CI 或 review 承担。
 
 `*.spec.sh` 契约（违反即执行判据失败）：
 

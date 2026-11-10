@@ -26,15 +26,27 @@ jobs:
         shell: bash
         run: bash tests/run.sh
 
+  # 治理执行面与自测同属本 workflow，聚合门可直接消费其结果；实例 hygiene 只在本仓执行。
+  governance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: bash .meta/gates/ci-verify.sh
+      - run: bash .meta/gates/scratch-hygiene.sh && bash .meta/gates/scratch-hygiene.spec.sh
+      - run: |
+          git config core.hooksPath .githooks
+          bash ponygo audit --run-specs
+
   # 聚合门：分支保护只依赖这一个检查，防 skipped 被计为通过
   all-checks-passed:
     if: always()
-    needs: [selftest-linux, selftest-windows]
+    needs: [selftest-linux, selftest-windows, governance]
     runs-on: ubuntu-latest
     steps:
       - name: aggregate
         run: |
           set -e
-          result="${{ needs.selftest-linux.result }} ${{ needs.selftest-windows.result }}"
+          result="${{ needs.selftest-linux.result }} ${{ needs.selftest-windows.result }} ${{ needs.governance.result }}"
           echo "job results: $result"
-          [ "$result" = "success success" ]
+          [ "$result" = "success success success" ]

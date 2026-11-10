@@ -35,8 +35,11 @@ if ! bash .agents/skills/write-adr/verify-note.sh; then
 fi
 
 echo "== [2/3] 暂存区门负样本 spec（adr-verify.spec.sh）=="
-if ! bash .meta/gates/adr-verify.spec.sh; then
-  echo "ci-verify: FAIL 门禁自检未通过（A1 的拒绝/放行语义与预期不符）" >&2
+# 分开捕获真实退出码与输出：SKIPPED + 0 同样是未验证，不得被 ! 改写后洗成通过。
+spec_out=$(bash .meta/gates/adr-verify.spec.sh 2>&1); spec_rc=$?
+printf '%s\n' "$spec_out"
+if [ "$spec_rc" -ne 0 ] || ! printf '%s\n' "$spec_out" | grep -qF '[adr-verify.spec] 全部通过'; then
+  echo "ci-verify: FAIL 门禁自检未通过（exit $spec_rc；缺 A2 精确完成标记即未验证）" >&2
   fail=1
 fi
 
@@ -51,9 +54,13 @@ fi
 if [ ! -f .meta/gates/archive-verify.spec.sh ]; then
   echo "ci-verify: FAIL 第 3 段缺资产 .meta/gates/archive-verify.spec.sh（fail-closed：缺件不得静默跳过）→ 跑 'ponygo init --repair-skeleton' 补齐" >&2
   fail=1
-elif ! bash .meta/gates/archive-verify.spec.sh; then
-  echo "ci-verify: FAIL 归档封印门自检未通过（archive-verify.spec.sh：门不再拒绝非法样本）" >&2
-  fail=1
+else
+  archive_spec_out=$(bash .meta/gates/archive-verify.spec.sh 2>&1); archive_spec_rc=$?
+  printf '%s\n' "$archive_spec_out"
+  if [ "$archive_spec_rc" -ne 0 ] || ! printf '%s\n' "$archive_spec_out" | grep -qF '== archive-verify.spec：通过（5 类负样本 + 1 合法样本全部符合预期）=='; then
+    echo "ci-verify: FAIL 归档封印门自检未通过（exit $archive_spec_rc；缺 A7 精确完成标记即未验证）" >&2
+    fail=1
+  fi
 fi
 
 if [ "$fail" -ne 0 ]; then

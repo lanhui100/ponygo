@@ -105,7 +105,7 @@ revisions/{proposed,accepted}/README.md   框架自我迭代
 
 - **命令面唯一真源**：`ponygo` 的 `usage()` + case 分发（六命令）。改命令后必须同步 README §3 + §1 表 + §7 索引。
 - **level 取值唯一真源**：整数 `0-6`。`meta.yaml` 注释、`maturity-ladder.md` §5 grep、`constitution.md` 槽位示例（已改"如 2"）三方一致。
-- **审计细目唯一真源**：`audit/checklist.md`（骨架8/机制15/精微8）。CLI 内嵌是精简子集（10/14），口径不一致以 checklist 为准。
+- **审计细目唯一真源**：`audit/checklist.md`（骨架8/机制15/精微8）。CLI 内嵌是精简子集（10/15），口径不一致以 checklist 为准。
 - **决策 class 封闭集合**：`feature/bug-fix/simplification/architecture/process/testing`（连字符，勿写成斜杠）。
 
 ---

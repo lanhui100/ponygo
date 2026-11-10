@@ -19,8 +19,8 @@ audit_m() { # <dir>：人读/JSON 双面同跑，结果存 M_*
   M_HIT=$(json_get "$M_JOUT" "d['hits']")
   M_TOTAL=$(json_get "$M_JOUT" "d['total']")
   assert_eq "M 人读 hits 与 JSON hits 同源" "$hh" "$M_HIT"
-  assert_eq "M 总项数恒为 14" 14 "$M_TOTAL"
-  assert_eq "M 人读 total 与 JSON total 同源" 14 "$(total_of "$M_HOUT")"
+  assert_eq "M 总项数恒为 15" 15 "$M_TOTAL"
+  assert_eq "M 人读 total 与 JSON total 同源" 15 "$(total_of "$M_HOUT")"
 }
 
 # CA-05/07 正对照：有真实 ADR 时，决策数项与 Status 项均正常计分。

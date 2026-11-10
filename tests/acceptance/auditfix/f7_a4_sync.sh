@@ -114,13 +114,27 @@ assert_contains "F7-3 取证：生成态 A4 实跑经过 [3/3]" "$CIR" "[3/3]"
 assert_not_contains "F7-3 NOGO：实跑不得残留旧两段编号 [1/2]" "$CIR" "[1/2]"
 assert_not_contains "F7-3 NOGO：生成态 A4 实跑不得出现 hygiene 段" "$CIR" "scratch-hygiene"
 
-# ---- F7-4：本仓 A5 承载「固定两步之外的实例专属门」----
-A5="$ROOT/.github/workflows/ponygo-governance.yml"
-assert_exists "F7-4 本仓 A5 存在（.github/workflows/ponygo-governance.yml）" "$A5"
-A5_TXT=$(cat "$A5" 2>/dev/null || :)
-assert_contains "F7-4 GO：A5 仍调用 A4（bash .meta/gates/ci-verify.sh）" "$A5_TXT" "bash .meta/gates/ci-verify.sh"
-assert_contains "F7-4 GO：A5 有 scratch-hygiene.sh 的独立 step" "$A5_TXT" "bash .meta/gates/scratch-hygiene.sh"
-assert_contains "F7-4 GO：A5 有 scratch-hygiene.spec.sh 的独立 step" "$A5_TXT" "scratch-hygiene.spec.sh"
-assert_contains "F7-4 GO：A5 有 bash ponygo audit --run-specs 的真实执行面" "$A5_TXT" "bash ponygo audit --run-specs"
+# ---- F7-4：本仓把治理执行面并入主 ci.yml，使聚合门可消费 governance 结果 ----
+# A5 文件不再是本仓必需：跨 workflow 的 job 无法被 `needs` 消费；生成模板仍保留（下方 fresh init 验证）。
+CI="$ROOT/.github/workflows/ci.yml"
+assert_exists "F7-4 本仓主 CI 存在" "$CI"
+CI_TXT=$(cat "$CI" 2>/dev/null || :)
+assert_contains "F7-4 GO：主 CI 含 governance job" "$CI_TXT" "governance:"
+assert_contains "F7-4 GO：governance 调 A4" "$CI_TXT" "bash .meta/gates/ci-verify.sh"
+assert_contains "F7-4 GO：governance 含 scratch-hygiene.sh" "$CI_TXT" "bash .meta/gates/scratch-hygiene.sh"
+assert_contains "F7-4 GO：governance 含 scratch-hygiene.spec.sh" "$CI_TXT" "scratch-hygiene.spec.sh"
+assert_contains "F7-4 GO：governance 含 bash ponygo audit --run-specs" "$CI_TXT" "bash ponygo audit --run-specs"
+assert_contains "F7-4 GO：聚合门 needs governance" "$CI_TXT" "needs: [selftest-linux, selftest-windows, governance]"
+
+# 生成模板仍交付 A5：新实例预置 .github/workflows 后 init 应生成薄适配器并调用 A4。
+T=$(new_case)
+mkdir -p "$T/.github/workflows"
+run_in "$T" init
+A5_GEN="$T/.github/workflows/ponygo-governance.yml"
+assert_exists "F7-4 生成模板：fresh init 仍产出 A5" "$A5_GEN"
+if [ -f "$A5_GEN" ]; then
+  A5_GEN_TXT=$(cat "$A5_GEN")
+  assert_contains "F7-4 生成模板：A5 调用 A4" "$A5_GEN_TXT" "bash .meta/gates/ci-verify.sh"
+fi
 
 finish

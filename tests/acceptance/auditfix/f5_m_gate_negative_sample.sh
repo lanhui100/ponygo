@@ -11,10 +11,10 @@ set -u
 
 hits_of() { hits_n_of "$1"; }
 
-# 基座：治理仓 + 一个实质门禁文件（占住「gates/ 有实质文件」这一分），并清掉框架自带的 *.spec.*
+# 基座：治理仓 + 一个实质门禁文件（占住「gates/ 有实质文件」这一分）。
+# 框架自带的是 A2/A7 spec，保留（新契约下编排资产与实例门都要保持可配对）。
 make_base() { # <dir>
   gov_repo "$1" 1 || return 1
-  rm -f "$1"/.meta/gates/*.spec.*
   cat > "$1/.meta/gates/my-gate.sh" <<'GATEEOF'
 #!/usr/bin/env bash
 # 验收夹具：实例自己的实质门禁（非框架资产、非负样本 spec）
@@ -23,6 +23,13 @@ printf 'my-gate: 拒绝非法输入\n' >&2
 exit 1
 GATEEOF
   chmod +x "$1/.meta/gates/my-gate.sh"
+  cat > "$1/.meta/gates/my-gate.spec.sh" <<'SPECEOF'
+#!/usr/bin/env bash
+# 验收夹具：与 my-gate.sh 同名的负样本 spec（证明实例门会拒绝非法样本）
+printf 'my-gate.spec: 非法样本被拒绝\n'
+exit 0
+SPECEOF
+  chmod +x "$1/.meta/gates/my-gate.spec.sh"
   return 0
 }
 
@@ -33,7 +40,7 @@ if make_base "$A"; then
   HIT_A=$(hits_of "$R_OUT")
   assert_matches "F5 基座 A：输出含「命中 N / M 项」" "$R_OUT" '命中 [0-9]+ / [0-9]+ 项'
   assert_matches "F5 基座 A：命中数为整数（实得 [$HIT_A]）" "$HIT_A" '^[0-9]+$'
-  assert_eq "F5-3 基座 A：总项数仍为 14" 14 "$(hits_t_of "$R_OUT")"
+  assert_eq "F5-3 基座 A：总项数仍为 15" 15 "$(hits_t_of "$R_OUT")"
 
   # ---- B：加一个普通单测 foo.spec.ts（不在 gates/ 下）----
   B=$(new_case)
@@ -46,11 +53,17 @@ if make_base "$A"; then
   else
     bad "F5 B：无法解析命中数（A=[$HIT_A] B=[$HIT_B]）"
   fi
-  assert_eq "F5-3 B：总项数仍为 14" 14 "$(hits_t_of "$R_OUT")"
+  assert_eq "F5-3 B：总项数仍为 15" 15 "$(hits_t_of "$R_OUT")"
 
-  # ---- C：加一个真门禁负样本 gates/x.spec.sh ----
+  # ---- C：新增一个带同名负样本的实例门。计分是「是否存在实例门/配对」而非按门数累加，
+  #          因此命中数不增；关键断言是配对被接受、无 gate_spec_missing。----
   C=$(new_case)
   cp -a "$A"/. "$C"/
+  cat > "$C/.meta/gates/x.sh" <<'GATEEOF'
+#!/usr/bin/env bash
+printf 'x-gate: 拒绝非法输入\n' >&2
+exit 1
+GATEEOF
   cat > "$C/.meta/gates/x.spec.sh" <<'SPECEOF'
 #!/usr/bin/env bash
 # 验收夹具：门禁负样本（证明门会拒绝非法样本）
@@ -58,16 +71,17 @@ set -u
 printf '[x.spec] [ok] 门拒绝了非法样本，放行了合法样本\n'
 exit 0
 SPECEOF
-  chmod +x "$C/.meta/gates/x.spec.sh"
+  chmod +x "$C/.meta/gates/x.sh" "$C/.meta/gates/x.spec.sh"
   run_in "$C" audit --level M
+  assert_zero "F5 C：完整门+同名 spec 配对必须放行" "$R_RC"
   HIT_C=$(hits_of "$R_OUT")
   if [ -n "$HIT_A" ] && [ -n "$HIT_C" ]; then
-    assert_eq "F5 C：gates/x.spec.sh 必须让 M 档命中 +1（A=$HIT_A / C=$HIT_C）" \
-      "$((HIT_A + 1))" "$HIT_C"
+    assert_eq "F5 C：配对项是存在性计分，加门不得白送额外命中（A=$HIT_A / C=$HIT_C）" "$HIT_A" "$HIT_C"
   else
     bad "F5 C：无法解析命中数（A=[$HIT_A] C=[$HIT_C]）"
   fi
-  assert_eq "F5-3 C：总项数仍为 14" 14 "$(hits_t_of "$R_OUT")"
+  assert_not_contains "F5 C：完整配对不得报 gate_spec_missing" "$R_OUT" "gate_spec_missing"
+  assert_eq "F5-3 C：总项数仍为 15" 15 "$(hits_t_of "$R_OUT")"
 
   # ---- F5-5（Wave 6「有效内容为空」口径）：空白 / 注释-only spec 不得计分 ----
   # D：1 字节空白 spec（printf '\n'）——有效内容为空，不是门禁负样本
@@ -97,10 +111,10 @@ SPECEOF
     bad "F5-5 E：无法解析命中数（A=[$HIT_A] E=[$HIT_E]）"
   fi
 
-  # 对照：真有内容的 spec（C）必须是唯一 +1 的那一个
+  # 对照：C 的完整配对不改变命中数；空白/注释 spec 也不得产生额外命中。
   if [ -n "$HIT_C" ] && [ -n "$HIT_D" ]; then
-    assert_eq "F5-5 对照：真有内容 spec(C) 与空白 spec(D) 命中差恰为 1（C=$HIT_C / D=$HIT_D）" \
-      "$((HIT_D + 1))" "$HIT_C"
+    assert_eq "F5-5 对照：完整配对(C) 与空白 spec(D) 均不改变存在性命中（C=$HIT_C / D=$HIT_D）" \
+      "$HIT_C" "$HIT_D"
   fi
 fi
 

@@ -23,9 +23,9 @@ run_json "$MAIN" audit --json
 MAIN_RC=$R_RC; MAIN_JSON=$R_OUT; MAIN_HUMAN=$R_ERR
 assert_rc_is "CA-17 正对照：主工作树 audit" 0 "$MAIN_RC"
 assert_json_shape "CA-17 主工作树" "$MAIN_RC" "$MAIN_JSON"
-json_assert "CA-17 正对照：主工作树自适应 M，total=14" "$MAIN_JSON" "
+json_assert "CA-17 正对照：主工作树自适应 M，total=15" "$MAIN_JSON" "
 if d.get('tier') != 'M': fail.append(d.get('tier'))
-if d.get('total') != 14: fail.append(d.get('total'))
+if d.get('total') != 15: fail.append(d.get('total'))
 "
 assert_contains "CA-17 正对照：人读触发理由贡献者≥3(3)" "$MAIN_HUMAN" "贡献者≥3(3)"
 MAIN_LINE=$(printf '%s\n' "$MAIN_HUMAN" | grep '审计深度：' | head -n1)
@@ -40,9 +40,9 @@ assert_eq "CA-17 夹具：linked 与主工作树 HEAD 相同" "$MAIN_HEAD" "$(gi
 run_json "$LINK" audit --json
 assert_rc_is "CA-17 GO：linked worktree 与主仓退出码相同" "$MAIN_RC" "$R_RC"
 assert_json_shape "CA-17 linked worktree" "$R_RC" "$R_OUT"
-json_assert "CA-17 GO：linked worktree 同样自适应 M，total=14" "$R_OUT" "
+json_assert "CA-17 GO：linked worktree 同样自适应 M，total=15" "$R_OUT" "
 if d.get('tier') != 'M': fail.append(d.get('tier'))
-if d.get('total') != 14: fail.append(d.get('total'))
+if d.get('total') != 15: fail.append(d.get('total'))
 if d.get('hits') != $MAIN_HITS: fail.append('hits=%r main=$MAIN_HITS' % d.get('hits'))
 "
 assert_contains "CA-17 GO：linked 人读同样报告贡献者≥3(3)" "$R_ERR" "贡献者≥3(3)"

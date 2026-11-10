@@ -77,7 +77,7 @@ if gov_repo "$T" 1; then
     assert_eq "F9-3 注释-only 门禁不计分（真有内容必须恰 +1：注释=$HIT_C / 真内容=$HIT_R）" \
       "$((HIT_C + 1))" "$HIT_R"
   fi
-  assert_eq "F9-3 M 档总项数仍为 14" 14 "$(hits_t_of "$R_OUT")"
+  assert_eq "F9-3 M 档总项数仍为 15" 15 "$(hits_t_of "$R_OUT")"
 fi
 
 # ================= F9-4 upgrade 的 gates/README 条件分支 =================

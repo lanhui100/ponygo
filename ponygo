@@ -496,7 +496,7 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 | A2 | `.meta/gates/adr-verify.spec.sh` | A1 的负样本执行判据（非法→拒、合法→放行、TOCTOU→拒） | 0 = 自检通过 |
 | A3 | `.githooks/pre-commit`（或既有钩子内追加块） | 本地层挂载点 | 转发 A1 的退出码 |
 | A4 | `.meta/gates/ci-verify.sh` | forge 无关全树门（verify-note 整树 + A2 + A6/A7，三段） | 0 放行 / 非零拒绝 |
-| A5 | `.github/workflows/ponygo-governance.yml` | GitHub 薄适配器（checkout + A4） | 同 A4 |
+| A5 | `.github/workflows/ponygo-governance.yml` | GitHub 薄适配器（checkout + A4）；等价形态是主 `ci.yml` 内 `governance` job 直接跑 A4——只有同 workflow 的 job 才能被聚合门 `needs` 消费 | 同 A4 |
 | A6 | `.meta/gates/archive-verify.sh` | 归档 SHA-256 封印门：`check`（默认，只读）/ `seal`（追加封印，互斥 + 原子替换），零旗标 | 0 通过 / 1 拒绝 |
 | A7 | `.meta/gates/archive-verify.spec.sh` | A6 的负样本执行判据（篡改/缺条目/孤儿/重复/非追加 → 必须拒；合法样本 → 放行） | 0 = 自检通过 |
 
@@ -705,6 +705,14 @@ bash .meta/gates/ci-verify.sh
 ponygo audit --run-specs          # 跑 gates/*.spec.sh，断言各自 exit 0
 bash .meta/gates/<name>.spec.sh   # CI / pre-push 层的等价写法
 ```
+
+### 2.3 门与负样本配对（实例门）
+
+- 每个实例门（`*.sh` / `*.ps1`）必须有**同 Stem、同语言后缀**的负样本 spec：
+  `foo.sh ↔ foo.spec.sh`、`foo.ps1 ↔ foo.spec.ps1`；空文件不算配对。
+- `ci-verify.sh` 是唯一编排器豁免；框架内置 A1/A2/A6/A7 不冒充实例门计分。
+- 默认只读 `audit` 即核对配对，缺口以 `gate_spec_missing` 非零；`--run-specs` 仍只执行
+  `*.spec.sh`，`.ps1` 只作结构配对，其执行语义由对应平台 CI 或 review 承担。
 
 `*.spec.sh` 契约（违反即执行判据失败）：
 
@@ -1940,7 +1948,7 @@ verify_ladder() {
         bash -n "$f" 2>/dev/null || { sh_bad=1; [ -z "$shf" ] && shf="$f"; }
       done < <(find "$META_DIR/gates" -type f -name '*.sh' -print0 2>/dev/null)
       [ "$sh_bad" = "0" ] || vl_fail "2.2 门禁脚本语法错误：$shf → 修语法；并人工补真判据（'<gate> --help' / 空样本须非零拒绝）"
-      # 2.3 负样本 spec（*.spec.*）：存在性判据（形状，靠 review）。
+      # 2.3 负样本 spec（*.spec.*）：先查存在性，再逐门查同 Stem/同语言配对。
       # 执行判据是 opt-in 的 `ponygo audit --run-specs`——只读命令不执行仓库脚本
       # （设计约束"判定优先只读"，见文件头）。
       # W2/W6：无有效内容的 `*.spec.*` 不计入（README/.gitkeep 的既有排除口径扩到「空文件」，
@@ -1950,6 +1958,13 @@ verify_ladder() {
         if file_has_content "$sp23f"; then sp23=1; break; fi
       done < <(find "$META_DIR/gates" -type f -name '*.spec.*' -print0 2>/dev/null)
       [ "$sp23" = "1" ] || vl_fail "2.3 gates/ 无负样本 spec（*.spec.*）→ 配一个证明门会拒绝非法样本的 spec（推荐 *.spec.sh 自检脚本，用 'ponygo audit --run-specs' 验证）"
+      local pair23_txt="" pair23_igf="" pair23_instance=0
+      while IFS= read -r -d '' pair23_igf; do
+        file_has_content "$pair23_igf" && pair23_instance=$((pair23_instance+1))
+      done < <(find "$META_DIR/gates" -maxdepth 1 -type f \
+          \( -name '*.sh' -o -name '*.ps1' \) ! -name '*.spec.*' \
+          ! -name 'adr-verify.sh' ! -name 'archive-verify.sh' ! -name 'ci-verify.sh' -print0 2>/dev/null)
+      if [ "$pair23_instance" -gt 0 ] && ! pair23_txt=$(check_gate_spec_pairing); then vl_fail "2.3 gate_spec_missing 实例门缺同名负样本 spec：${pair23_txt}"; fi
       # 2.4 「本地层已接 ADR 门」六条 AND（§6.6 / §7 F1+F3+F5 / maturity-ladder.md §2.4）：
       #   ① hooksPath 已设 ② 归一化目录可达（F6：~ 展开）③ 该目录内 pre-commit 存在且可执行
       #   ④ 哨兵区间逐字节等于规范块（EOL 归一，F3）⑤ 块起始行 < 首个顶层 exit/exec 行
@@ -2158,7 +2173,7 @@ verify_ladder() {
     fi
   fi
   [ "$verified_range" = "L0-L2" ] && \
-    echo "  注：2.2 与 2.3 均为代理判据——2.2 查 bash -n 语法、2.3 查 *.spec.* 存在性（只读命令不执行仓库脚本）。" && \
+    echo "  注：2.2 与 2.3 均为代理判据——2.2 查 bash -n 语法、2.3 查 *.spec.* 存在性并逐实例门核对同 Stem/同后缀配对（只读命令不执行仓库脚本）。" && \
     echo "      执行判据是 opt-in 的 'ponygo audit --run-specs'（跑 *.spec.sh 并断言 exit 0）；" && \
     echo "      真判据的人工补验：'<gate> --help' / 空样本须非零拒绝。"
   return 0
@@ -2497,7 +2512,7 @@ PONYGO_EOF
 #   - 自包含：从自身路径解析仓库根，不依赖调用者 cwd；
 #   - 只读仓库：样本一律建在 `mktemp -d` 临时目录，退出时清理；不改仓库任何文件；
 #   - 秒级：自包裹 `timeout 30`（有 timeout 时）；
-#   - 防递归：环境里已有 `PONYGO_IN_SPEC=1` → 打印 SKIPPED 并 exit 0（不计入 PASS）；
+#   - `PONYGO_IN_SPEC` 仅为旧环境信息，不作为本 spec 的跳过开关；
 #   - exit 0 = 自检通过（"门确实会拒绝非法样本，且会放行合法样本"）。
 #
 # 本 spec 证明的是 A1 的**拒绝语义**，不是"格式判据本身对不对"——后者是
@@ -2507,12 +2522,6 @@ PONYGO_EOF
 set -u
 
 SPEC=adr-verify.spec
-
-# --- 防递归：被 audit --run-specs / CI 以 PONYGO_IN_SPEC=1 调用 → SKIPPED ---
-if [ "${PONYGO_IN_SPEC:-0}" = "1" ] && [ "${PONYGO_SPEC_SELFRUN:-0}" != "1" ]; then
-  printf '[%s] SKIPPED（PONYGO_IN_SPEC=1，不计入 PASS）\n' "$SPEC"
-  exit 0
-fi
 
 # --- 秒级上限：自包裹 timeout 30，避免挂死拖死体检 ---
 if [ "${PONYGO_SPEC_SELFRUN:-0}" != "1" ] && command -v timeout >/dev/null 2>&1; then
@@ -3117,8 +3126,11 @@ if ! bash .agents/skills/write-adr/verify-note.sh; then
 fi
 
 echo "== [2/3] 暂存区门负样本 spec（adr-verify.spec.sh）=="
-if ! bash .meta/gates/adr-verify.spec.sh; then
-  echo "ci-verify: FAIL 门禁自检未通过（A1 的拒绝/放行语义与预期不符）" >&2
+# 分开捕获真实退出码与输出：SKIPPED + 0 同样是未验证，不得被 ! 改写后洗成通过。
+spec_out=$(bash .meta/gates/adr-verify.spec.sh 2>&1); spec_rc=$?
+printf '%s\n' "$spec_out"
+if [ "$spec_rc" -ne 0 ] || ! printf '%s\n' "$spec_out" | grep -qF '[adr-verify.spec] 全部通过'; then
+  echo "ci-verify: FAIL 门禁自检未通过（exit $spec_rc；缺 A2 精确完成标记即未验证）" >&2
   fail=1
 fi
 
@@ -3133,9 +3145,13 @@ fi
 if [ ! -f .meta/gates/archive-verify.spec.sh ]; then
   echo "ci-verify: FAIL 第 3 段缺资产 .meta/gates/archive-verify.spec.sh（fail-closed：缺件不得静默跳过）→ 跑 'ponygo init --repair-skeleton' 补齐" >&2
   fail=1
-elif ! bash .meta/gates/archive-verify.spec.sh; then
-  echo "ci-verify: FAIL 归档封印门自检未通过（archive-verify.spec.sh：门不再拒绝非法样本）" >&2
-  fail=1
+else
+  archive_spec_out=$(bash .meta/gates/archive-verify.spec.sh 2>&1); archive_spec_rc=$?
+  printf '%s\n' "$archive_spec_out"
+  if [ "$archive_spec_rc" -ne 0 ] || ! printf '%s\n' "$archive_spec_out" | grep -qF '== archive-verify.spec：通过（5 类负样本 + 1 合法样本全部符合预期）=='; then
+    echo "ci-verify: FAIL 归档封印门自检未通过（exit $archive_spec_rc；缺 A7 精确完成标记即未验证）" >&2
+    fail=1
+  fi
 fi
 
 if [ "$fail" -ne 0 ]; then
@@ -4006,6 +4022,27 @@ file_has_content() { # <文件> → 0 = 有有效内容；非 0 = 空/仅空白/
   grep -qvE '^[[:space:]]*(#|$)' "$1" 2>/dev/null
 }
 
+# 实例门与负样本的机械配对：只按同 Stem、同语言后缀推导，不维护第二份映射表。
+# 返回 0 = 全部有配对（含零实例门）；1 = 有缺口，逐行列出具体门与所缺 spec。
+# ci-verify.sh 只编排其他门，不是独立判定门；框架内置门与实例门用同一算法配对，
+# 但仅实例门参与 M 档计分，防止框架随骨架交付的资产白送实例成熟度分。
+check_gate_spec_pairing() {
+  local gate="" name="" ext="" stem="" spec="" missing=0
+  while IFS= read -r -d '' gate; do
+    file_has_content "$gate" || continue
+    name="${gate##*/}"; ext="${name##*.}"; stem="${name%.*}"
+    case "$ext" in sh|ps1) ;; *) continue ;; esac
+    [ "$name" = "ci-verify.sh" ] && continue
+    spec="${gate%.*}.spec.${ext}"
+    if [ ! -f "$spec" ] || ! file_has_content "$spec"; then
+      printf '  - %s 缺负样本 spec %s（同 Stem、同 .%s 后缀；空 spec 不计）\n' "$gate" "$spec" "$ext"
+      missing=1
+    fi
+  done < <(find "$META_DIR/gates" -maxdepth 1 -type f \
+      \( -name '*.sh' -o -name '*.ps1' \) ! -name '*.spec.*' -print0 2>/dev/null | sort -z)
+  return "$missing"
+}
+
 # 文件权限（八进制；GNU/BSD stat 双兼容）
 file_mode() { # <文件> → 如 755
   if stat -c %a "$1" >/dev/null 2>&1; then stat -c %a "$1"; else stat -f %Lp "$1" 2>/dev/null; fi
@@ -4333,7 +4370,7 @@ ensure_gate_wiring() {
       [ -f "$META_DIR/gates/$a" ] || info "[dry-run] 将生成 $META_DIR/gates/$a（缺失）+ chmod +x"
     done
     if [ "$provid" = "github" ]; then
-      [ -f .github/workflows/ponygo-governance.yml ] || info "[dry-run] 将生成 .github/workflows/ponygo-governance.yml（A5 薄适配器）"
+      github_governance_wired || info "[dry-run] 将生成 .github/workflows/ponygo-governance.yml（A5 薄适配器）"
     else
       info "[dry-run] 远端层：未检出 GitHub（provider=$provid）→ 不生成 A5，需在你的 CI 里加 bash .meta/gates/ci-verify.sh"
     fi
@@ -4440,9 +4477,12 @@ ensure_gate_wiring_locked() {
   # 1) A1/A2/A4：缺失才写 + 内容与规范不一致则自愈覆盖（F10）+ chmod +x
   write_gate_assets
 
-  # 2) A5：只按 forge 证据生成（§6.3）；非 GitHub 不生成，由 status/audit 给可执行指引（不静默）
+  # 2) A5：只按 forge 证据生成（§6.3）；非 GitHub 不生成，由 status/audit 给可执行指引（不静默）。
+  #    主 ci.yml 已有 governance 执行面时视为等价接线，不再生成重复的独立 workflow。
   if [ "$provid" = "github" ]; then
-    if write_ci_adapter; then
+    if github_governance_wired; then
+      info "远端层：GitHub 治理执行面已接线（A5 文件或 ci.yml governance job）——不重复生成"
+    elif write_ci_adapter; then
       info "远端层：检出 GitHub → 生成 .github/workflows/ponygo-governance.yml（A5 薄壳，调 .meta/gates/ci-verify.sh）"
     else
       gate_write_fail ".github/workflows/ponygo-governance.yml" "写入失败（目录不可写/原子替换失败）——A5 薄适配器未能生成"
@@ -4556,10 +4596,10 @@ gate_wiring_report() {
   printf '治理门接线：%s\n' "$state"
   case "$provid" in
     github)
-      if [ -f .github/workflows/ponygo-governance.yml ]; then
-        printf '远端层：GitHub Actions 薄适配器已生成（.github/workflows/ponygo-governance.yml → bash .meta/gates/ci-verify.sh）\n'
+      if github_governance_wired; then
+        printf '远端层：GitHub Actions 治理执行面已接线（ponygo-governance.yml 或 ci.yml 的 governance job → bash .meta/gates/ci-verify.sh）\n'
       else
-        printf '远端层：GitHub 证据在但适配器缺失 → 补 bash ponygo init（会生成 .github/workflows/ponygo-governance.yml）\n'
+        printf '远端层：GitHub 证据在但适配器缺失 → 补 bash ponygo init（会生成 .github/workflows/ponygo-governance.yml），或在 ci.yml 增加 governance job 调 bash .meta/gates/ci-verify.sh\n'
       fi
       ;;
     none)
@@ -4855,12 +4895,25 @@ gates_local_state() { # → wired|not_wired|skipped（与 2.4 / gate_wiring_repo
   git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { printf 'skipped'; return 0; }
   if gate_24_probe; then printf 'wired'; else printf 'not_wired'; fi
 }
+# GitHub 远端执行面：独立 A5 文件，或主 ci.yml 内 `governance` job 直接跑 A4。
+# 后一种是「同 workflow 可被聚合门 needs 消费」的形态，和 A5 等价接线，不得误报缺失。
+github_governance_wired() {
+  [ -f .github/workflows/ponygo-governance.yml ] && return 0
+  [ -f .github/workflows/ci.yml ] || return 1
+  awk '
+    /^  governance:[[:space:]]*$/ { injob=1; next }
+    injob && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { injob=0 }
+    injob && /^[[:space:]]*-[[:space:]]*run:[[:space:]]*bash[[:space:]]+\.meta\/gates\/ci-verify\.sh[[:space:]]*$/ { found=1 }
+    END { exit(found ? 0 : 1) }
+  ' .github/workflows/ci.yml
+}
+
 gates_remote_state() { # → wired|missing|none|other（只按 forge 证据形状判定）
   local p=""
   p=$(ci_provider)
   case "$p" in
     none)   printf 'none' ;;
-    github) if [ -f .github/workflows/ponygo-governance.yml ]; then printf 'wired'; else printf 'missing'; fi ;;
+    github) if github_governance_wired; then printf 'wired'; else printf 'missing'; fi ;;
     *)      printf 'other' ;;
   esac
 }
@@ -4888,7 +4941,7 @@ lv110_carrier() {
   p=$(ci_provider)
   case "$p" in
     none) return 1 ;;
-    github) [ -f .github/workflows/ponygo-governance.yml ] && return 0; return 1 ;;
+    github) github_governance_wired && return 0; return 1 ;;
     *) return 0 ;;
   esac
 }
@@ -5083,6 +5136,16 @@ cmd_audit() {
   fi
 
   # 问② 承诺怎么强制
+  local gate_spec_gap_txt="" gate_spec_missing=0
+  if ! gate_spec_gap_txt=$(check_gate_spec_pairing); then gate_spec_missing=1; fi
+  # 只有出现真正的实例门才启用配对硬判据；初始化骨架的 A1/A6 仍由各自内置 spec 看守。
+  local instance_gate_count=0 igf=""
+  while IFS= read -r -d '' igf; do
+    file_has_content "$igf" && instance_gate_count=$((instance_gate_count+1))
+  done < <(find "$META_DIR/gates" -maxdepth 1 -type f \
+      \( -name '*.sh' -o -name '*.ps1' \) ! -name '*.spec.*' \
+      ! -name 'adr-verify.sh' ! -name 'archive-verify.sh' ! -name 'ci-verify.sh' -print0 2>/dev/null)
+  if [ "$instance_gate_count" -eq 0 ]; then gate_spec_missing=0; gate_spec_gap_txt=""; fi
   total=$((total+1))
   # gates/ 有实例自己的实质门禁。README/.gitkeep 占位不计分；框架随 `ponygo init` 交付的
   # ADR 门资产（A1/A2/A4：adr-verify.sh / adr-verify.spec.sh / ci-verify.sh）与归档封印门资产
@@ -5121,10 +5184,15 @@ cmd_audit() {
     # 都能过 -s，纯可操纵性——故按有效行判定，与 2.3、run_gate_specs 同一口径）。
     negspec=""
     while IFS= read -r -d '' ns1; do
-      if file_has_content "$ns1"; then negspec="$ns1"; break; fi
+      if file_has_content "$ns1" && [ "$gate_spec_missing" = "0" ]; then negspec="$ns1"; break; fi
     done < <(find "$META_DIR/gates" -type f -name '*.spec.*' \
         ! -name 'adr-verify.spec.sh' ! -name 'archive-verify.spec.sh' -print0 2>/dev/null)
     [ -n "$negspec" ] && hit=$((hit+1))
+    # 配对分与「实例门存在分」成对：合法门+spec 得 2；缺 spec 两者皆失，净差 1。
+    total=$((total+1)); [ "$gate_spec_missing" = "0" ] && [ "$instance_gate_count" -gt 0 ] && hit=$((hit+1))
+    if [ "$gate_spec_missing" = "1" ] && [ -z "$negspec" ]; then
+      printf 'ponygo: 2.3 gates/ 无负样本 spec（实例门无有效同名配对）\n' >&2
+    fi
   fi
 
   # 问③ 重复劳动怎么复用
@@ -5144,6 +5212,8 @@ cmd_audit() {
   fi
 
   # ---- 输出 ----
+  # 缺配对是明确硬 FAIL：先让机读面、分数与人读缺口完整落盘，再统一非零收口。
+  if [ "$gate_spec_missing" = "1" ]; then vl_fail "2.3 gate_spec_missing 实例门缺同名负样本 spec：${gate_spec_gap_txt}"; fi
   AUDIT_HIT="$hit"; AUDIT_TOTAL="$total"
   echo ""
   echo "===== ponygo 审计结果（${LEVEL_CHOICE} 档）====="
@@ -5168,6 +5238,10 @@ cmd_audit() {
   if [ "$hook_ok" != "1" ]; then
     gap_txt="${gap_txt}  - 本地 ADR 门未接线（${G24_CAUSE:-gate_24_probe 未通过}）→ 这是「强制层」缺口，优先补（放大器）"$'\n'
     AUDIT_GAP_IDS="${AUDIT_GAP_IDS}${AUDIT_GAP_IDS:+ }no_local_hook"
+  fi
+  if [ "$gate_spec_missing" = "1" ]; then
+    gap_txt="${gap_txt}  - gate_spec_missing 实例门缺同名负样本 spec："$'\n'"${gate_spec_gap_txt}"$'\n'
+    AUDIT_GAP_IDS="${AUDIT_GAP_IDS}${AUDIT_GAP_IDS:+ }gate_spec_missing"
   fi
   echo ""
   if [ -n "$gap_txt" ]; then

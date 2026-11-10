@@ -46,15 +46,15 @@
 
 | # | 子项 | 判定 | 检查命令 | 失败动作 |
 |---|---|---|---|---|
-| 2.1 | 有门禁目录 | `gates/` 目录存在 | `ls -d .meta/gates 2>/dev/null` | 建 `.meta/gates/` |
-| 2.2 | 本地钩子已挂 | `core.hooksPath` 指向非空钩子目录，或 `.githooks/` 存在 | `git config core.hooksPath`（非空）+ `ls -A $(git config core.hooksPath)` | 挂本地钩子（这是强制层放大器，优先） |
-| 2.3 | CI 存在 | 有 CI 配置 | `ls .github/workflows/*.yml .gitlab-ci.yml 2>/dev/null \| head -1` | 加最小 CI（聚合门） |
+| 2.1 | 有实质门禁 | `gates/` 存在有效门禁文件 | `find .meta/gates -type f ! -name 'README.md' ! -name '.gitkeep'` | 放第一个非零退出的门禁脚本 |
+| 2.2 | 门禁脚本可运行 | 门禁脚本语法可解析，非零退出表达拒绝 | `find .meta/gates -name '*.sh' -exec bash -n {} +` | 修语法；人工补 `<gate> --help` / 空样本非零拒绝 |
+| 2.3 | 门带负样本 spec | 有实质负样本 spec，且每个实例门配同 Stem、同语言后缀的 spec | `find .meta/gates -type f -name '*.spec.*'`；`bash ponygo audit --level M` 逐门配对 | 补 `foo.sh ↔ foo.spec.sh` 或 `foo.ps1 ↔ foo.spec.ps1`；编排器 `ci-verify.sh` 豁免 |
+| 2.4 | 本地 ADR 门已接线 | `core.hooksPath` 指向的 `pre-commit` 存在且可执行，含规范 ADR 接线哨兵块且位于首个顶层 `exit`/`exec` 之前；`.meta/gates/adr-verify.sh` 存在 | `bash ponygo status` 的 2.4 判据 | 用 `bash ponygo init` 补齐接线与资产；不可执行时先 `chmod +x <hook>` |
 
 ### 机制层（M 档追加）
 
 | # | 子项 | 判定 | 检查命令 | 失败动作 |
 |---|---|---|---|---|
-| 2.4 | 门带负样本 spec | 每个门有构造非法样例证明会拒绝 | `find . -path ./node_modules -prune -o \( -name '*_test.go' -o -name '*_test.rs' -o -name 'test_*.py' -o -name '*_test.py' -o -name '*.spec.ts' -o -name '*.spec.js' -o -name '*.Spec.cs' \) -print \| head -1` 非空 | 给门配负样本 spec（后缀随项目栈而定，此处仅给常见样例） |
 | 2.5 | 分层（本地 vs CI）各抓各的 | 本地窄、CI 全，不重复跑 | 语义，见 `scorecard.md` 问② | 靠 review |
 | 2.6 | 绕行可控 | 有 bypass 记录/上报机制 | 语义 | 靠 review |
 | 2.A | 资源隔离（原子分配，靠 review） | 并行测试的共享资源由原子分配器获取，禁先探后占 | review 程序：抽新增测试各一例 → 记 F1–F7 分类 → 复现阶梯到首个签名（细则家见 methodology §4.7；检查示例非穷尽：固定路径含 POSIX `/tmp` 与 Windows `%TEMP%` 等价物，动词不限 kill/abort/close 三词） | 补原子分配 + review 记录 |
@@ -62,7 +62,7 @@
 | 2.C | 处置到静默（quiescence，靠 review） | 清理获取后立即注册；关闭/取消后等到完成信号才算收尾 | 同上三步 review 程序 | 补完成等待 + review 记录 |
 
 > 读者指引：2.A–2.C 为 active；2.7/2.8 仍 `[future]`；2.7/2.8 激活时顺延编号、本附录号不重编。
-> 本表口径与 CLI 内嵌 10/14 是两套计数——CLI 内嵌是子集故免改，勿混改 CLI（权威以本表为准）。
+> 本表口径与 CLI 内嵌 10/15 是两套计数——CLI 内嵌是子集故免改，勿混改 CLI（权威以本表为准）。
 
 ### 精微层（`[future]`）
 
