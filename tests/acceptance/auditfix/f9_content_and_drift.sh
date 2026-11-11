@@ -27,6 +27,14 @@ if gov_repo "$T" 2; then
   # 新增 A6/A7 同属骨架门禁资产；若保留有效内容，本负样本根本走不到「无实质门禁」分支。
   : > "$T/.meta/gates/archive-verify.sh"
   : > "$T/.meta/gates/archive-verify.spec.sh"
+  # 负空间批次新增 A8/A9（no-residue 门 + 其负样本 spec）同样属**骨架交付资产**：
+  # 只要它们留着有效内容，本负样本就永远走不到「无实质门禁」分支（夹具假绿面）→ 同步清空。
+  : > "$T/.meta/gates/no-residue.sh"
+  : > "$T/.meta/gates/no-residue.spec.sh"
+  # P0-2（2026-11-11）：gov_repo(2) 现在会加装一对合规实例门（instance-gate.sh/.spec.sh）；
+  # 它同样是「有实质内容」的门，不清空就永远走不到「无实质门禁」分支（夹具假绿面）→ 同步清空。
+  : > "$T/.meta/gates/instance-gate.sh"
+  : > "$T/.meta/gates/instance-gate.spec.sh"
   printf '%s\n' "$COMMENT_ONLY" > "$T/.meta/gates/comment-only-gate.sh"
   chmod +x "$T/.meta/gates/comment-only-gate.sh"
   run_in "$T" status
@@ -51,7 +59,12 @@ if gov_repo "$T" 2; then
   printf '%s\n' "$COMMENT_ONLY" > "$T/.meta/gates/adr-verify.spec.sh"
   # A7 也是负样本 spec；必须同步为注释-only，才能继续检验「仓内无任何有效 spec」的 2.3 分支。
   printf '%s\n' "$COMMENT_ONLY" > "$T/.meta/gates/archive-verify.spec.sh"
-  chmod +x "$T/.meta/gates/adr-verify.spec.sh" "$T/.meta/gates/archive-verify.spec.sh"
+  # A9（no-residue.spec.sh）同属骨架交付的负样本 spec——不清成注释-only，2.3 永远 PASS。
+  printf '%s\n' "$COMMENT_ONLY" > "$T/.meta/gates/no-residue.spec.sh"
+  # P0-2/P0-3（2026-11-11）：gov_repo(2) 加装的实例门 spec 也是有效 spec，同样要清成注释-only。
+  printf '%s\n' "$COMMENT_ONLY" > "$T/.meta/gates/instance-gate.spec.sh"
+  chmod +x "$T/.meta/gates/adr-verify.spec.sh" "$T/.meta/gates/archive-verify.spec.sh" \
+    "$T/.meta/gates/no-residue.spec.sh" "$T/.meta/gates/instance-gate.spec.sh"
   run_in "$T" status
   assert_rc_is "F9-2 注释-only spec → status exit 1（2.3 形状不成立）" 1 "$R_RC"
   assert_contains "F9-2 GO：报「2.3 gates/ 无负样本 spec」" "$R_OUT" "2.3 gates/ 无负样本 spec"
@@ -62,6 +75,9 @@ fi
 T=$(new_case)
 if gov_repo "$T" 1; then
   rm -f "$T"/.meta/gates/*.spec.* 2>/dev/null
+  # 唯一变量必须是 my-gate.sh：A8（no-residue.sh，骨架交付、自带有效内容）会先占住
+  # 「gates/ 有实例实质门禁」这一分，让「注释-only 不计分」的 +1 差分恒为 0 → 清空隔离。
+  : > "$T/.meta/gates/no-residue.sh"
   printf '%s\n' "$COMMENT_ONLY" > "$T/.meta/gates/my-gate.sh"
   chmod +x "$T/.meta/gates/my-gate.sh"
   run_in "$T" audit --level M
@@ -77,7 +93,7 @@ if gov_repo "$T" 1; then
     assert_eq "F9-3 注释-only 门禁不计分（真有内容必须恰 +1：注释=$HIT_C / 真内容=$HIT_R）" \
       "$((HIT_C + 1))" "$HIT_R"
   fi
-  assert_eq "F9-3 M 档总项数仍为 15" 15 "$(hits_t_of "$R_OUT")"
+  assert_eq "F9-3 M 档总项数仍为 16" 16 "$(hits_t_of "$R_OUT")"
 fi
 
 # ================= F9-4 upgrade 的 gates/README 条件分支 =================

@@ -40,7 +40,7 @@ if make_base "$A"; then
   HIT_A=$(hits_of "$R_OUT")
   assert_matches "F5 基座 A：输出含「命中 N / M 项」" "$R_OUT" '命中 [0-9]+ / [0-9]+ 项'
   assert_matches "F5 基座 A：命中数为整数（实得 [$HIT_A]）" "$HIT_A" '^[0-9]+$'
-  assert_eq "F5-3 基座 A：总项数仍为 15" 15 "$(hits_t_of "$R_OUT")"
+  assert_eq "F5-3 基座 A：总项数仍为 16" 16 "$(hits_t_of "$R_OUT")"
 
   # ---- B：加一个普通单测 foo.spec.ts（不在 gates/ 下）----
   B=$(new_case)
@@ -53,7 +53,7 @@ if make_base "$A"; then
   else
     bad "F5 B：无法解析命中数（A=[$HIT_A] B=[$HIT_B]）"
   fi
-  assert_eq "F5-3 B：总项数仍为 15" 15 "$(hits_t_of "$R_OUT")"
+  assert_eq "F5-3 B：总项数仍为 16" 16 "$(hits_t_of "$R_OUT")"
 
   # ---- C：新增一个带同名负样本的实例门。计分是「是否存在实例门/配对」而非按门数累加，
   #          因此命中数不增；关键断言是配对被接受、无 gate_spec_missing。----
@@ -81,7 +81,7 @@ SPECEOF
     bad "F5 C：无法解析命中数（A=[$HIT_A] C=[$HIT_C]）"
   fi
   assert_not_contains "F5 C：完整配对不得报 gate_spec_missing" "$R_OUT" "gate_spec_missing"
-  assert_eq "F5-3 C：总项数仍为 15" 15 "$(hits_t_of "$R_OUT")"
+  assert_eq "F5-3 C：总项数仍为 16" 16 "$(hits_t_of "$R_OUT")"
 
   # ---- F5-5（Wave 6「有效内容为空」口径）：空白 / 注释-only spec 不得计分 ----
   # D：1 字节空白 spec（printf '\n'）——有效内容为空，不是门禁负样本

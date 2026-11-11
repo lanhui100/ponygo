@@ -270,6 +270,10 @@ Status: <status>
   | `archived/` | 冻结豁免（保持归档时原貌，不改一字） |
 
 - 每条必含 `## Alternatives considered`（候选方案与落选原因）——记录无备选的决策是在邀请重开争执。
+- **删除/收窄类决策（`implemented/simplification/`）必含 `## Reintroduction conditions`**（复活条件：
+  什么条件下把这块能力接回来）；若同条含 `## Removed surface`，还须含**至少一行检索收据**
+  （行内含 `rg` / `grep` / `git grep`）——"无生产消费者"这个声称必须锚到一条可复跑的命令。
+  判据 1.11 机械校验（围栏感知）；**条件是否真成立靠 review**（见下「非机械项」表）。
 - **围栏内的标题不算在场**（判据 1.8/1.10 机械校验的固有口径）：``` 围栏（含 ` ```text ` 等语言标记）
   里的 `## Decision` / `## Alternatives considered` 是**示例文本**，不能充当在场证据；围栏未闭合时
   其后所有标题都视为围栏内（fail-closed）。要证明"真有这个节"，把标题写在围栏外。
@@ -277,18 +281,19 @@ Status: <status>
   改写为现在时 `## Decision`（Acceptance criteria / Risks 折叠进 `## Consequences`）；
   提案用现在时等于"未批准的方案伪装成已落地的决定"，状态轴在正文层失真。
 
-## 非机械项（机械影子管不到、必须靠 review 的三件事）
+## 非机械项（机械影子管不到、必须靠 review 的四件事）
 
-判据 1.7 / 1.8 / 1.10 只锁**影子**（行文形态），不锁**内容成立性**。下面三项永远靠人看：
-`verify-note.sh` 通过 **不等于**这三项成立——**不要把"门绿了"当成"理由成立"的证据**。
+判据 1.7 / 1.8 / 1.10 / 1.11 只锁**影子**（行文形态），不锁**内容成立性**。下面四项永远靠人看：
+`verify-note.sh` 通过 **不等于**这四项成立——**不要把"门绿了"当成"理由成立"的证据**。
 
-| 非机械项 | 机械影子能判（1.7/1.8/1.10） | 影子判不到（靠 review） | 抽查动作 |
+| 非机械项 | 机械影子能判（1.7/1.8/1.10/1.11） | 影子判不到（靠 review） | 抽查动作 |
 |---|---|---|---|
 | 1.7 理由**是否成立** | 同一行有分隔符，且剥掉标点后正文 ≥2 字节 | 理由是"真理由"还是"为过门编的一句"（如"时间不够"不是否决理由） | `governance-review` 决策面抽查：抽 N 条 rejected 读理由，问"半年后能靠它避免重开争执吗" |
 | 1.8 标题**是否真是决定** | `implemented/` 有 `## Decision`、无提案时代标题（含中文等价） | Decision 写的是"已落地的决定"还是"计划换个说法的复述" | `change-review`：对照代码现实读 Decision，问"这句话现在为真吗" |
 | 1.10 备选**是否真权衡** | 有 `## Alternatives considered` 节（围栏外的标题才算） | 备选是真实候选（有落选理由）还是凑数的稻草人 | `governance-review`：抽条读备选，问"其中一条是否曾被真正认真考虑过" |
+| 1.11 复活条件**是否真成立** | `implemented/simplification/` 含围栏外 `## Reintroduction conditions`（含 `## Removed surface` 时含一行 `rg`/`grep`/`git grep` 检索收据） | 条件是"真能判定该不该复活"还是"以后有需要再说"；检索收据是引用的真实输出还是手抄一句 | `governance-review` / `change-review`：抽条问"照这条条件，今天能不能判定该不该把它接回来" |
 
-三者的共同结构：**机械影子只能证明"这一节在场"，不能证明"这一节有内容"**。影子存在的意义是把
+四者的共同结构：**机械影子只能证明"这一节在场"，不能证明"这一节有内容"**。影子存在的意义是把
 "忘了写"降为零成本拦截，而不是替人做判断（P6 形意分离：形可机械、意靠 review）。
 
 ## 触发规则（谁在什么时候必须写）
@@ -402,7 +407,10 @@ PONYGO_EOF
 
   # meta.yaml：仅 level / ai-surface / docs-tier 字段（其余由 git / 目录存在性派生，不冗余声明）
   if [ ! -f "$META_YAML" ]; then
-    printf '# ponygo 治理根状态文件（唯一真值源：level）\n# 版本由 git 派生；组件清单由 .meta/ + .agents/ 目录存在性充当；演进由 git + .agents/notes/ 的 ADR 充当。\n# 合法键：level / ai-surface / docs-tier（docs-tier: on|off 是文档分层的启用声明，目录存在不等于已激活，见 maturity-ladder §5 判据 2.5）。\n\nlevel: %s\n' "$lvl" > "$META_YAML"
+    # P1-8（2026-11-11）：level 的语义统一为「**当前档位**」（与 maturity-ladder §6 停止线第 2 条
+    # 同源）——它是"已经在跑的那一档"，不是未来目标；声明高于实际验到的档位时，status / audit
+    # 结论行显式写「已声明 Lx，仅验证到 Ly」。
+    printf '# ponygo 治理根状态文件（唯一真值源：level = 当前档位）\n# 版本由 git 派生；组件清单由 .meta/ + .agents/ 目录存在性充当；演进由 git + .agents/notes/ 的 ADR 充当。\n# 合法键：level / ai-surface / docs-tier（docs-tier: on|off 是文档分层的启用声明，目录存在不等于已激活，见 maturity-ladder §5 判据 2.5）。\n# level 的语义 = 当前档位（不是未来目标）：达到下一档前不新增超出该档位的机制。\n\nlevel: %s\n' "$lvl" > "$META_YAML"
   fi
 
   # 最小文档家播种（v2.0：文档治理前置到 L0/L1，判据 0.5/1.9）——家载体分工：
@@ -481,11 +489,11 @@ PONYGO_EOF
     cat > "$META_DIR/gates/README.md" <<'PONYGO_EOF'
 # gates/ —— 门禁（把承诺转成非零退出命令）
 
-**框架交付资产 A1/A2/A4/A6/A7 常驻；实例自有门禁从 L2 起按需添加。**
+**框架交付资产 A1/A2/A4/A6/A7/A8/A9 常驻；实例自有门禁从 L2 起按需添加。**
 升到 L2 时放你的第一个实例门禁，并同步 meta.yaml 的 level 改为 2——框架资产不需要你手动放，
 `ponygo init` 已经落盘（见下表）。
 
-## 本仓已接线的门禁（ADR 门 + 归档封印门，A1–A7）
+## 本仓已接线的门禁（ADR 门 + 归档封印门 + 零残留门，A1–A9）
 
 「交付即接线」：`ponygo init` 幂等装配下列资产（`.meta` 已存在也装配，见 plan-freeze §6.2）；
 repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致。
@@ -495,13 +503,23 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 | A1 | `.meta/gates/adr-verify.sh` | 暂存区 ADR 格式门（无参=暂存 ADR；带参=指定路径）；A6 `check` 在**任何跳过分支之前**早期 probe（见下「A6 的时序」） | 0 放行 / 非零拒绝 |
 | A2 | `.meta/gates/adr-verify.spec.sh` | A1 的负样本执行判据（非法→拒、合法→放行、TOCTOU→拒） | 0 = 自检通过 |
 | A3 | `.githooks/pre-commit`（或既有钩子内追加块） | 本地层挂载点 | 转发 A1 的退出码 |
-| A4 | `.meta/gates/ci-verify.sh` | forge 无关全树门（verify-note 整树 + A2 + A6/A7，三段） | 0 放行 / 非零拒绝 |
+| A4 | `.meta/gates/ci-verify.sh` | forge 无关全树门（verify-note 整树 + A2 + A6/A7 + A8/A9，四段） | 0 放行 / 非零拒绝 |
 | A5 | `.github/workflows/ponygo-governance.yml` | GitHub 薄适配器（checkout + A4）；等价形态是主 `ci.yml` 内 `governance` job 直接跑 A4——只有同 workflow 的 job 才能被聚合门 `needs` 消费 | 同 A4 |
 | A6 | `.meta/gates/archive-verify.sh` | 归档 SHA-256 封印门：`check`（默认，只读）/ `seal`（追加封印，互斥 + 原子替换），零旗标 | 0 通过 / 1 拒绝 |
 | A7 | `.meta/gates/archive-verify.spec.sh` | A6 的负样本执行判据（篡改/缺条目/孤儿/重复/非追加 → 必须拒；合法样本 → 放行） | 0 = 自检通过 |
+| A8 | `.meta/gates/no-residue.sh` | 零残留门（删除/收窄后的符号检索验收）：读清单 `.meta/gates/no-residue.manifest`（每行 `<pattern><TAB><scope>`），`rg --fixed-strings` 按字面检索（无 `rg` 退化 `grep -rIlF`）；缺清单/空清单 → 放行并打印跳过 | 0 放行（无命中 / 跳过）/ 1 命中、清单格式非法、未知参数 |
+| A9 | `.meta/gates/no-residue.spec.sh` | A8 的负样本执行判据（命中→拒 / 无命中→放行 / 空清单→放行 / 未知参数→拒 / 特殊字符按字面） | 0 = 自检通过 |
 
-**宇宙表只登记 A1/A2/A4/A6/A7**（不可变资产）：A3/A5 是实例可编辑文件（有人会追加自己的钩子逻辑、
-改 CI 触发），塞进 `UPGRADE_UNIVERSE` 会让实例永久 drift 红。
+**宇宙表只登记 A1/A2/A4/A6/A7/A8/A9**（不可变资产）：A3/A5 是实例可编辑文件（有人会追加自己的钩子逻辑、
+改 CI 触发），塞进 `UPGRADE_UNIVERSE` 会让实例永久 drift 红。`scratch-hygiene.sh` 也不进宇宙表——它是
+**本仓实例门**，不由 `init` 播种（见下节）。
+
+### 实例卫生门 scratch-hygiene.sh（init 不播种，CI 单点接线 `ci.yml:47`）
+
+常载命约 7「临时产物统一下沉」的机械看守，只拦三类可判违例（`.scratch/` 被 Git 跟踪 / 根 `.gitignore` 缺
+`.scratch/` 声明 / 发布安装链引用 `.scratch`）；「平铺在源码旁」是 review 项，门不覆盖。接线 = **CI 单点**：
+`.github/workflows/ci.yml:47` 的 `governance` job 跑 `bash .meta/gates/scratch-hygiene.sh && bash .meta/gates/scratch-hygiene.spec.sh`；
+本地 pre-commit 不跑它，秒级预算留给 A1。
 
 ### 承诺 → 非零退出命令
 
@@ -515,7 +533,9 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 | 归档件冻结（改一字节即拒） | `bash .meta/gates/archive-verify.sh check`（无参等价） | A6（manifest ↔ `archived/**/*.md` 双向一致） |
 | 归档必须显式封印 | `bash .meta/gates/archive-verify.sh seal` | A6（append-only 追加；新条目要求 `Status:` 首词 ∈ {`implemented`, `archived`}） |
 | 封印门自己会拒绝非法样本 | `bash .meta/gates/archive-verify.spec.sh` | A7（篡改/缺条目/孤儿/重复/非追加） |
-| 远端层全树兜底 | `bash .meta/gates/ci-verify.sh` | A4（= `verify-note.sh` 整树 + A2 + A6/A7，三段） |
+| 删除/收窄后无残留符号 | `bash .meta/gates/no-residue.sh` | A8（清单 pattern 零命中；缺/空清单放行） |
+| 零残留门自己会拒绝非法样本 | `bash .meta/gates/no-residue.spec.sh` | A9（命中→拒 / 无命中→放行 / 空清单→放行 / 未知参数→拒） |
+| 远端层全树兜底 | `bash .meta/gates/ci-verify.sh` | A4（= `verify-note.sh` 整树 + A2 + A6/A7 + A8/A9，四段） |
 
 ### 归档时先 seal（A6 的写路径）
 
@@ -659,9 +679,31 @@ A1/A2/A4，spec 用「围栏内 Decision / 围栏内 Alternatives / 未闭合围
 
 运行时机：`bash .meta/gates/ci-verify.sh`（CI/本地全树）、`ponygo audit --run-specs`（opt-in，
 本 spec 会被**真跑**并断言 exit 0）、pre-commit 不跑它（秒级预算）。
+
 若 `audit --run-specs` 存在**未被真正执行**的 spec（0 个 / 自报 SKIPPED（含部分）/ 递归护栏拦截），
 `audit` 以 **exit 3（证据不足）** 结束，且结论行不得出现「机械判据全部 PASS」。
 无有效内容（去掉空白行与 `#` 注释行后为空）的 spec 判 **FAIL**（exit 1，优先于 3）。
+
+### A8/A9 的负样本怎么读
+
+`no-residue.sh`（A8）是**零残留门**：读清单 `.meta/gates/no-residue.manifest`（每行 `<pattern><TAB><scope>`；
+`#` 起注释、空行忽略；非空且无 TAB = 格式非法 → exit 1），用 `rg --fixed-strings --no-messages -l` 在 scope
+内按**字面**（不解释正则）检索——任一 pattern 命中 → 列出命中并 exit 1。缺清单 / 清单为空（去掉空白与注释行
+后为空）→ exit 0 并打印「跳过」：没有删除面就没有残留面，不制造一道永远空转的门。参数只认 `--help` 与一个
+可选清单路径，其余（未知 / 多余参数）→ exit 1。**运行时不承诺 `rg` 存在**（本框架只承诺 bash）：无 `rg` 时
+退化为 `grep -rIlF`（同样字面匹配）并在 stderr 声明退化，不假装有 `rg` 的精确度。它服务的承诺是常载命约 3
+「删代码前先搜消费者」的**收尾验收**：删除那次提交把被删符号写进清单，门证明"同一组检索词在生产树里零残留"。
+
+`no-residue.spec.sh`（A9）在 `mktemp -d` 临时目录造夹具仓，逐类断言：命中 → 拒（并列命中）；
+无命中 → 放行；空清单 / 缺清单 → 放行；未知参数 → 拒；pattern 含 `.` / `*` 等特殊字符 → **按字面**匹配
+（当正则解释就会误报或漏报）。与 A2/A7 同规格：**执行判据**，由 A4 第 4 段与 `ponygo audit --run-specs` 真跑。
+
+**A4 的四段**：① `verify-note.sh` 整树（1.1–1.11）→ ② A2 负样本 → ③ A6 `check` + A7 负样本 →
+④ A8 零残留 + A9 负样本。第 ④ 段在文件缺失时打印提示但不失败（尚未分发 A8/A9 的旧实例不因此恒红），
+存在即执行并按退出码判；未知参数一律 exit 1（fail-closed，不猜意图）。
+
+> 诚实标注（P6）：门只能证明"清单里登记的那些 pattern 不再命中"，证明不了"清单本身完整"——
+> 该把哪些删除面写进清单是 review/评审时的判断，不是门能替的部分。
 
 ## 门禁分层的三个时间经济层（P7，dsh 实证）
 
@@ -769,6 +811,40 @@ PONYGO_EOF
   每次评审的固定动作，消费者由框架自身创造（Rule of three 豁免同 write-adr）。
 三者都是**框架交付物，不计入** L3"实例已长出流程资产"的证据——L3 仍要求你的项目
 按 Rule of three 自己长出第一个 skill。
+
+---
+
+## 三层归属：基线 / 模板库 / 实例自有
+
+`.agents/skills/` 下只有一类技能会出现在"已安装"语义里，但技能资产的**来源**有三种，判定口径不同：
+
+| 层 | 位置 | 所有者 | 计入 L3 证据 | 来源 |
+|---|---|---|---|---|
+| **基线** | `.agents/skills/{write-adr,change-review,governance-review}/` | 实例可改，模板逐字节锁 | 否 | `ponygo init` 必播 |
+| **模板库** | `.meta/skills-library/pg-*/` | 仅模板 | 否 | `ponygo init` 播种，**不自动安装** |
+| **实例自有** | 其余 `.agents/skills/*/` | 实例 | **是** | 项目按 Rule of three 自己长 |
+
+库技能名统一带 `pg-` 前缀（本项目命名空间）；基线名不带前缀（既有契约引用遍布 gates/tests/docs，
+改名是破坏性变更且无收益）。
+
+### 安装与三态（库 → 项目）
+
+```bash
+bash .meta/skills-library/install.sh list                    # 每个技能一行：已装/未装 + 三态
+bash .meta/skills-library/install.sh install pg-doc-hygiene  # 复制到 .agents/skills/，已存在则拒绝
+bash .meta/skills-library/install.sh check                   # ok / stale / modified
+```
+
+- `install` 成功后写 `.agents/skills/<name>/.ponygo-installed`（`library_sha256` + `installed_at`），
+  该标记同时是问③ 的**排除依据**——库安装的技能不计入"实例自有"；
+- `stale` = 库已更新；`modified` = 本地改过（**永不覆盖**，本地校准样例是正当改造）；
+- 只读 `check` 不写盘；无 `uninstall`：删除技能是一次决策，走 `.agents/notes/` 记录 + 手删。
+
+### 何时装哪个
+
+`ponygo audit` 在 `能力缺口建议（advisory）` 段按 `.meta/skills-library/catalog.tsv` 的证据规则
+给出候选与安装命令——证据可机械求值（笔记类别计数、归档封印数、文档规模、Web/测试/发布面），
+**是否真的到阈值、值不值得装，靠 review**；该段不计分、不改退出码，不装也不失败。
 
 > **「原理」引用的出处**：本文及实例骨架中的 methodology 引用，均指向 ponygo 框架仓库的
 > `docs/methodology.md`：<https://github.com/lanhui100/ponygo/blob/main/docs/methodology.md>。
@@ -901,7 +977,7 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 4. **选 class**：`feature`（新能力）/ `bug-fix`（修缺陷）/ `simplification`（减复杂度）/ `architecture`（交付源码的结构）/ `process`（代码周围的工具与流程）/ `testing`（测试策略）。都不够 → 考虑在 `notes/classes.local` 登记领域扩展（扩展即一次治理决策，须评审）。
 5. **建文件**：`.agents/notes/{lifecycle}/{class}/$(date +%F)-<topic-title>.md`，topic 用 kebab-case。
 6. **头部**：第一行 `# Agent Note: <title>`，空行，`Status: <与所在目录一致>`。`rejected` 必须带一行理由：`Status: rejected — <为何否决>`（分隔符 `—` / `-` / `:` 任一，且**剥掉分隔符、空白、ASCII 与中文标点**后正文 ≥2 字节；判据 1.7 机械校验：`Status: rejected — 。` 这种「标点充理由」同样 FAIL；`*.zh.md` 豁免）。
-7. **正文**：`## Problem` 开头（先写动机，脱离方案也成立），随后**按 lifecycle 选骨架**（判据 1.8 机械校验标题是否与 lifecycle 匹配，选错即 FAIL：`implemented/` 缺 `## Decision` 即 FAIL，含提案时代标题——英文 `## Proposal`/`## Plan`/`## Migration plan`/`## Acceptance criteria` 或中文 `## 提案`/`## 计划`/`## 迁移计划`/`## 验收标准`/`## 验收`/`## 风险`/`## 待办`——同样 FAIL；判据 1.10 机械校验 `## Alternatives considered` 必须在场）。**围栏感知**：``` 围栏内的 `## 标题` 是示例文本，不算在场（未闭合围栏 → 其后全部视为围栏内）；要证明「真有这一节」，标题写在围栏外：
+7. **正文**：`## Problem` 开头（先写动机，脱离方案也成立），随后**按 lifecycle 选骨架**（判据 1.8 机械校验标题是否与 lifecycle 匹配，选错即 FAIL：`implemented/` 缺 `## Decision` 即 FAIL，含提案时代标题——英文 `## Proposal`/`## Plan`/`## Migration plan`/`## Acceptance criteria` 或中文 `## 提案`/`## 计划`/`## 迁移计划`/`## 验收标准`/`## 验收`/`## 风险`/`## 待办`——同样 FAIL；判据 1.10 机械校验 `## Alternatives considered` 必须在场；删除/收窄类决策另受判据 1.11 约束：`implemented/simplification/` 须含围栏外 `## Reintroduction conditions`，若含 `## Removed surface` 还须有一行检索收据（`rg` / `grep` / `git grep`））。**围栏感知**：``` 围栏内的 `## 标题` 是示例文本，不算在场（未闭合围栏 → 其后全部视为围栏内）；要证明「真有这一节」，标题写在围栏外：
 
    | lifecycle | 骨架 |
    |---|---|
@@ -930,6 +1006,7 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 - 反例（标点充理由，判据 1.7）：`Status: rejected — 。`（理由只有一个中文句号）→ 剥掉标点后正文为 0 字节，FAIL（`1.7 <path>：rejected 缺一行理由`）；正确写法是写出**为什么**否决（如「与 X 冲突」「成本高于收益」）。
 - 反例（围栏内标题，判据 1.8/1.10）：把 `## Decision` 放进 ```` ```text ```` 示例块 → 围栏内标题不算在场，仍报「缺 ## Decision」；示例代码块里的标题只是**样例**，不是本文档的节。
 - 反例（围栏吞标题，判据 1.8/1.10）：prose 里想引用三反引号时，别让它出现在行首（含缩进行首）——会被当成围栏开启；改为行内引用或加前缀字符。
+- 反例（删除无回程票，判据 1.11）：`implemented/simplification/…` 只写"删了什么、为什么删"、不给 `## Reintroduction conditions` → 被删能力永久失去复活支点；补法是把"什么条件下接回来"写成可判定的条件（"若出现外部消费者 X 或性能回归 Y"），而不是"以后有需要再说"。含 `## Removed surface` 时还要贴一行 `rg --fixed-strings '<符号>' <scope>` 的收据，"没人用"才有证据。
 - 反例（缺备选节，判据 1.10，硬判据）：只写 `## Problem` + `## Decision` 就收尾、整条没有 `## Alternatives considered` → 决策史只剩结论没有权衡，读者无法判断"为什么不选另一条"，ADR 退化成事后记录；`verify-note.sh` 直接 FAIL（`1.10 <path>：缺 ## Alternatives considered`）。补法：把当时真正比较过的 2–3 个备选各写一行 + 各自落选理由（"没考虑过备选"本身不是备选——说明该决定还不该落条）。
 - 反例（混合 ADR）：把"治理已采纳"（implemented/process）与"架构尚在设计中、零代码"（proposed/architecture）写进同一条 implemented note → 状态轴失真（未实施伪装成已落地）+ class 污染；**多类拆条**（notes/README 触发规则）：已落地的记 implemented，未实施的记 proposed。
 - 反例（文不对题，判据管不到、靠 review）：TUI 定价表单功能（11 个 `.rs` 含大文件重写）携带一篇多协议声明 proposed note——标题与代码无关，ADR 成了"有记录无对应"的伪证据；正确做法是为 TUI 定价单独立条，把多协议提案放到它自己的分支/commit。
@@ -937,8 +1014,8 @@ description: 何时用：出现任何非平凡变更（行为变更 / 架构 / �
 
 ## 验证与报告
 
-- 跑 **`bash .agents/skills/write-adr/verify-note.sh`**（无参 = 整树；或跟单个相对路径）——机械影子 1.1–1.10（1.1–1.8：路径两轴/文件名/日期/Status（含 rejected 一行理由）/骨架标题（围栏感知）；1.9a：整树文档有家 docs/AGENTS.md 存在；1.10：必含 `## Alternatives considered`，围栏感知）全部通过，exit 0 才算完成；FAIL 项逐条修复重跑。
-- **门绿 ≠ 内容成立**：1.7 理由是否成立、1.8 标题是否真是决定、1.10 备选是否真权衡属**非机械项**（见 `.agents/notes/README.md` 同名小节），由 `governance-review` / `change-review` 抽查。
+- 跑 **`bash .agents/skills/write-adr/verify-note.sh`**（无参 = 整树；或跟单个相对路径）——机械影子 1.1–1.11（1.1–1.8：路径两轴/文件名/日期/Status（含 rejected 一行理由）/骨架标题（围栏感知）；1.9a：整树文档有家 docs/AGENTS.md 存在；1.10：必含 `## Alternatives considered`，围栏感知；1.11：`implemented/simplification/` 必含围栏外 `## Reintroduction conditions`，含 `## Removed surface` 时另需一行 `rg`/`grep`/`git grep` 检索收据）全部通过，exit 0 才算完成；FAIL 项逐条修复重跑。
+- **门绿 ≠ 内容成立**：1.7 理由是否成立、1.8 标题是否真是决定、1.10 备选是否真权衡、1.11 复活条件是否真成立属**非机械项**（见 `.agents/notes/README.md` 同名小节），由 `governance-review` / `change-review` 抽查。
 - 归档/迁移落 `archived/` 时，再跑 **`bash .meta/gates/archive-verify.sh seal`**（追加封印，append-only）与 **`bash .meta/gates/archive-verify.sh check`**（只读校验：逐条比对归档件哈希，应为 exit 0；报「未封印」/「哈希不符」即欠账）。
 - 再跑 `ponygo status`：决策数 +1、L1 判据全绿、无卫生 WARN。
 - 报告格式：新记录路径 + lifecycle/class + 一句话 Problem + verify-note.sh 的通过输出。
@@ -960,7 +1037,7 @@ PONYGO_EOF
 #   带路径   = 只校验给定文件（如 .agents/notes/proposed/architecture/xxx.md）
 #
 # 退出码：全部通过 exit 0；任一违例 exit 1（逐项打印 FAIL）。
-# 对应判据：maturity-ladder §5 的 L1 判据 1.1–1.10，
+# 对应判据：maturity-ladder §5 的 L1 判据 1.1–1.10，外加 1.11（负空间形状，见下），
 # 影子来自 DSH verify-agent-note-format / verify-agent-note-classification。
 # 1.1–1.8 与 ponygo verify_ladder 逐项对齐；1.9 只对齐 1.9a（详见下文「对齐契约」）；
 # 1.10（必含 ## Alternatives considered）于 2026-10-29 新增为硬判据，**只由本脚本判定**——
@@ -968,6 +1045,10 @@ PONYGO_EOF
 # 「判据 1.1–1.9」（1.9b 条件未判定时收窄为 1.1–1.8）并明文声明该范围；
 # 1.10 的看守面由 A1 暂存区门与 A4 全树门承担（两者都经本脚本）。
 # 见 revisions/accepted/2026-10-29-alternatives-criterion-1-10.md。
+# 1.11（负空间形状，2026-11-11 新增）同样只由本脚本判定：`implemented/simplification/` 的简化记录
+# 必须写清「什么条件下把删掉的东西装回来」（围栏外 `## Reintroduction conditions`），
+# 且一旦写了 `## Removed surface`，就必须给出一行**检索收据**（`rg` / `grep` / `git grep`）——
+# 「删代码前先搜消费者」不能只在散文里宣称（常载命约 3）。看守面同样由 A1/A4 承担。
 #
 # 设计快照（为何是 bash、为何一个脚本）：
 # - 语言：bash 与 ponygo CLI 同源（单文件、零依赖铁律，见 notes/
@@ -994,6 +1075,7 @@ PONYGO_EOF
 #         它们要读 meta.yaml 开关 + 扫描包目录，属实例状态而非单条 ADR 的格式。
 #         故 `A1/A4 绿 ≠ 1.9b PASS`——本地/远端门只证明 ADR 格式与归档封印，不证明 AI 常载入口完好。
 #   1.10：只在本脚本实现（CLI 不复刻，P9 一份判据一份实现）。
+#   1.11：只在本脚本实现（同上；负空间形状是**单条记录的形状**判据，不是实例状态）。
 # 若发现 1.1–1.8 行为不一致，以 maturity-ladder §5 判据真源为准并回改两者。
 # ============================================================
 set -u
@@ -1172,6 +1254,29 @@ check_one() { # $1 = 决策文件路径
       fi
       ;;
   esac
+  # 1.11 负空间形状（简化记录专用）：只锁 implemented/simplification/，不外溢到其它 class。
+  # 为什么是硬判据：删除是**不可逆**的治理动作。只写「删了什么」而不写「什么条件下装回来」，
+  # 下一个人面对同一需求时只能靠考古重建；只写「已全树清理」而不留检索收据，
+  # 「零残留」就是一句无法复核的宣称（常载命约 3：搜索零残留才是验收）。
+  # 豁免口径与 1.8/1.10 完全一致：archived/ 冻结豁免、README/AGENTS 入口早退、*.zh.md 双语配对不独立判。
+  # 围栏口径：`## Reintroduction conditions` 与 1.8/1.10 同样**围栏内不算在场**（fail-closed）；
+  #   检索收据行则**围栏内外都算**——命令本来就常写在代码块里，收据的载体是人写的命令行。
+  # 判据号不出现在成功横幅里（见文件末尾注释），失败时以 `FAIL  1.11 …` 前缀出现。
+  case "$b" in
+    *.zh.md) ;;
+    *)
+      case "$rel" in
+        implemented/simplification/*)
+          heading_outside_fence "$f" '## Reintroduction conditions([[:space:]]|$)' \
+            || fail "1.11 $f：implemented/simplification 缺 ## Reintroduction conditions（写清什么条件下把删掉的东西装回来，别留「以后可能用得上」）"
+          if heading_outside_fence "$f" '## Removed surface([[:space:]]|$)' \
+             && ! grep -Eq '(^|[^[:alnum:]_])(rg|grep)([^[:alnum:]_]|$)' "$f" 2>/dev/null; then
+            fail "1.11 $f：含 ## Removed surface 但缺检索收据行（须有一行 rg / grep / git grep 检索命令，证明「搜索零残留」）"
+          fi
+          ;;
+      esac
+      ;;
+  esac
   return 0
 }
 
@@ -1186,7 +1291,9 @@ else
 fi
 
 if [ "$FAIL" = "0" ]; then
-  echo "verify-note: 全部通过（机械影子 1.1–1.10；真实性/分类/备选质量靠 review）"
+  # 成功横幅刻意**不写**「1.11」编号串：验收契约要求正例输出不得含该串（否则「本次没报 1.11 违例」
+  # 与「横幅里出现 1.11」无法机械区分）。判据名写在括号里，失败时按 `FAIL  1.11 …` 前缀出现。
+  echo "verify-note: 全部通过（机械影子 1.1–1.10 + 负空间形状判据；真实性/分类/备选质量靠 review）"
   exit 0
 fi
 echo "verify-note: 未通过（见上方 FAIL 项；逐项修复后重跑）" >&2
@@ -1328,6 +1435,28 @@ description: 何时用：评审一处变更（工作区 diff / 单个提交 / �
 4. **输出报告**：blocker（必须修：文不对题、无 ADR 的非平凡变更、Status 失真）/
    non-blocker（建议修：文档滞后、nit）各附证据；末尾一句话：合入条件。
 
+### 删除/收窄类变更（负空间程序，附加在上面四步之上）
+
+命中任一即走本程序：删符号 / 删文件或目录 / 删依赖 / 把公共面收窄（改私有、降导出、缩参数、下线功能）。
+**"没人用"不是证据，"检索不到生产消费者"才是**（P9 负空间对称：删除不是添加的逆操作）。
+
+1. **三行证据**（每行都要磁盘或检索输出；缺一行即 blocker）：
+   - `owner`：这块东西声称服务谁？（模块 / 团队 / 外部消费者）
+   - `producer`：谁写入或生成它？（构造函数、写入路径、生成脚本、迁移）
+   - `consumer`：谁读取或调用它？（`grep -rn '<符号>'`、`git grep`、`rg --fixed-strings` + 读调用点）
+   - **判别句**：唯一调用者是**自身测试**或**同级辅助包**时，它只是**删除候选**，不是既成事实——
+     测试为自己的实现服务不算消费者；把候选当结论直接开删 = 拿"测试覆盖"当"生产使用"的证据。
+2. **五件同提交清单**（连根拔，缺一件就是留壳）：
+   - ① 源码（删定义，不留 `deprecated` 空壳 / `TODO` 墓碑 / 空 `mod` 残块）
+   - ② 测试与快照（删对应用例，刷新 golden 快照；不留被 skip 的用例当"纪念"）
+   - ③ 依赖声明（`Cargo.toml` / `package.json` / `requirements` / lock 中随之无用的依赖）
+   - ④ 目录条目（导出清单、入口文件、`mod` / `index` / 注册表 / 构建清单里的逐一声明处）
+   - ⑤ 文档索引链（README / AGENTS 索引 / 包文档里指向它的路径、链接与计数）
+3. **验收 = 检索零残留 + 门禁绿**：同一组检索词在生产树里 0 命中（命令与输出贴进报告，不写"应该没问题"）；
+   `bash .meta/gates/ci-verify.sh`（含 A8 `no-residue.sh` 清单门，见 `.meta/gates/README.md`）与项目自身测试全绿。
+4. **留痕**：删除是一次决策——`implemented/simplification/` 落一条 note，含 `## Removed surface`
+   与 `## Reintroduction conditions`（判据 1.11：复活条件写"什么条件下把它接回来"，不写"以后再说"）。
+
 ## 校准样例
 
 - 正例：评审报告每条 blocker 都附 `git show --stat <sha>`、ADR 路径、`grep` 命中行；
@@ -1335,17 +1464,982 @@ description: 何时用：评审一处变更（工作区 diff / 单个提交 / �
 - 反例：无证据断言"这段代码与 ADR 不符"却不给符号对照；把 review 判断说成"机器已验证"；
   堆 20 个 nit 却漏掉文不对题的 ADR。
 - 反例（文不对题）：TUI 功能提交携带多协议提案——标题与代码无关，记 blocker 并要求拆条。
+- 正例（删除评审）：删一个导出函数 —— 报告贴 `consumer` 三行（`owner`/`producer`/`consumer`）、
+  `rg --fixed-strings '<符号>'` 的 0 命中输出、五件同提交的 `git show --stat`、`ci-verify.sh` exit 0。
+- 反例（删除评审）：只跑 `rg <符号>` 命中测试文件就宣布"有消费者"（把自身测试当生产调用），
+  或删了源码却留 README 里的路径与旧依赖声明（五件只做了一件）。
 - 边界（靠 review）：重构归类、改动是否用户可见——判据管不到，列疑点 + 证据让人定夺。
 
 ## 验证与报告
 
 - 本技能无退出码门禁（审查是 review 层）。
 - 交付物 = 评审报告（blocker/non-blocker + 证据 + 合入条件）。
+- 删除/收窄类变更另需：五件同提交清单在现场点齐 + 检索零残留的输出留档；缺件即 blocker。
 - 后续动作：blocker 修完重审；需补/迁移的 note 按 write-adr 落盘——审完不落盘等于没审。
 PONYGO_EOF
   fi
 
-  # docs-tier/README.md：缺失时生成与模板仓库 eol 归一后逐字节一致的全量版（内容源收敛为本 heredoc 常量）
+
+  # ---- 技能模板库（OPTIONAL_UNIVERSE 九文件，init 播种但不自动安装）----
+  mkdir -p "$META_DIR/skills-library"/{pg-delivery-checks,pg-find-simplifications,pg-doc-hygiene,pg-test-reliability,pg-upgrade-guide,pg-gc-agent-notes}
+
+  if [ ! -f "$META_DIR/skills-library/README.md" ]; then
+    cat > "$META_DIR/skills-library/README.md" <<'PONYGO_EOF'
+# skills-library/ —— 可选技能模板库（三层归属里的「模板库」）
+
+本目录是 ponygo 的**可选技能模板库**：六个 `pg-` 前缀的通用流程技能以**模板**形态随
+`init` 播种，但**不自动安装**——安装是用户显式执行的安装器动作，副本归实例所有、可自由改造。
+
+> 本文件是这套契约（三层归属 / 三态 / marker / 不计 L3 / 安装用法）的**唯一家**：
+> 安装器、CLI 与测试只引用本文，不复述规则。库技能正文的五要素契约在
+> `.agents/skills/README.md`，此处不重复。
+
+---
+
+## 三层归属
+
+| 层 | 位置 | 所有者 | 计入 L3 | `init` |
+|---|---|---|---|---|
+| 基线 | `.agents/skills/{write-adr,change-review,governance-review}/` | 实例可改，模板逐字节锁 | 否 | 必播 |
+| 模板库 | `.meta/skills-library/pg-*/`（本目录） | 仅模板 | 否 | 必播、**不安装** |
+| 实例自有 | 其余 `.agents/skills/*/` | 实例 | 是 | 不生成 |
+
+- 库技能名一律带 `pg-` 前缀（本项目命名空间）；基线名不变。
+- 库技能的**安装副本**（带 `.ponygo-installed`）是实例文件，但**不计入 L3**：
+  `audit` 的「实例自有技能 ≥1」按归属判定，模板库副本与基线 3 技能同样被排除——
+  否则一条安装命令就能买到 L3，等级失去含义。
+- 一条技能落进哪一层只看**位置 + marker**，不看内容：带 marker 的副本永远是模板库副本，
+  想让它成为实例自有资产，就按 Rule of three 自己改写/新写一篇（并删除 marker）。
+
+## 文件清单
+
+| 文件 | 职责 |
+|---|---|
+| `README.md` | 本文件：契约与用法（唯一家） |
+| `install.sh` | 安装器：`list` / `install <name>` / `check`（位置子命令，零旗标） |
+| `catalog.tsv` | 必要性元数据（`audit` B3 能力缺口建议的唯一数据源） |
+| `pg-<name>/SKILL.md` | 六个库技能正文（模板） |
+
+## 安装用法
+
+```bash
+bash .meta/skills-library/install.sh list                    # 每技能一行，查看可安装项与三态
+bash .meta/skills-library/install.sh install pg-doc-hygiene   # 安装到 .agents/skills/pg-doc-hygiene/
+bash .meta/skills-library/install.sh check                    # 只读：逐已安装项报三态
+```
+
+| 动词 | 行为 | 退出码 |
+|---|---|---|
+| `list` | 每技能一行：`<name>\t<installed\|absent>\t<ok\|stale\|modified\|->` | 0 |
+| `install <name>` | 复制库技能文件到 `.agents/skills/<name>/`，成功后写 marker | 0 成功 / 1 目标已存在（零写入）/ 2 用法错、未知技能或无法写入 |
+| `check` | 逐已安装项一行：`<name>\t<state>`（state = `ok` / `stale` / `modified`） | 0（只读、advisory，恒不改退出码） |
+
+零旗标：`--list`、`-n` 一类旗标形态一律按未知输入拒绝（exit 2）。错误信息全部走 stderr；
+`list` / `check` 的 stdout 只承载上表的制表符数据行（无副本时 `check` 的提示也只走 stderr）。
+无参数调用同样是用法错（exit 2）——三个动词之外不设默认动作，也不替调用方猜意图。
+写目标失败、取不到 sha256 工具或日期这几种**无法完成安装**的情形也归 exit 2，且回滚本次新建目录。
+
+`list` 的技能集合 = `catalog.tsv` 登记的库技能 ∪ 库内 `pg-*/SKILL.md` ∪ 已装副本
+（三者的并集、按名排序去重）：模板文件缺失时该技能仍列出（`absent` + `-`），缺口因此可见；
+此时 `install` 会以 exit 2 指出库内缺 `SKILL.md`，修法见文末「获取与修复」。
+
+安装语义：
+
+- **永不覆盖**：目标 `.agents/skills/<name>` 已存在（普通文件、目录或符号链接）即拒绝，
+  零写入。要换版本或放弃本地改造，由人 review 后手工移除副本再装——安装器不动实例文件。
+- 复制只写新建的副本目录；**全部复制成功后才写 marker**，任何一步失败即回滚本次新建目录，
+  不留"有副本无 marker"的半装状态。
+- 复制源是库内该技能目录下的普通文件（当前为 `SKILL.md`）；库内技能目录不存在 →
+  该名字是未知技能（exit 2），不会凭空创建。
+
+## `.ponygo-installed` marker
+
+安装成功后写在副本根，两行 `<key>=<value>`：
+
+```
+library_sha256=<安装时库内 SKILL.md 的 sha256>
+installed_at=<yyyy-mm-dd>
+```
+
+- `library_sha256` 是**安装那一刻**模板的指纹，三态判定的基准，不是库的当前值。
+- marker 存在 ⟺ 该目录是模板库安装副本（`audit` 归属判定与 `list` 的 `installed` 列都据此）。
+- marker 损坏或缺 `library_sha256` 视为**不可校验**，判 `modified`（不是 `ok`）。
+
+## 三态判定
+
+按 `modified` > `stale` > `ok` 的顺序求值，先命中先返回：
+
+| 态 | 判据 | 含义 |
+|---|---|---|
+| `modified` | 副本 `SKILL.md` 的 sha256 ≠ `marker.library_sha256`（含副本 `SKILL.md` 缺失、marker 无 `library_sha256`） | 实例改造过（或副本被删/被改），安装器不会碰它 |
+| `stale` | 副本与 marker 一致，但**库内** `SKILL.md` 当前 sha256 ≠ `marker.library_sha256`（含库内文件已不存在） | 模板已更新，副本是旧版本 |
+| `ok` | 副本、marker、库内当前值三者一致 | 副本与模板同步且未被改造 |
+
+- 未安装的技能在 `list` 里输出 `-`（第四态，仅表示"无副本"，不是判定结果）。
+- 三态都是**观测**，不是自动修复：`stale` 由人决定是否手工合并模板变更，`modified`
+  由人决定是否放弃本地改造。`check` 决不写盘，也不改任何退出码。
+- `audit` 对已装副本的三态只做 advisory：非 `ok` 报 `skill_library_stale` /
+  `skill_library_modified` 提示，不计分、不影响退出码。
+
+## catalog.tsv 与能力缺口建议
+
+`catalog.tsv` 是制表符五列 `name / evidence_kind / evidence_arg / min / hint`，`#` 起注释。
+`evidence_kind` 取封闭集合（`notes_class` / `archive_sealed` / `docs_scale` / `web_dirs` /
+`test_dirs` / `release_surface` / `none`），求值口径见 `spec-ponygo-v2.6.md` §3.1。
+
+`audit` 拿 `catalog.tsv × 证据` 求值，**未安装且证据达阈值**时打印"能力缺口建议"
+（含证据摘要与安装命令）；已安装但证据不再成立时打印一行退场候选。建议是
+**advisory，靠 review 判定，不计分、不影响退出码**——必要性是语义判断，不装假计数。
+
+## 获取与修复
+
+库文件属可选资产：`init` 必播、`upgrade` 不判 drift、缺失只提示。历史项目或删过库文件
+的仓库用 `ponygo init --repair-skeleton` 补缺失库文件（只补不覆盖）。
+PONYGO_EOF
+  fi
+
+  if [ ! -f "$META_DIR/skills-library/install.sh" ]; then
+    cat > "$META_DIR/skills-library/install.sh" <<'PONYGO_EOF'
+#!/usr/bin/env bash
+# ============================================================
+# install.sh —— 可选技能模板库安装器（位置子命令，零旗标）
+#
+# 用法：
+#   bash .meta/skills-library/install.sh list
+#   bash .meta/skills-library/install.sh install <name>
+#   bash .meta/skills-library/install.sh check
+#
+# 动词契约与退出码：
+#   list            每技能一行：`<name>\t<installed|absent>\t<ok|stale|modified|->`；exit 0
+#                   （技能集合 = catalog.tsv 登记的库技能 ∪ 库内 `pg-*/SKILL.md` ∪
+#                    `.agents/skills/*/.ponygo-installed`；模板缺失时仍列出，便于发现缺口）
+#   install <name>  复制库技能文件到 `.agents/skills/<name>/`；全部复制成功后才写
+#                   `.ponygo-installed`。0 成功 / 1 目标已存在（零写入）/ 2 用法错误、
+#                   未知技能或无法写入（回滚本次新建目录，不留半装状态）
+#   check           逐已安装项判 `ok`/`stale`/`modified`；exit 0（只读、advisory）
+#
+# 只读纪律：list / check 不写仓库任何文件；install 只写目标副本目录（含其 marker）。
+# 永不覆盖：目标 `.agents/skills/<name>` 已存在（普通文件、目录或符号链接）即拒绝，
+#   绝不改写实例文件——处理方式是 review 后手工移除副本，不由本脚本代劳。
+# 三态判定顺序 modified > stale > ok；公式、marker 格式、三层归属与「不计 L3」的
+#   唯一家是 `.meta/skills-library/README.md`，本脚本头注释不复述规则内容。
+# 零依赖：bash 3.2+ 与 POSIX 工具（cp / mkdir / date / awk / sort）。sha256 先探测
+#   `sha256sum`，再探测 `shasum -a 256`；两者皆无则拒绝运行（exit 2），不静默放行。
+# ============================================================
+set -u
+
+PROG=skills-library/install
+LIB=".meta/skills-library"
+DEST=".agents/skills"
+MARKER=".ponygo-installed"
+
+ROOT=$(cd "$(dirname "$0")/../.." 2>/dev/null && pwd) || {
+  printf '[%s] FAIL：无法解析仓库根（本脚本须位于 <repo>/.meta/skills-library/）\n' "$PROG" >&2
+  exit 2
+}
+cd "$ROOT" || {
+  printf '[%s] FAIL：无法进入仓库根 %s\n' "$PROG" "$ROOT" >&2
+  exit 2
+}
+
+if command -v sha256sum >/dev/null 2>&1; then
+  SHA_TOOL=sha256sum
+elif command -v shasum >/dev/null 2>&1; then
+  SHA_TOOL=shasum
+else
+  SHA_TOOL=""
+  printf '[%s] FAIL：缺少 sha256 工具（需要 sha256sum 或 shasum -a 256）\n' "$PROG" >&2
+  exit 2
+fi
+
+usage() {
+  printf '[%s] 用法：bash .meta/skills-library/install.sh list\n' "$PROG" >&2
+  printf '            bash .meta/skills-library/install.sh install <name>\n' >&2
+  printf '            bash .meta/skills-library/install.sh check\n' >&2
+  printf '  零旗标：不接受 --list / -l / -n 等旗标形态；三态与 marker 契约见 .meta/skills-library/README.md\n' >&2
+}
+
+die_usage() {
+  printf '[%s] FAIL：%s\n' "$PROG" "$*" >&2
+  usage
+  exit 2
+}
+
+sha_of() {
+  if [ "$SHA_TOOL" = shasum ]; then
+    shasum -a 256 "$1" 2>/dev/null | awk '{print $1}'
+  else
+    sha256sum "$1" 2>/dev/null | awk '{print $1}'
+  fi
+}
+
+# marker 单行读取：`<key>=<value>`；找不到输出空串（调用方按"不可校验"处理）。
+marker_field() {
+  awk -v want="$2" '
+    { sub(/\r$/, "") }
+    index($0, want "=") == 1 { print substr($0, length(want) + 2); exit }
+  ' "$1" 2>/dev/null
+}
+
+# 库内可安装技能（`pg-*/SKILL.md` 存在即视为可安装；名字集合以磁盘为准）。
+library_names() {
+  local d name
+  [ -d "$LIB" ] || return 0
+  for d in "$LIB"/pg-*/; do
+    [ -d "$d" ] || continue
+    name=${d%/}
+    name=${name##*/}
+    [ -f "$LIB/$name/SKILL.md" ] || continue
+    printf '%s\n' "$name"
+  done
+}
+
+# catalog.tsv 登记的库技能名（第一列；判据真值源是 catalog，缺模板时仍可被 list 看见）。
+catalog_names() {
+  local f
+  f="$LIB/catalog.tsv"
+  [ -f "$f" ] || return 0
+  LC_ALL=C awk -F'\t' '
+    { sub(/\r$/, "") }
+    /^#/ || /^$/ { next }
+    $1 != "" { print $1 }
+  ' "$f" 2>/dev/null
+}
+
+# 已安装副本（以 marker 存在为准）。
+installed_names() {
+  local d name
+  [ -d "$DEST" ] || return 0
+  for d in "$DEST"/*/; do
+    [ -d "$d" ] || continue
+    name=${d%/}
+    name=${name##*/}
+    [ -f "$DEST/$name/$MARKER" ] || continue
+    printf '%s\n' "$name"
+  done
+}
+
+# 三态判定（顺序即优先级）：modified > stale > ok；未安装输出 `-`。
+state_of() {
+  local name marker msha isha lsha
+  name=$1
+  marker="$DEST/$name/$MARKER"
+  [ -f "$marker" ] || {
+    printf '%s\n' "-"
+    return 0
+  }
+  msha=$(marker_field "$marker" library_sha256)
+  isha=$(sha_of "$DEST/$name/SKILL.md")
+  if [ -z "$msha" ] || [ "$isha" != "$msha" ]; then
+    printf 'modified\n'
+    return 0
+  fi
+  lsha=$(sha_of "$LIB/$name/SKILL.md")
+  if [ -z "$lsha" ] || [ "$lsha" != "$msha" ]; then
+    printf 'stale\n'
+    return 0
+  fi
+  printf 'ok\n'
+}
+
+# 失败回滚：只删本次 install 新建的副本目录（名字已过形状校验，杜绝越界 rm）。
+rollback_new() {
+  local name dst
+  name=$1
+  case "$name" in
+    '' | *[!a-z0-9-]*) return 0 ;;
+  esac
+  dst="$DEST/$name"
+  if [ -d "$dst" ]; then
+    rm -rf "$dst"
+  fi
+  return 0
+}
+
+cmd_list() {
+  local name st
+  {
+    catalog_names
+    library_names
+    installed_names
+  } | LC_ALL=C sort -u | while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    if [ -f "$DEST/$name/$MARKER" ]; then
+      st=$(state_of "$name")
+      printf '%s\tinstalled\t%s\n' "$name" "$st"
+    else
+      printf '%s\tabsent\t-\n' "$name"
+    fi
+  done
+}
+
+cmd_check() {
+  local name st found=0
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    st=$(state_of "$name")
+    printf '%s\t%s\n' "$name" "$st"
+    found=1
+  done < <(installed_names | LC_ALL=C sort -u)
+  if [ "$found" -eq 0 ]; then
+    printf '[%s] 提示：无已安装副本（库技能尚未安装到 %s/）\n' "$PROG" "$DEST" >&2
+  fi
+}
+
+cmd_install() {
+  local name src dst f lib_sha today
+  name=${1:-}
+  case "$name" in
+    '') die_usage "install 需要技能名（位置参数恰好 1 个）" ;;
+    -*) die_usage "未知技能名：$name（零旗标；技能名形如 pg-doc-hygiene）" ;;
+  esac
+  case "$name" in
+    *[!a-z0-9-]* | *- | *--*)
+      die_usage "技能名形状非法：$name（只允许小写字母、数字、连字符，且不以连字符收尾）"
+      ;;
+  esac
+
+  src="$LIB/$name/SKILL.md"
+  [ -f "$src" ] || die_usage "未知技能：$name（库内无 $LIB/$name/SKILL.md；先跑 list 看可安装项；若模板缺失，用 ponygo init --repair-skeleton 补库文件）"
+
+  dst="$DEST/$name"
+  if [ -e "$dst" ] || [ -L "$dst" ]; then
+    printf '[%s] 拒绝：目标已存在，不覆盖实例文件：%s\n' "$PROG" "$dst" >&2
+    printf '[%s] 处理：用 check 看三态；确认副本可弃后手工移除该目录再重装\n' "$PROG" >&2
+    exit 1
+  fi
+
+  lib_sha=$(sha_of "$src")
+  if [ -z "$lib_sha" ]; then
+    printf '[%s] FAIL：无法计算 sha256：%s（零写入）\n' "$PROG" "$src" >&2
+    exit 2
+  fi
+
+  if ! mkdir -p "$DEST" 2>/dev/null; then
+    printf '[%s] FAIL：无法创建目录 %s\n' "$PROG" "$DEST" >&2
+    exit 2
+  fi
+  if ! mkdir "$dst" 2>/dev/null; then
+    printf '[%s] FAIL：无法创建目标目录 %s（零写入）\n' "$PROG" "$dst" >&2
+    exit 2
+  fi
+
+  for f in "$LIB/$name"/*; do
+    [ -f "$f" ] || continue
+    case "${f##*/}" in
+      "$MARKER") continue ;;
+    esac
+    if ! cp "$f" "$dst/${f##*/}" 2>/dev/null; then
+      printf '[%s] FAIL：复制失败：%s → %s（已回滚本次新建目录）\n' "$PROG" "$f" "$dst" >&2
+      rollback_new "$name"
+      exit 2
+    fi
+  done
+
+  today=$(date +%Y-%m-%d 2>/dev/null) || today=""
+  if [ -z "$today" ]; then
+    printf '[%s] FAIL：无法取日期（date +%%Y-%%m-%%d）（已回滚本次新建目录）\n' "$PROG" >&2
+    rollback_new "$name"
+    exit 2
+  fi
+
+  if ! {
+    printf 'library_sha256=%s\n' "$lib_sha"
+    printf 'installed_at=%s\n' "$today"
+  } >"$dst/$MARKER" 2>/dev/null; then
+    printf '[%s] FAIL：无法写 marker %s（已回滚本次新建目录）\n' "$PROG" "$dst/$MARKER" >&2
+    rollback_new "$name"
+    exit 2
+  fi
+
+  printf '%s：已安装 → %s/（library_sha256=%s，installed_at=%s）\n' "$PROG" "$dst" "$lib_sha" "$today"
+  printf '  三态自检：bash .meta/skills-library/install.sh check\n'
+}
+
+[ "$#" -ge 1 ] || die_usage "缺少位置子命令（list | install <name> | check）"
+MODE=$1
+shift
+
+case "$MODE" in
+  list)
+    [ "$#" -eq 0 ] || die_usage "list 不接受额外参数（零旗标）"
+    cmd_list
+    ;;
+  install)
+    [ "$#" -eq 1 ] || die_usage "install 需要且只接受一个技能名（位置参数）"
+    cmd_install "$1"
+    ;;
+  check)
+    [ "$#" -eq 0 ] || die_usage "check 不接受额外参数（零旗标）"
+    cmd_check
+    ;;
+  *)
+    die_usage "未知输入：$MODE"
+    ;;
+esac
+exit 0
+PONYGO_EOF
+    chmod +x "$META_DIR/skills-library/install.sh"
+  fi
+
+  if [ ! -f "$META_DIR/skills-library/catalog.tsv" ]; then
+    cat > "$META_DIR/skills-library/catalog.tsv" <<'PONYGO_EOF'
+# catalog.tsv —— 库技能必要性元数据（audit B3 唯一数据源）
+# 语法：制表符五列 name<TAB>evidence_kind<TAB>evidence_arg<TAB>min<TAB>hint
+# evidence_kind 封闭集合（spec §3.1）：notes_class | archive_sealed | docs_scale |
+#   web_dirs | test_dirs | release_surface | none；arg 缺省写 -；min 为正整数；
+#   hint 是给人读的一句「何时需要」。证据求值口径与阈值语义见同目录 README.md。
+#
+# 列序：name / evidence_kind / evidence_arg / min / hint（制表符分隔，见 spec §3.1）
+pg-delivery-checks	test_dirs	-	1	存在测试目录与 CI 配置时——推送前要按改动表面选最小充分证据，而不是全量重跑
+pg-find-simplifications	notes_class	simplification	1	已有过简化决策（≥1 条）——删除或收窄变更需要证据链（owner/producer/consumer 三行 + 检索零残留），符号零命中不等于可删
+pg-doc-hygiene	docs_scale	-	20	文档多到会出现同一条规则写在两处时——需要「事实一个家」的一次性清扫口径
+pg-test-reliability	test_dirs	-	1	测试出现偶发失败或在修复后复发时——需要隔离、定位与防回归的固定程序
+pg-upgrade-guide	release_surface	-	1	仓库有发布面（CHANGELOG / tag / bin）时——破版升级要迁移指引，不靠口头约定
+pg-gc-agent-notes	archive_sealed	-	3	归档封印累积到一定量时——过期与重复语料要回收，否则检索面被稀释
+PONYGO_EOF
+  fi
+
+  if [ ! -f "$META_DIR/skills-library/pg-delivery-checks/SKILL.md" ]; then
+    cat > "$META_DIR/skills-library/pg-delivery-checks/SKILL.md" <<'PONYGO_EOF'
+---
+name: pg-delivery-checks
+description: 何时用：在推送、强推、标记可评审或声称「检查已通过」之前，选出最小但足以覆盖本次外发差异的检查集合；以及历史重写型批量重推（级联 rebase 后一次发布）刚完成、需要立刻补验证时。日常小改不要因此跑全量套件。
+---
+
+# pg-delivery-checks —— 外发前选证
+
+**项目等价命令约定**：文中 `<项目测试命令>`、`<项目类型检查命令>`、`<项目文档门禁命令>`、
+`<项目链路检查命令>`、`<项目 PR 状态命令>` 只是占位。
+安装到某项目后，先读该项目的根常载文件、任务脚本/包清单/Makefile 与 CI 配置，把它们替换成真实入口；
+替换后的真实命令必须原样进报告，不得只报占位名。
+
+## 真相源
+
+- 项目的根常载约定文件与贡献指引 —— 本地钩子的**真实边界**（哪些检查本地已有，哪些归 CI）。
+- 项目的测试策略文档 —— 证据种类与分层（单元 / 集成 / 快照 / 端到端 / 真实外部依赖）。
+- 项目的 CI 配置 —— 全量覆盖与平台矩阵的归属。**全量是 CI 的职责，不是本地的默认动作。**
+- 活动决策记录 —— 哪些检查是某一决定刻意保留的（别把刻意义务当可跳过的开销）。
+
+## 步骤
+
+1. **确认检出与基线**：`git status --short --branch`、`git rev-parse --show-toplevel`。
+   基线 ref **只能核实、不能猜**：从远端或栈状态读当前 PR 基线/父层，`git fetch` 后再
+   `git diff --stat <已核实基线>...HEAD`。合并了变动的基线之后，重跑范围报告、重新评估受影响行为，
+   只重跑被这次合并无效化的检查。
+2. **按变更面选最小证据**（每条都给"会因该回归而失败"的最窄检查；更广的只补 diff 实际触达的面）：
+
+   | 变更面 | 首选证据 |
+   |---|---|
+   | 包/脚本/模块行为 | `<项目测试命令> <所属测试文件>`，必要时加聚焦用例名过滤 |
+   | 共享契约（类型/签名/导出） | 涉事包测试 + `<项目类型检查命令>` |
+   | 生成物（清单、声明、快照） | 再生成 + 该生成物的新鲜度/一致性检查 |
+   | 文档、决策记录、被文档引用的注释 | `<项目文档门禁命令>`（链接、格式、配对、预算） |
+   | 面向用户或模型可见的输出（CLI 文本、UI 文案、诊断） | 拥有该输出的聚焦快照或可运行示例 |
+   | 清单/构建配置/入口/构建产物路径 | 构建 + 卫生检查 + 该产物的冒烟 |
+   | 真实外部服务行为 | 对应端到端目标（凭据可用时）；**永不打印密钥** |
+3. **每个选中的检查都补齐证据链四件套**：① 受影响面的 owner（文件/模块/契约）；② 会失败的
+   producer/consumer 路径（谁产出、谁消费、回归从哪条路可见）；③ 覆盖清单与不覆盖清单；
+   ④ 最强反方——"为什么这次不需要更广的检查"。回答不了 ④，就说明该跑更广的范围。
+4. **不重复已验证的检查**：检查已通过后，不因"紧接着要提交/推送"再跑一遍；尤其不要为了重复
+   本地已有的推送前钩子而手动跑它。重复执行不是更强的证据，只是更贵的证据。
+5. **覆盖率作用域与测试过滤是两件事**：测试文件过滤选"跑哪些测试"，覆盖率作用域另需点名
+   受影响源文件/模块。不要为了让未覆盖面消失而放宽阈值、加"无测试即通过"开关或缩小源作用域。
+   依赖图工具找不到只经配置、动态加载、子进程、worker、构建产物或外部服务触达的行为 → 显式点名。
+6. **何时才跑全量**：用户明确要求、正在定位 CI 失败、或变更横跨仓库使任何窄集都不可信。
+   现有任务脚本与 CI 配置就是清单，不要凭记忆重建一个聚合入口。
+7. **历史重写型推送**：重写后旧提交哈希、行内评论锚点、评审结论都不是现行证据，必须重审。
+   发布前记录远端分支**确切 OID**，用带租约的强推 `--force-with-lease=<branch>:<observed-oid>`；
+   裸 `--force` 永不允许。若所用工具把"取回 + 级联重写 + 发布"合成一个不可插入验证的动作：
+   运行前要求工作树干净、记录官方层序与远程头；返回后逐层重查远程头、逐层对比实际基线重选证据，
+   全部通过前**保持未合并、验证状态报 pending**。工具返回 0 不等于栈就绪。
+8. **失败处理**：相关检查在普通推送前失败 → 停下修复或说明阻塞，不要"先推再看 CI"。看起来是
+   环境特异性失败也要证：记录确切命令、失败用例、平台差异，确认非平台证据，优先修不确定行为。
+   绕过本地钩子只在用户明确同意时，并报清失败内容与 CI 为何被预期为不同。
+
+## 校准样例
+
+- 正例（窄证据足够）：给某导出函数加默认参数、只影响一处调用 → 所属测试文件 + 类型检查；不跑全量。
+- 反例（重复劳动）：全量套件刚绿，只因为要执行提交就再跑一次；更强的证据并没有增加。
+- 反例（全量凑齐）：改了三条注释就要求全量套件"稳妥"——用覆盖面换安心，换不来更强的证据。
+- 正例（四件套齐全）：删掉一个配置路径 → owner=配置加载器；路径=加载器读键 → 运行期消费点；
+  消失清单=该键的解析分支与其测试；保留清单=旧键的兼容转换；最强反方="外部用户可能仍写旧键"，
+  故保留兼容层只删内部默认值。
+- 正例（重写型推送）：重写分支后记录远端 OID 并用 `--force-with-lease=branch:<oid>`；并发更新时推送中止即为正确行为。
+- 反例（裸强推）：`git push --force` 覆盖协作者的提交——不可恢复，且无租约可救。
+- 正例（无检查上报的诊断顺序）：平台报"无检查"时先读可合并性状态；冲突状态下平台本就不产生这些运行，
+  用 `git merge-tree --write-tree HEAD origin/<base>` 确认冲突路径。
+- 反例（用空提交等信号）：连推空提交、草稿与就绪反复切换、revert 再恢复——历史变脏，信号依然为零。
+- 边界（靠 review）：把"该不该跑全量"交给"变更是否真的横跨仓库"这一判断；判据是触达面，不是文件行数。
+
+## 验证与报告
+
+- 每条选中检查跑**一次**，报告里贴：占位替换后的真实命令 + 观察到的结果（含选中用例数，
+  别把被过滤到 0 条的运行当聚焦证据）。
+- 远端一致：`git rev-parse HEAD origin/$(git branch --show-current)` 两行相同；平台侧用 `<项目 PR 状态命令>` 读检查状态。
+- 状态词只允许三档：通过 / 待定（pending）/ 失败。待定就报待定；不把重试、跳过、待定的 CI 说成通过。
+- 环境特异性失败：报确切命令、失败用例、平台差异、以及"CI 为何被预期不同"。
+- 重写型推送：附后置验证清单（逐层范围、逐层证据、合并状态），并显式说明"未合并直到全部通过"。
+PONYGO_EOF
+  fi
+
+  if [ ! -f "$META_DIR/skills-library/pg-find-simplifications/SKILL.md" ]; then
+    cat > "$META_DIR/skills-library/pg-find-simplifications/SKILL.md" <<'PONYGO_EOF'
+---
+name: pg-find-simplifications
+description: 何时用：要求"找有证据支撑的简化"、删死代码/多余导出、合并重复实现、减掉被持续维护的冗余基础设施，或评估另一个分支上的简化方案时。它产出提案与证据，不授予实施许可——调查不等于动手。
+---
+
+# pg-find-simplifications —— 有证据的简化勘探
+
+简化 = 去掉**被持续维护的义务**：API、表示、生命周期状态、配置路径、依赖、测试、文档。
+宁可少数几条证据扎实的候选，不要一份"删了多少行"的清单。这是判断指引，不是勾选表。
+
+**项目等价命令约定**：文中 `<项目检索命令>`（例 `rg -n`，无则用 `grep -rn`）、
+`<项目测试命令>`、`<项目类型检查命令>`、`<项目文档门禁命令>` 按被安装项目的真实入口替换。
+
+## 真相源
+
+- 根常载约定 + 架构地图 + 防御模式/测试策略文档 —— 判断"这是义务还是意外"的底。
+- **活动**决策记录（proposed/implemented/rejected）—— 刻意的设计不要当垃圾。
+  冻结归档区只作历史示例：不据它判现行，也永不修它的出链。
+- 既有依赖与语言标准库 —— 替换基础设施前先搜，不然是"换个地方写同样代码"。
+
+## 步骤
+
+1. **定范围与约束**：读上面四类真相源，写下本次范围（模块/包/文档面）与明确排除项。
+   范围宽时按正交域分派：核心循环与持久化 / 装配与注册 / 对外接口与 SDK / 子进程与执行提供者 /
+   组合与脚本与测试与文档。每个子域都要求"消费者证据 + 已否决的替代"。
+   **受保护设计先划出来**：刻意的双实现、接缝抽象、树上提供者支持——除非用户显式推翻，不提案删除；
+   但受保护设计内部的未用成员仍是候选（只要删除不损其目的）。
+2. **六问发现**（逐候选问，答案决定是否继续）：
+   - 声明的特性有**完整效果路径**吗？追生产者→转换→提供端支持→可观察结果。遍地复制的字段
+     可能没有写入者、没有读者，或只有"拒绝它"的实现。别只搜调用点，也搜构造器与判别式发射点。
+   - 哪些区分真的改变消费者的动作？控制授权/驻留/持久性/归属的内部区分要留；
+     只制造"不可用的选择"的公开区分可以收。
+   - 更小的显式行为能消灭整个子系统吗？固定间隔、调用方自报时区、显式失败上报，
+     可以抵掉通用日历、持久化默认值、自动回滚。**点名放弃的能力**，别只说删了什么。
+     已有生产调用方时这是行为决策，不是自动否决。
+   - 消费者能否在需要时读到权威值？抄写的历史、晋升台账、"失效事件 + 再读"、并列于共享投影流的缓存
+     ——先确定所需观测时点，再判能否用派生/复用一并删掉订阅、留存数据、陈旧响应处理与恢复路径。
+   - 组合是否被误当策略？可选服务在场、提供者方法、兄弟工具都能表达"可用性"，却不必决定部署行为。
+     显式配置或调用方意图操作可删注册表与依赖检查；归属或完成时序不同的操作要保留。
+   - **谁承担完整维护成本**？透传配置、重复的应用树、产品在用的演示启动器、只做解析的工作区、
+     自带升级生命周期的安装辅助——把被删系统与替代方案整体比较，含残余胶水。
+     把复杂度搬家、或加一道门禁让两份定义保持相等，都不算简化。
+3. **证明可达性与取舍**：先 `<项目检索命令>` 再读命中，搜确切符号、属性读写、判别值、事件与线协议
+   字符串、配置键、模块名，以及 `.method(` 与 `method(` 两种形态。
+   测试与声明只能证明契约，不能证明有已发布的生产者或消费者。
+   按**实际入口**而不是目录名给样例/夹具分类；跟随生成清单到它的消费者：
+   被模型或用户写的插件挂载所消费的清单是动态产品 API，只在文档里列一次的清单不是固定调用点。
+   公开的第三方扩展路径可以是有意零调用点。
+4. **逐个候选记录证据链四件套**（缺一件即降级为"证据不足"）：
+   ① **owner**（当前谁拥有这段契约/状态）；② **producer/consumer 路径**（产出点 → 消费点）；
+   ③ **消失清单 vs 保留清单**（一起消失的文件/测试/文档/注释；必须留下的残余行为）；
+   ④ **最强反方**（保留它的最强理由）。据此归类：
+   删除不可达或无人读取的行为 / 收窄公开或产品行为并**显式说明损失** / 保留为受保护义务或证据不足。
+5. **归属与失败语义不许被顺手抹平**：对复制、冻结、校验、回调捕获，点名值的来源、下一归属者、信任边界。
+   同进程的类型化调用通常借用只读值；解析器、配置加载、队列、模型/工具 JSON、持久文件、worker、
+   进程、线协议解码器则拥有或校验其输入。"敌意 getter"或"回调替换"测试本身不构成需求；
+   冻结根不证明后代不可变；id 相等不证明对象同一。异步机制里把每个 promise、标志、取消路径、
+   disposer（清理函数）、预留映射到归属与状态迁移；只有在表达同一事实时才合并。同步发布与回滚、回调收敛、
+   首个终态仲裁、worker/进程归属、dispose 到静默，都属必须保留的语义。
+   能记录真实事实的持久起止标记，不因渲染器忽略就可删——丢掉被中断的工作是能力损失。
+6. **替换基础设施只为净减**：先查既有依赖与标准库；列出被删除的确切实现与专属测试、维护与传递成本、
+   胶水必须保留的每一处行为。演练最可能击败替换的不匹配：协议截断、取消与清理、配置上限、
+   确定性测试时钟、平台打包、源码入口与构建入口的差异。
+   "覆盖了帧格式但为了限长又要重写一遍帧格式"的库不是简化。被接受的边缘行为变更写进提案与对应测试；
+   不要只证明依赖的通用规格，却漏掉本项目专属胶水的测试。
+7. **落地记录**：实质提案用固定骨架 `Problem` / `Proposal` / `Alternatives considered` /
+   `Acceptance criteria` / `Risks`，含消费者证据、被删的维护成本、放弃的能力、可观察的验收条件；
+   已实施的决策换成已实施骨架。同一决策已有 owner → 更新而不新建重复记录（别为凑候选数造条）。
+   新记录必须做一次**限定范围**的取代检查（同决策/同机制/同被否替代），别顺手全树审计。
+   小而局部的改进写成就地 `TODO`/`FIXME`/`XXX` 并注明紧迫理由，不立设计记录。
+
+## 校准样例
+
+- 正例（不可达删除）：某配置项 `retryWindowMs` 只在类型声明与示例配置里出现，无解析分支无读取点
+  → owner=配置 schema；消失清单=字段+示例+校验用例；保留清单=相邻重试次数键；反方"外部用户可能写过" →
+  先查无兼容读路径，再删并记一条决策。
+- 反例（伪简化）：把两份"看起来一样"的适配层合并成一个，代价是给剩余一个加两个布尔开关——
+  复杂度搬家 + 新增分支，义务没减。
+- 反例（拿测试当需求）：为一个函数写过的"敌意 getter"测试被当作"必须保留防御拷贝"的证据；
+  真实调用方是同进程只读传参，测试造出的是不存在的场景。
+- 正例（收窄公开面）：三个内部状态映射到一个对外状态，内部区分保留（它控制授权），
+  公开枚举删掉两个永远不可选的值 → 显式写出"放弃的是调用方的可观测粒度"。
+- 正例（能力换机制）：把通用日历与持久化默认时区换成"调用方必须传时区"，删掉整条回滚与迁移路径 →
+  在提案里点名放弃"缺省时区"能力，并把拒绝路径写进验收条件。
+- 反例（只搬复杂度）：引入依赖替换手写解析，但为了对齐边缘行为又在自己代码里重实现一整套边界处理，
+  并新增一门禁"保证两份定义相等"。
+- 反例（越权实施）：用户要"勘探报告"，却直接提交了删除补丁——调查不是许可；实施须在授权范围内。
+- 边界（靠 review）：受保护的双实现内部的未用成员——留还是删，取决于删除是否损及其存在目的。
+
+## 验证与报告
+
+- 每个入选候选：四件套 + 归类（删除不可达 / 收窄并声明损失 / 保留义务或证据不足）+ 若实施则给验收条件。
+- 报告要含**有意义的否决与延后**，以及拟新增/合并/保留/删除的决策记录条数——只报候选数是在报工作量，不是结论。
+- 实施后跑：`<项目测试命令> <受影响测试>`、`<项目类型检查命令>`；若动了文档或注释，再跑
+  `<项目文档门禁命令>` 与 `git diff --check`。删除前按"删代码前先搜消费者"确认零生产消费者，
+  验收 = 搜索零残留 + 门禁照常绿。
+- 不得把未验证的搜索称为"穷尽"；范围仍在扩张时用草稿态交付，并列出尚未勘探的域。
+PONYGO_EOF
+  fi
+
+  if [ ! -f "$META_DIR/skills-library/pg-doc-hygiene/SKILL.md" ]; then
+    cat > "$META_DIR/skills-library/pg-doc-hygiene/SKILL.md" <<'PONYGO_EOF'
+---
+name: pg-doc-hygiene
+description: 何时用：新建/重构/评审/审计/迁移 Markdown 文档、包或模块 README、注释与 JSDoc 时；判断一段事实该住哪个家、是否漏了契约、以及散文读起来像泄漏的推理转录（"used to"/"本 PR"/"(decision 7)"/评审者辩解）时。合并了「文档放置 + 契约完整性 + CoT 泄漏类型学」三类判断。
+---
+
+# pg-doc-hygiene —— 文档家、契约与推理泄漏
+
+文档卫生的三件事：**事实有唯一可寻址的家**、**契约不丢命题**、**读者视点在 HEAD 而不在作者会话里**。
+本技能只给判断与流程，不替代项目的机械门禁。
+
+**项目等价命令约定**：文中 `<项目文档门禁命令>`、`<项目检索命令>`（例 `rg -n`）、
+`<项目配对重录命令>`、`<项目词数/规模门禁命令>` 按被安装项目真实入口替换；替换后写进报告。
+
+## 真相源
+
+- 项目的**文档标准**（tier 分类法、写作规则、slop 清单）——文档规则的家就是它，不在别处复制第二份。
+- 决策记录规则（`notes/README.md` 之类）——理由与历史叙事的合法去处。
+- 各载体的既有契约：根常载文件、模块/包 README、生成参考的再生成器、双语配对与词数预算的门禁脚本。
+
+## 步骤
+
+1. **定 scope 并定排除**：缺 scope 就报"需要 scope"并停下，不推断全仓。默认排除第三方目录（`vendor/` 等）
+   与**冻结归档区**（只读史，不据此判现行，也永不修它的出链）。排除项写在包含项之**后**，
+   否则后加的包含规则会把它们放回来。
+2. **定位：一个事实一个家**。按 job 分家，而不是按"谁先写到"：
+
+   | 事实的 job | 家 |
+   |---|---|
+   | 每次会话必载的常驻约定（短条文 + 链到理由层） | 根常载文件 |
+   | tier 分类 / 写作规则 / slop 清单 | 文档标准 |
+   | 组合、核心模块、接缝、扩展点（有序地图） | 架构地图 |
+   | 为什么这样 / 为什么不那样 | 决策记录（含 Alternatives） |
+   | 单模块的配置/语义/限制/扩展点 | 该模块或包的 README |
+   | 带编号验证步的操作指引 | how-to |
+   | bug 年表、证据、因果链、预防 | 事故复盘 |
+   | 交付过程证据（已完成的 spec/task/review） | 过程记录区 |
+   | 从源再生成 + 新鲜度门禁 | 生成参考 |
+
+   速查：bug→复盘；理由→决策记录；过程→how-to；契约→模块 README；常驻→根文件；交付证据→过程记录。
+   同一条规则出现两处 → 用特色短语 `<项目检索命令>` 找出来，留一家、其余链过去。
+3. **事实核查（先跑再说）**：文档陈述的是"今天怎么行为"，操作类主张唯一的合法证据是**亲自跑过**。
+   逐条执行文中将出现的命令/片段/示例，只写观察到的输出、告警与失败模式；
+   依赖你没有的凭据或网络的，明说并指名验证 owner，而不是断言。
+   改旧页先与最新主干对比：主干上的陈旧陈述照样是错的——按代码改，不按旧散文改。
+   复现不了的命令、字段、默认值、行为：删掉，不要从记忆或邻模块 README 搬。
+4. **契约完整性（这是"不许删"的清单）**：动笔前先把段落里的命题列出来，逐条判定是否前后都在场——
+   **主体与动作、条件/时序/顺序、模态（必须/可以/永不）、负向保证与例外、归属、副作用、失败模式与后果**。
+   删修饰、删重复、删叙事，只有当每个事实子句都活下来且更清楚时才算改进；**词数变少不是改进**。
+   架构、理由、算法、历史、扩展例子 → 激进外链到它的家；调用方/维护者就地需要的契约（行为、失败、归属、后果）→ 留在使用点。
+   生成物（清单、快照、夹具）是派生物：先改拥有它的源或场景，再重生成；不要手改派生物。
+5. **按载体补必写、避必不写**：公共 API 文档写调用方可见的返回区分、抛错/拒绝、副作用、归属、时序、取消、持久性；
+   内部注释写代码表达不出的不变量、竞态顺序、安全边界、反常失败，**不写控制流复述**；
+   模块注释写角色、依赖、职责与非显然架构选择；测试注释只写非显然设计（为何这个夹具/断言/平台让步/真实入口是必要的）；
+   模块 README 写配置、语义、失败、限制、扩展点与对外可见效果；决策记录留独有理由、机制、备选、后果与已交付证据；
+   复盘留年表、证据、因果、影响与预防；技能与 agent 指引留行为护栏与显式范围限定（"指引，不是脚本"）；
+   诊断消息点名失败主体、被违反的规则与修法。面向用户/模型的串按"措辞即行为"处理，须有拥有它的行为证据才改。
+6. **CoT 泄漏（chain-of-thought，推理转录外泄到成品散文）：一个测试 + 八类类型学**。测试只有一句：**HEAD 上的读者，没有任何会话转录、PR 讨论或未提交
+   草稿，能否解析每个引用并验证每个主张？** 不能 → 把幸存事实改写成仓库视点，删掉转录；能 → 它不是泄漏，
+   但在 README/文档/JSDoc 这类"当前态"载体上，可解析的变更故事仍是变更叙事，应路由到决策记录。
+   八类：① 已死的设计会话语引用——`(decision 7)`、`(audit C2)`、`plan §1.4`、阶段标签（`T4`/`W3`）、
+   "设计台账"；有已提交的 owner 就按名与路径引用，否则删引用、把事实子句改成自足陈述。
+   ② 栈与 PR 视点——"本栈后面的 PR"、"本 PR 新增"。改成机制陈述或扩展点；延后工作进 `TODO` 或 issue。
+   ③ 变更叙事与版本戳——"原来是"、"不再"、"旧 X"、"这一稿"、"现在"。写当前行为；
+   已修的回归写成现在时反事实（"没有 X 就会 Y"），不写成仓库史（"原来会 Y"）。
+   ④ 评审编排——"评审中被否"、"评审者确认"、草稿序号。留下决定与理由，删掉谁在哪一轮说的。
+   ⑤ 对评审者辩解——"这是安全的，因为它只是…"。写使代码安全的不变量，或直接删。
+   ⑥ 复述与推导转录——控制流旁白（"先 X 再 Y"）、测试走查、显然分支的证明。删；只留非显然契约。
+   ⑦ 对冲与计划残留——"目前大概够用"、无标记的延后。升级为 `TODO`/`FIXME` 或写出真实上界。
+   ⑧ 作者语言滑落——正文语种里混入未翻译的工序词或私有分隔符。翻译或删。
+7. **不是泄漏的保留清单**（删多和删少都错，按此执行）：issue 引用（`#1470`、`TODO(name):`）；
+   决策记录与复盘里的已合并 PR/issue 引用（那是被许可的证据）；抑制/忽略理由注释（理由错就修，不删）；
+   现在时反事实回归钉（"没有 X 就会 Y"）；实测边界（`measured:` 这类证据词是承重的）；运行时新旧态
+   （"旧连接排空后新连接才接入"是生命周期，不是变更史）；按设计在仓外解析的外部引用（标准号、设计稿名）；
+   项目口吻的"我们"与决策记录的"备选"节。
+
+## 校准样例
+
+- 正例（放置）：`setTimeout` 上限从 10s 调到 30s 的**理由** → 决策记录；30s 这个**当前值** → 模块 README。
+  反例：把理由写进模块 README，把值抄进根常载文件——两处都会漂移。
+- 正例（去叙事留事实）：`// 原来用 10s，现在 30s` → `// 上限 30s：更长的等待会被网关先断开`。
+  反例：留下"原来/现在"对——读者在 HEAD 上无从验证过去。
+- 反例（已死引用）：`// 见 design §4.7 与 decision 7`——两者都没提交，读者无法解析；改成自足陈述或链接到已提交的决策记录。
+- 正例（保留引用）：`// 见 #1470` 与 `// oxlint-disable-next-line … -- 生成代码不满足该规则` 都必须在场。
+  反例：为了"清理叙事"把 issue 引用和抑制理由一起删掉。
+- 反例（对评审者辩解）：`// 这里不安全，但调用方总是传字符串` → 要么写进类型/守卫，要么写出不变量；辩解不是契约。
+- 正例（运行时新旧态不是变更史）：`// 旧连接排空后，新监听才开始接受` 保留。
+  反例（版本戳）：`// v2 新增的接受顺序` → 改成机制陈述。
+- 正例（实测边界）：`// 嵌套上限 512：measured ≈0.15s` 保留证据词。
+  反例：删掉 `measured` 只剩数字，读者无法判断这是规范还是观测。
+- 反例（手改生成物）：直接编辑生成清单或配对 sidecar——下次重生成即回滚，且掩盖了真源未改。
+- 边界（靠 review）：一句话既像克制又确实丢了"永不"模态——判据是命题是否完整，不是语感。
+
+## 验证与报告
+
+- 跑本项目机械门禁：`<项目文档门禁命令>`（链接、格式、配对、预算、技能元数据；名称按项目替换）、
+  `<项目词数/规模门禁命令>`、`git diff --check`；改了双语或配对页则用 `<项目配对重录命令>` 重录，别手改 sidecar。
+- 复扫：重跑泄漏探针（含隐藏目录），期望**只剩**许可保留类、本技能自身目录与被引用的原始证据；
+  再逐条确认保留下来的每个引用在 HEAD 可解析。
+- 报告：巡检范围（及排除项）、明确改动、**刻意保留**、延后项、实际跑过的命令与结果。
+  不得把未执行的搜索称为穷尽；不得在没有拥有该行为的证据时改动面向用户/模型的措辞。
+PONYGO_EOF
+  fi
+
+  if [ ! -f "$META_DIR/skills-library/pg-test-reliability/SKILL.md" ]; then
+    cat > "$META_DIR/skills-library/pg-test-reliability/SKILL.md" <<'PONYGO_EOF'
+---
+name: pg-test-reliability
+description: 何时用：编写或修改会碰共享主机资源、时钟、进程全局状态、子进程、网络监听、异步清理的测试与夹具时；排查"本地绿、CI 红"的不确定失败时；评审测试隔离性时。选推送前命令请用 pg-delivery-checks，本技能只管隔离与可靠性设计。
+---
+
+# pg-test-reliability —— 并发与清理下的可靠测试
+
+测试要能在项目的**真实 CI 拓扑**下成立，而不只在安静的开发机上单跑成立。
+本技能拥有隔离与可靠性判断；它不替代项目的测试分层策略，也不负责挑推送前的命令清单。
+
+**项目等价命令约定**：文中 `<项目测试命令>`、`<测试运行器并发参数>`、`<项目类型检查命令>`
+按被安装项目的真实入口替换（读任务脚本/包清单/CI 配置确定），替换后写进报告。
+
+## 真相源
+
+- 项目的测试策略文档 —— 单元 / 覆盖率 / 期望输出 / 快照 / 浏览器 / 真实外部依赖各层选谁。
+- 项目的防御模式文档 —— 生命周期、子进程、取消、清理的既有约定。
+- 测试运行器配置与 CI 工作流 —— worker 数、作业切分、共享主机事实（决定叠加层数）。
+- 录制型场景的夹具说明 —— 若项目有"录制/回放"目录，它有自己的摆放与命名规则。
+
+## 步骤
+
+1. **建模执行拓扑**（除非现行配置证明不会，否则假定这些层会重叠）：
+   ① 同一测试文件内的用例；② 不同文件或 worker 进程；③ 同一作业里的独立运行器/门禁进程；
+   ④ 共享同一主机的不同 CI 作业。**进程隔离不隔离主机端口、可预测文件系统路径、外部服务、
+   数据库、socket、被继承的子进程。** 对每个被占用的资源写清：owner、原子分配机制、可观测的就绪信号、
+   已注册的清理、静默完成信号。
+2. **不要用"整包串行"掩盖单个夹具的缺失隔离**：先缩小独占作用域或改资源分配方式。
+   一个串行块保护不了被另一个文件、进程、作业或主机拿走的主机资源。
+3. **原子分配**：用资源 owner 自己的分配器，而不是"先探测可用、稍后再占"。
+   网络夹具绑回环的临时端口（`listen(0)`）并在服务报告"正在监听"后读实际地址——**永不先扫空闲端口再绑**；
+   每用例私有临时根用 `mkdtemp`，不占可预测共享路径；数据库/socket/会话/输出位置给唯一命名空间；
+   必须先不存在才能创建的场景用独占创建；把**稳定录制标识**与**临时传输地址**分开，在夹具内做翻译，
+   而不是逼活资源去迁就录制值。仅作解析输入或期望值的字面路径/URL 不是被占用资源，不要因为"看起来是硬编码"就改。
+4. **容纳进程全局状态**：`process.env`、`cwd`、假时钟、locale 与时区、模块 mock、注册表、console 钩子、
+   `globalThis`、全局请求拦截，都当**独占可变资源**。优先依赖注入或实例级适配器；必须变更时：
+   记录原值是"不存在"还是"存在"、精确还原该状态、立即注册还原、把变更包在最小 `try/finally` 作用域、
+   在"局部 finally 之前也可能失败"时加 `afterEach` 兜底、只拦截夹具真正拥有的那一次调用。
+5. **尊重平台语义**：同一套件常在两类操作系统上跑，平台拥有的值不一定原样回来。
+   把值写回去只有在断言**容忍写回失败**时才安全——用还原证明"指纹会失效"到处成立，
+   用还原证明"记录仍有效"就默认了无损往返（某些文件系统的时间戳精度并不给回原值）；
+   断言依赖还原值时，从**重新读取**取值而不是取记忆值。
+   环境变量名大小写不敏感的平台上，`http_proxy` 与 `HTTP_PROXY` 是两个键但只有一个条目；
+   句柄异步释放的平台上，rename/删除需要按实际竞争程度给**有界重试**；没有 POSIX 权限/信号语义时，
+   用**显式平台跳过并写明理由**，而不是把断言在全平台弱化。优先选"处处成立"的观测方式。
+6. **超时预算对照车道**：用例级超时会**覆盖**运行器默认值而不是让位于它——低于车道预算的值等于
+   擅自缩减 CI 已给的时间，而同一个字面值在默认更小的主机上又是放宽。受进程创建约束的套件取车道预算；
+   更紧的值必须带"为什么更紧"。hook（setup/teardown）预算随用例预算一起抬：清理同样承担竞争压力，
+   只抬用例预算只是把竞争失败挪进 teardown。当**超时本身是被测对象**时，外层等待要远大于被测超时，
+   否则负载而非产品决定谁先触发。
+7. **在状态上同步**：固定 sleep 不是"setup 完成"或"清理结束"的证据。
+   等显式就绪事件、握手、状态迁移、拥有的 promise 或外部可观察条件；用 deferred/屏障把竞态放在确定点，
+   以证明相关操作真的重叠；超时只用于给等待定上界，绝不用来让断言成立；
+   除非调度顺序本身就是被测的产品行为，否则不要断言依赖调度器的顺序；时间是被测对象时注入或伪造时钟，
+   并在结束时恢复真时钟。
+8. **清理到静默**：acquire 之后**立刻**注册清理，使断言失败也释放资源。清理要：停止新的回调/请求、
+   解绑监听、还原全局钩子、终止自己拥有的工作，并**等待**子进程退出、服务关闭、worker 终止等等价完成信号。
+   只调 `abort()`/`close()`/`kill()` 而不等完成信号 = 不完整清理；迟到完成可能污染其他用例时，
+   要证明清理确实阻止了它。
+9. **证明预期回归**：能先看到普通回归在修复前失败；新静态/语料守卫先临时注入被拒样本、观察预期失败；
+   竞态用屏障证明重叠（重复执行不等于竞态测试）；端口/socket/共享路径/子进程等主机资源，
+   在"跨进程隔离正是修复内容"时**并发跑独立测试进程**；夹具自带 deadline 时，先断言没有信号或超时先结束了子进程，
+   再断言退出码，否则被杀的子进程会伪装成"状态不匹配"；验证外部状态、事件、文件、日志、退出与清理，
+   而不是相信组件的自我报告。压力跑是补充，不是替代。
+10. **拒绝掩盖型修复**（不要把下列当根因修复交付）：没搞清在等什么就加超时；加重试；把全部文件串行；
+    吞掉错误或未处理的拒绝；弱化断言；把不稳定行为归一化掉；在清理或断言前加 sleep。
+    例外仅在"外部提供者瞬时失败且已有文档化策略"的边界上保留有界重试；**把预算恢复到车道原本给的值
+    不算掩盖**——但它必须点名在等哪段工作。
+
+## 校准样例
+
+- 正例（原子分配）：`server.listen(0)` 后从 `server.address()` 读端口，并等 `'listening'` 再连。
+  反例（TOCTOU）：先扫一个"好像空闲"的端口写进常量，再在用例里绑定——另一进程可能已占用。
+- 正例（全局态）：保存"原值是否存在"的哨兵，`finally` 里用它决定 delete 还是还原。
+  反例：把 `process.env.X = ''` 当作"未设置"，下游的空串分支因此进入不同逻辑。
+- 正例（平台）：把 mtime 写回只为证明指纹会失效；断言"记录仍有效"时改用重新读取的值。
+  反例：断言写回的 mtime 与记忆值相等——在时间戳精度受限的文件系统上偶发失败。
+- 正例（超时）：用例证明 20ms 的上限会触发，外层等待取秒级车道预算。
+  反例：外层等待 50ms —— 负载决定是"上限先到"还是"外层先超时"，失败信息会指向错误的地方。
+- 正例（清理）：等待子进程 `'exit'` 事件后断言退出码，并先断言无信号/无超时先结束。
+  反例：`kill()` 之后立刻断言退出码——被杀与业务失败无法区分。
+- 反例（掩盖）：CI 偶发失败后把用例重试 3 次、超时从 5s 提到 60s——两个改动都没说出在等什么状态。
+  正例（真正的修复）：发现夹具读的是"文件存在"而不是"内容写完后关闭"，改为等写入方的完成信号。
+- 反例（整包串行）：把整个套件 `sequence` 化以避免端口冲突——另一个 CI 作业仍在同一主机上抢端口。
+- 边界（靠 review）：真的只有外部提供者才会瞬断时，有界重试可否保留——判据是该失败是否属于本项目可控的确定性行为。
+
+## 验证与报告
+
+- 先跑受影响行为的**最窄聚焦回归**：`<项目测试命令> <目标文件或用例名>`，确认选中用例数不为 0。
+- 只有变更确实拥有该风险时，才追加拓扑证据：全局变更→还原证据；生命周期/子进程→静默清理证据；
+  端口/socket/共享路径→并发独立进程证据；新守卫→负样本对照（红相）。
+- 报告里写**确切命令与观察到的结果**（含退出码与关键断言输出）。
+- 术语只允许三档：通过 / 失败 / 待定。不得把重试后通过、被跳过的用例、仍 pending 的 CI 描述成通过。
+- 若结论是"这是既有 flaky，不是本次引入"，必须给出证据链（失败点、竞争资源、复现条件），而不是概率陈述。
+PONYGO_EOF
+  fi
+
+  if [ ! -f "$META_DIR/skills-library/pg-upgrade-guide/SKILL.md" ]; then
+    cat > "$META_DIR/skills-library/pg-upgrade-guide/SKILL.md" <<'PONYGO_EOF'
+---
+name: pg-upgrade-guide
+description: 何时用：某变更破坏了一个仓库外可感知的面（命令行与旗标、配置文件键或其可接受值、持久化的用户数据、SDK 或线协议接口、已发布包的名称与入口），或改动了尚未发布的迁移指引已覆盖的面时，写或更新该迁移指引。内部预稳定接口且同变更已更新所有调用方时不写。
+---
+
+# pg-upgrade-guide —— 破版迁移指引
+
+迁移指引回答一个问题：**正在跑 vT 的人，要改什么才能跑下一个版本。** 它写在引入破坏的**那次变更里**，
+一经识别就写，不延到发布准备阶段。
+
+**项目等价命令与位置约定**：文中 `<项目迁移指引校验命令>`、`<项目配对重录命令>`、`<项目链接检查命令>`
+是占位；推荐的家是 `docs/upgrade-guide/v<version>/<item>/guide.md`，若项目已有迁移/升级文档目录，
+改用项目等价位置并在报告里写明实际路径。
+
+## 真相源
+
+- 项目的文档标准 —— 迁移指引的 kind／骨架／篇幅上限归它，本文不复制具体数值。
+- 引入破坏的那次变更本身（diff、相关决策记录）—— 旧行为、新行为、受影响者只能从这里取。
+- 项目既有的迁移指引与校验脚本 —— 格式门禁与最大篇幅的**唯一口径**。
+- 发布版本的事实来源（根包清单的版本字段或等价物）—— 决定 `<version>` 目录归谁。
+
+## 步骤
+
+1. **判范围：只写仓库外可观察的破坏**。典型清单：命令行与旗标、配置键及其可接受值、
+   持久化的用户数据（日志、数据库、用户目录）、SDK 导出与线协议消息、已发布包的名称与入口。
+   **不写**：预稳定内部接口，且其消费者在同一次变更里全部更新完。持久格式的破坏另有类型确认流程时，
+   指引只写读者要做的动作，并链到那份记录。
+2. **定位置与命名**：`docs/upgrade-guide/v<version>/<item>/guide.md`。
+   `<version>` 取**写指引时**的根版本字段（指引描述"从该发布到下一个发布"）；
+   `<item>` 用被破坏面的 kebab-case 名（如 `profile-flag-rename`）。
+   每个 item 目录只放：正文、对照语言版（若项目有双语）、配对记录；不放索引、不放附件。
+3. **维护规则（不是一次性写作）**：根版本未变期间，当前版本目录描述"从 vT 到当前主干"的增量；
+   后续变更触到某条已覆盖的面 → **同一次变更内更新那条指引**；破坏被回滚 → 删掉指引。
+   版本提升后，旧版本目录冻结；新破坏进新版本目录。**一条指引永不跨两个发布。**
+4. **写 `Change`**：旧行为、新行为、谁受影响（按角色或使用形态点明，不按文件点明）。
+   读者要能一眼判断"这条命中我了吗"。
+5. **写 `Migration`**：有编号的步骤，点名确切文件、键、命令或符号；结尾给出**如何确认迁移成功**
+   （可执行的观测，不是"应该没问题"）。机械重复的步骤收敛成脚本或一条项目命令，由指引调用。
+6. **压篇幅**：超限时的去处是——外链到源码/符号而不是复述代码；把理由移进决策记录；
+   把重复步骤变成脚本。**不**靠删掉失败模式、限制或所有权来瘦身。
+7. **双语与配对**（若项目有此约定）：同一次变更里写对照语言版，按项目配对规则重录，别手改配对记录文件。
+
+## 校准样例
+
+- 正例（该写）：配置键 `profile.default` 改名为 `profile.name`，且旧键不再被接受 →
+  指引写明旧键/新键、逐条迁移步骤、确认命令（读一次解析后的生效配置）。
+  反例（不写）：把某个内部预稳定模块的导出改名，且同一次变更内更新了全部调用方——仓库外无人可见。
+- 正例（受影响的角色写清）：破坏命中自建插件作者而非普通用户 → `Change` 点名"自建插件作者"，
+  并给出插件的等价改法。反例：只写"接口有变"，读者无法自查命中。
+- 反例（把理由塞进 Migration）：在步骤里解释"为什么决定重命名"——理由归决策记录，步骤只留可执行动作。
+- 反例（一条跨两版）：v0.3 目录里的指引同时描述 v0.2→v0.3 与 v0.3→v0.4 的改动——读者无法确定自己处在哪一段。
+- 正例（回滚即删）：破坏在发布前被回滚 → 同一变更内删掉指引，而不是留着当"历史记录"。
+- 正例（确认步骤可执行）：迁移后运行 `<项目配置校验命令>`，观察输出中新键有值、旧键不再出现。
+  反例：只写"确认一切正常"——不可验证的确认等于没有确认。
+- 边界（靠 review）：同一发布里两个相邻破坏是否该合成一条指引——判据是读者能否独立完成迁移；
+  能独立完成就分条，耦合步骤才合一。
+
+## 验证与报告
+
+- 跑项目机械门禁并贴输出：`<项目迁移指引校验命令>`（骨架、字段、篇幅）、
+  `<项目链接检查命令>`、`git diff --check`；有双语则跑 `<项目配对重录命令>` 后确认配对状态干净。
+- 逐条走一遍指引记载的迁移步骤（至少在一个临时/沙箱环境中执行），确认"确认步骤"的观测真的会出现；
+  跑不通的步骤必须修指引，而不是改期望。
+- 报告：指引路径、被破坏的面、受影响角色、确认迁移成功的那条命令、实际跑过的校验命令与结果。
+- 不得把"指引已写"等同于"迁移已验证"：未执行过的步骤要显式标注为未验证，并点名验证 owner。
+PONYGO_EOF
+  fi
+
+  if [ ! -f "$META_DIR/skills-library/pg-gc-agent-notes/SKILL.md" ]; then
+    cat > "$META_DIR/skills-library/pg-gc-agent-notes/SKILL.md" <<'PONYGO_EOF'
+---
+name: pg-gc-agent-notes
+description: 何时用：新增、审计、精简、归档、恢复或评审决策记录（Agent Note / ADR）时；新写一条记录需要检查是否取代了活动旧记录时；需要对已实施记录按"未来决策价值"做汰换、对 rejected 记录判断是否还值得留作护栏时。
+---
+
+# pg-gc-agent-notes —— 决策记录语料回收
+
+目标是**减少活动语料而不擦掉仍能指导工作的历史**。每条都按语义判：字数与年龄只是发现候选的
+线索，永不作为判定标准。也不允许"为凑配额而归档"。
+
+**项目等价命令约定**：文中 `<项目归档封印命令>`、`<项目归档校验命令>`、`<项目文档门禁命令>`、
+`<项目配对重录命令>` 按被安装项目真实入口替换（本框架实例通常为 `.meta/gates/archive-verify.sh` 的
+`seal` / `check` 位置子命令）；替换后写进报告。
+
+## 真相源
+
+- 决策记录规则（`notes/README.md` 之类或 `.agents/notes/AGENTS.md`）—— 路径两轴、骨架、触发规则、判据。
+- 归档区规则（`archived/AGENTS.md` 之类）—— 冻结语义与 manifest/封印契约。
+- 当前代码、配置、派生清单、更新的决策记录、入链 —— 判断某条理由是否仍在拥有或约束什么。
+- 各 lifecycle 的现行骨架要求 —— 归档/migrate 时标题时态必须与目录一致。
+
+## 步骤
+
+1. **读契约再判断**：先读上面四类真相源，尤其"何时该写一条"的创建判据；不要在没读现行骨架时动手改标题。
+2. **新增时必做取代检查**：起草一条新记录，就触发一次**限定范围**的活动语料审计（同决策 / 同机制 /
+   同被否替代）。逐条分类：完全取代 → 同一变更内处理旧条；部分取代 → 两边交叉链接、都保留；
+   独立有用的理由 → 保留；已过时的提案 → 否决；不再能拦住真实误判的 rejected → 删。
+   新记录若吸收了旧条的全部独有命题 → 按合并规则并入，**不把已知命中推给以后的全语料审计**。
+3. **按未来价值分类**（先判生命周期，再判价值）：
+
+   | lifecycle | 处置 |
+   |---|---|
+   | implemented | 只描述小 UI 调整或纯机械改动的整条**删**（并修/删入链）；理由、备选、负向保证、持久/线协议语义、归属边界、安全规则、重新引入条件仍可能指导未来 → **留活动**；实质历史决策已完成且不再指导工作、但历史理由仍值得留存 → **归档** |
+   | proposed | **永不归档**：还有价值就留活动；不再值得推进就以诚实理由改为 rejected 并满足 rejected 骨架 |
+   | rejected | 只作为护栏保留：落选方案仍是**诱人的、有意义的错误**、且本条说清了为何落选 → 留；想法已过时/已被取代/不再可信/拦不住重新争论 → **整条删**（并修/删入链） |
+
+   判**决定**本身而不是它的实现机制：一次机械改名或类型抽取，也可能记录下长期的命名、兼容或归属规则。
+   长度不是判据；"实现完了"也不构成删除理由。小 UI 与纯机械的删除判据**先于**留/归档判断执行。
+4. **归档一个已实施条目**（按项目实际形态；有双语与配对记录时是"正文 + 对照语言 + 配对记录"三件套）：
+   ① 把整组文件从 `implemented/<kind>/` 移到 `archived/<kind>/`（路径里**故意不再有** `implemented`
+   段，保血缘用移动而不是复制+删除）；
+   ② **正文一字不改**，只在 `Status:` 行下方插一行 `Archived: YYYY-MM-DD`，两侧语言用同一个日期；
+   ③ 只为这两处元数据改动机械重录配对哈希；不翻译、不重排、不更新事实、不修区内链接
+   （既有标题标点、空行布局、语言切换文案都保持原样，它们是归档对象不是待改项）；
+   ④ 搜活动散文中指向它的入链：改为指向现行权威，或仅在"刻意引用历史快照"时改指归档路径，否则删掉；
+   **永不**从归档件向外修链；
+   ⑤ 跑 `<项目归档封印命令>`（追加式：先证明既有每个封印仍匹配，再只为新条目追加哈希），
+   随后跑 `<项目归档校验命令>`（只读比对，应 `exit 0`）。
+   封印后：永不编辑、移动、翻译、重排或删除该条目；它仍是合法的入链目标，但只作历史快照，不作现行权威。
+5. **状态轴不许失真**：未实施的记录不进 `implemented/`；标题时态必须与目录一致（提案用将来时标题，
+   迁移到已实施时改成现在时并把验收/风险折进后果节）；多类混装的记录要拆条，别让一条记录同时宣称
+   "已落地"和"仍在设计"。
+
+## 校准样例
+
+- 正例（删）：已实施的"折叠侧栏控件"——小 UI 行为、已关闭、无人会再引用；整条删并清掉入链。
+  反例（当保留理由的是长度）：因为一条记录很长就保留，或因为另一条很短就删——长度不含决策价值。
+- 正例（留）：单一主目录解析器——跨产品的归属规则，未来任何"再加一个家"的提案都要被它约束。
+  正例（留到条件解除）：被丢弃的图像内容块——只有在多模态支持落地时才该重新引入，这个协同条件本身就是理由。
+- 正例（留 rejected 作护栏）：合并某两个包的提案——"合并更省"的诱因仍在，落选理由仍然有效。
+  反例（删 rejected）：某条 rejected 的前提（旧协议/旧 UI）已不存在，留着只是让读者以为问题还活着。
+- 反例（proposed 归档）：把还有价值的活提案扫进归档区——归档区只读，提案就此失活，等于悄悄否决了它。
+- 正例（部分取代）：新记录承接了旧条的核心决定但旧条另有"安全边界"命题 → 交叉链接、都留。
+  反例（多余地重录）：为保留候选数而新建一条重复记录，而不更新既有的 owner。
+- 反例（归档时改正文）：顺势把归档件里的过时事实"修好"——破坏冻结即法律，且封印会立刻报哈希不符。
+- 边界（靠 review）：机械改名类记录——决定本身就是命名规则时留，纯重排无规则时删。
+
+## 验证与报告
+
+- 跑 `<项目归档封印命令>`（如本次有归档）与 `<项目归档校验命令>`，再跑 `<项目文档门禁命令>`、
+  `git diff --check`；有双语配对时跑 `<项目配对重录命令>` 并确认配对状态干净。
+- 报告逐项清点：活动已实施记录 保留 / 删除 / 归档 各几条，rejected 保留与删除各几条，
+  proposed 是否改为 rejected，以及**每一个真实边界个案**的处置与理由。
+- **不要声称归档件的出链有效**：归档校验器故意不检查从冻结区向外的链接；能报的只有"入链已重定向且校验通过"。
+- 不得用"已归档 N 条"当成果指标；报告要给判定依据（哪条命题不再指导工作 / 哪条仍约束未来）。
+PONYGO_EOF
+  fi
+
+    # docs-tier/README.md：缺失时生成与模板仓库 eol 归一后逐字节一致的全量版（内容源收敛为本 heredoc 常量）
   if [ ! -f "$META_DIR/docs-tier/README.md" ]; then
     cat > "$META_DIR/docs-tier/README.md" <<'PONYGO_EOF'
 # docs-tier/ —— 文档分层契约（按 tier 分类法给每个事实安一个家）
@@ -1550,12 +2644,53 @@ projection_write() {
   return 0
 }
 
+# ---------- 残留投影 WARN（sync 侧 P0-1 + status 侧 P1-7：同一实现、同一文案） ----------
+# 命中条件三件同时成立：① 宪法已填槽（模板态不判定——模板态的 BEGIN 块本就是 bootstrap 应投影
+# 的内容）② ai-surface 未开启（off / 值非法 / 未声明）③ 根 AGENTS.md / CLAUDE.md 仍含 BEGIN 哨兵块。
+# 为什么必须喊：投影开关关了但旧哨兵块还在 = AI 工具仍载入陈旧常载命约，声明与事实双面。
+# 为什么也挂在 status（P1-7，2026-11-11）：`retire --level off` 只改声明，若只有 sync 报警，
+# 人得先想起来跑一次 sync 才见告警——等于把「发现残留」依赖在「记得跑 sync」上。
+# 不自动删：静默改用户文件比留下显式指引更糟（清理是人的决定）。
+# 机读面（P1-10）：命中的文件名进 RESID_PROJ_FILES（空格分隔），由 JSON 的 warnings 块消费。
+RESID_PROJ_FILES=""
+warn_residual_projection() {
+  local res_f=""
+  if [ -f "$CONSTITUTION" ] && projection_is_bootstrap; then return 0; fi
+  case "$(ai_surface_state)" in on) return 0 ;; esac   # 声明 on = 投影是承诺，不属残留
+  for res_f in AGENTS.md CLAUDE.md; do
+    [ -f "$res_f" ] || continue
+    grep -qF -- "$SYNC_BEGIN" "$res_f" 2>/dev/null || continue
+    case " ${RESID_PROJ_FILES} " in
+      *" $res_f "*) : ;;
+      *) RESID_PROJ_FILES="${RESID_PROJ_FILES}${RESID_PROJ_FILES:+ }$res_f" ;;
+    esac
+    warn "WARN 残留投影：$res_f 仍含 '$SYNC_BEGIN' … '$SYNC_END' 哨兵块，但投影已关闭（ai-surface 未开启）→ 旧常载命约仍会被 AI 工具载入；请**手工删除**该文件里的这段标记区（或整文件），sync 不会替你删。"
+  done
+  return 0
+}
+
 do_sync() {
-  # AI 适配开关：meta.yaml 里 ai-surface: off 时，不生成 AGENTS.md / CLAUDE.md（禁 AI 团队整体退场）
-  # 开关读取走 ai_surface_state（与 1.9b/2.6 同一真源）：`off` / `OFF` / `"off"` / `off ` 一律跳过投影，
-  # 不得出现「status 说 off、sync 照投影」的双面（归一规则见 ai_surface_state 注释）。
-  if [ "$(ai_surface_state)" = "off" ]; then
-    info "ai-surface: off —— 跳过 AGENTS.md / CLAUDE.md 投影（未生成任何 AI 投影文件）。"
+  # 投影体门控（P0-1，2026-11-11）：两种宪法形态两套语义——
+  #   模板态（宪法含 `TODO:`）→ **永远**投影 bootstrap 引导：onboarding 是填槽的前置，与 AI 开关无关
+  #     （否则新实例连「请先填槽」的指引都拿不到，引导链在第一跳就断）。
+  #   填槽态 → 常载命约属 AI 适配载荷，**默认关**（命约 5）：仅显式 `ai-surface: on` 才投影；
+  #     缺键 / off / 值非法 → 不投影 + 一行说明；若根文件仍留 BEGIN constitution 哨兵块 → WARN 残留
+  #     （不自动删：静默改用户文件比留下显式指引更糟）。
+  # 开关读取走 ai_surface_state（与 1.9b/2.6 同一真源），归一规则见其注释；不得出现
+  # 「status 说 off、sync 照投影」的双面。
+  local as_state=""
+  as_state=$(ai_surface_state)
+  if [ -f "$CONSTITUTION" ] && projection_is_bootstrap; then
+    : # 模板态：bootstrap 引导照常投影（下方 info 会说明形态）
+  elif [ "$as_state" != "on" ]; then
+    case "$as_state" in
+      off)     info "ai-surface: off（显式 opt-out）→ 跳过 AGENTS.md / CLAUDE.md 投影（未生成任何 AI 投影文件；要启用写 ai-surface: on）。" ;;
+      invalid) info "ai-surface 值非法（仅 on|off，按未声明处理）→ 视为关闭，跳过投影（要启用写 ai-surface: on）。" ;;
+      *)       info "ai-surface 未声明 → 视为关闭，跳过投影（要启用写 ai-surface: on）。" ;;
+    esac
+    # 残留投影 WARN：判定与文案全在 warn_residual_projection（status 侧 P1-7 复用同一份，
+    # 禁第二处字面量——两处各写一份文案，迟早一处改了另一处没改）。
+    warn_residual_projection
     return 0
   fi
   [ -f "$CONSTITUTION" ] || die "无 $CONSTITUTION，无法投影"
@@ -1632,6 +2767,7 @@ audit_revisions_frozen() { # 0=PASS 1=WARN 2=SKIPPED；结果写 REV_STATUS/REV_
 
 # 打印 D5 守卫结果（audit 报告段调用；PASS 一行、WARN 逐条、SKIPPED 明说不计入 PASS）
 audit_revisions_report() {
+  # 框架专属轨道：普通实例无 revisions/ 时 not-applicable，静默退场且不查询父仓历史。
   [ -d revisions ] || return 0
   audit_revisions_frozen || true
   case "$REV_STATUS" in
@@ -1835,6 +2971,10 @@ verify_ladder() {
   case "$lv" in
     0|1|2|3|4|5) validated=1 ;;
   esac
+  # P1-1（2026-11-11）：level_verified = 本次真的判过的最高档位（0 = 只判了 L0）。
+  # 与 level_declared 严格分离：声明 L5 也只验到 min(声明,2)，**未验证 ≠ 通过**——
+  # 绝不因声明高而抬高本值（诚实条款；JSON 与人类结论行「已声明 Lx，仅验证到 Ly」同源）。
+  VL_VERIFIED_LEVEL=0
   # 日期合法性探测：GNU date 可用才机械判 1.6 日期，否则降级"靠 review"（P6 诚实条款）
   local DATE_OK=0
   date -d @0 '+%Y' >/dev/null 2>&1 && DATE_OK=1
@@ -1850,6 +2990,16 @@ verify_ladder() {
   [ -f "docs/AGENTS.md" ] || vl_fail "0.5 缺最小文档家 docs/AGENTS.md（文档标准的家，agent 自动加载）→ 跑 'ponygo init' 生成，或手工建（tier 分类 + 写作规则 + slop checklist）"
 
   if [ "$validated" = "1" ]; then
+    # ---- 框架门资产漂移（P0-4，2026-11-11）：不随声明级开关，门资产被改写即判 ----
+    # 判据编号沿用既有门禁段（2.1）：门资产漂移 = 「有实质门禁」的**字节前提**被破坏——
+    # 一个被改写的 adr-verify.sh 仍然「有实质内容」，形状判据照样绿，故必须按字节判。
+    # 语义边界（契约冻结）：**只**对框架不可变门资产（A1/A2/A4/A6/A7）判 FAIL；其余 universe 文件
+    # （README / AGENTS / SKILL）漂移仍是 status/audit 的 WARN 观察项，不改退出码。
+    # 数据来源 = skeleton_drift 的分类结果（唯一漂移口径，禁第二份比对实现）；未判定时
+    # （SKEL_CMP_OK≠1）不判——「没判过」≠「零漂移」（P6 诚实条款）。
+    if [ "${SKEL_CMP_OK:-0}" = "1" ] && [ -n "${SKEL_GATE_DRIFT_LIST:-}" ]; then
+      vl_fail "2.1 框架门资产漂移（可能被替换）：${SKEL_GATE_DRIFT_LIST} → 恢复原字节（git restore <该文件>）或跑 'ponygo upgrade apply' 刷新为内嵌模板副本；门资产是框架不可变资产，实例侧不编辑"
+    fi
 
     # ---- L1（1.1-1.9，声明级 ≥1 时验；决策计数排除集 {README.md, AGENTS.md, *.zh.md}）----
     # 判据范围诚实条款：本命令的机械影子覆盖 1.1–1.9；1.10（必含 ## Alternatives considered）
@@ -1857,6 +3007,7 @@ verify_ladder() {
     if [ "$lv" -ge 1 ]; then
       L1_JUDGED=1
       verified_range="L0-L1"
+      VL_VERIFIED_LEVEL=1   # P1-1：L1 判据本次真的跑过（判成 FAIL 也算判过；「判过」≠「通过」）
       [ -d "$DECISIONS_DIR" ] || vl_fail "1.1 .agents/notes/ 缺失 → 建 notes/ 与四态子目录"
       local n_dec=0
       n_dec=$(count_decisions)
@@ -2047,6 +3198,7 @@ verify_ladder() {
     # ---- L2（2.1-2.4，声明级 ≥2 时验；声明 L2 即视为已承诺钩子）----
     if [ "$lv" -ge 2 ]; then
       verified_range="L0-L2"
+      VL_VERIFIED_LEVEL=2   # P1-1：L2 判据本次真的跑过（同上：判过 ≠ 通过）
       # 2.1 gates/ 有实质文件（README/.gitkeep 占位不计分）
       # W3-B/W6：无有效内容（空白行/# 注释行之外无内容）的文件不算实质门禁
       local g21=0 g21f=""
@@ -2072,11 +3224,31 @@ verify_ladder() {
       [ "$sp23" = "1" ] || vl_fail "2.3 gates/ 无负样本 spec（*.spec.*）→ 配一个证明门会拒绝非法样本的 spec（推荐 *.spec.sh 自检脚本，用 'ponygo audit --run-specs' 验证）"
       local pair23_txt="" pair23_igf="" pair23_instance=0
       while IFS= read -r -d '' pair23_igf; do
+        is_framework_gate "${pair23_igf##*/}" && continue   # 框架门资产不算实例门（名单派生自 UPGRADE_UNIVERSE）
         file_has_content "$pair23_igf" && pair23_instance=$((pair23_instance+1))
       done < <(find "$META_DIR/gates" -maxdepth 1 -type f \
-          \( -name '*.sh' -o -name '*.ps1' \) ! -name '*.spec.*' \
-          ! -name 'adr-verify.sh' ! -name 'archive-verify.sh' ! -name 'ci-verify.sh' -print0 2>/dev/null)
-      if [ "$pair23_instance" -gt 0 ] && ! pair23_txt=$(check_gate_spec_pairing); then vl_fail "2.3 gate_spec_missing 实例门缺同名负样本 spec：${pair23_txt}"; fi
+          \( -name '*.sh' -o -name '*.ps1' \) ! -name '*.spec.*' -print0 2>/dev/null)
+      # 2.3 形状 + 静态配对（P0-2/P0-3，2026-11-11）：三条 AND，缺任一条即 FAIL——
+      #   ① 仓内有 ≥1 个非空 *.spec.*；
+      #   ② L2 至少要有 1 个**实例门**（框架随 init 交付的 A1/A4/A6/A8 不算：那是框架侧证据，每个实例
+      #      都有，计进来 2.3 就永远免判——旧实现 `pair23_instance > 0 &&` 正是这个短路）；
+      #   ③ 每个实例门的同名 spec 含**拒绝断言**（至少一处 `exit [1-9]` / `return [1-9]`）：
+      #      只 `exit 0` 的 spec 跑起来恒绿，证明不了门会拒绝非法样本（零断言 = 零证据）。
+      if [ "$pair23_instance" -eq 0 ]; then
+        vl_fail "2.3 L2 需至少 1 个实例门（当前实例门数 0；框架门 A1/A4/A6/A8 不计实例门）→ 放你的第一个实例门：.meta/gates/<name>.sh（违规输入须非零退出，依据 .meta/gates/README.md）+ 同名负样本 spec <name>.spec.sh（含至少一条 exit 1 拒绝断言）"
+      else
+        if ! pair23_txt=$(check_gate_spec_pairing); then vl_fail "2.3 gate_spec_missing 实例门缺同名负样本 spec：${pair23_txt}"; fi
+        local sp23_rf="" sp23_rbad=0 sp23_rfirst=""
+        # P1-9（2026-11-11）：① 证据判定走 spec_reject_assertion（剔除注释与字符串——`# 违规必须
+        # exit 1`、`echo "… exit 1"` 一律不算证据）；② 扫描面收窄为 paired_spec_files（只查与门配对的
+        # spec，含框架门自带 spec）——纯正向 smoke spec 不导致 2.3 误 FAIL。
+        while IFS= read -r sp23_rf; do
+          [ -n "$sp23_rf" ] || continue
+          spec_reject_assertion "$sp23_rf" && continue
+          sp23_rbad=$((sp23_rbad+1)); [ -z "$sp23_rfirst" ] && sp23_rfirst="$sp23_rf"
+        done < <(paired_spec_files)
+        [ "$sp23_rbad" -eq 0 ] || vl_fail "2.3 spec 无拒绝断言（至少一条违规→非零，且证据须是代码，注释/echo 字符串不算）：${sp23_rbad} 个配对 spec 缺 exit/return [1-9]（如 ${sp23_rfirst}）→ 在 spec 里补一条「违规输入必须被门拒绝」的断言，例：if bash <gate> --bad; then echo 门未拒绝; exit 1; fi"
+      fi
       # 2.4 「本地层已接 ADR 门」六条 AND（§6.6 / §7 F1+F3+F5 / maturity-ladder.md §2.4）：
       #   ① hooksPath 已设 ② 归一化目录可达（F6：~ 展开）③ 该目录内 pre-commit 存在且可执行
       #   ④ 哨兵区间逐字节等于规范块（EOL 归一，F3）⑤ 块起始行 < 首个顶层 exit/exec 行
@@ -2258,7 +3430,7 @@ verify_ladder() {
     fi
   fi
   [ "$verified_range" = "L0-L2" ] && \
-    echo "  注：2.2 与 2.3 均为代理判据——2.2 查 bash -n 语法、2.3 查 *.spec.* 存在性并逐实例门核对同 Stem/同后缀配对（只读命令不执行仓库脚本）。" && \
+    echo "  注：2.2 与 2.3 均为代理判据——2.2 查 bash -n 语法；2.3 查 *.spec.* 存在性 + L2 至少 1 个**实例门**（框架门 A1/A4/A6/A8 不计实例门）+ 逐实例门核对同 Stem/同后缀配对 + 每个 spec 须含拒绝断言（exit/return [1-9]）（只读命令不执行仓库脚本）。" && \
     echo "      执行判据是 opt-in 的 'ponygo audit --run-specs'（跑 *.spec.sh 并断言 exit 0）；" && \
     echo "      真判据的人工补验：'<gate> --help' / 空样本须非零拒绝。"
   return 0
@@ -2279,8 +3451,12 @@ verify_ladder() {
 #   - 超时：有 timeout 时软 25s + KILL 兜底 5s（最坏 30s；无视 TERM 的挂死 spec 会被强杀）；
 #   - 聚合：报告**全部**失败 spec（不只最后一个）。
 # 返回：0 全过 / 1 有失败 / 2 跳过（无 *.spec.sh 或有护栏命中）
+# P0-3 边界（2026-11-11）：**执行判据不是静态判据的替代品**——本函数只回答「spec 跑起来是否 exit 0」，
+# 不判「spec 是否含拒绝断言」（那是 verify_ladder 的 2.3 静态判据）。静态判据 FAIL 时结论行由
+# verify_ladder 的 FAIL 分支输出（VL_FAILS 非空 → 提前 return 1），故「2.3 执行判据 已真跑并通过」
+# 绝不会与「静态 2.3 FAIL」同屏——执行侧不得给静态侧的失败洗白。
 run_gate_specs() {
-  local n=0 bad=0 skip=0 f out rc tail_ outfile spec_depth=0
+  local n=0 bad=0 skip=0 f out rc tail_ outfile spec_depth=0 allout=""
   # A：结论行要能说清「N 真跑通过 / M 未验证（SKIPPED）」——计数用文件级变量（verify_ladder 读）
   SPEC_RUN_PASS=0; SPEC_RUN_SKIP=0
   if [ "${PONYGO_IN_SPEC:-0}" = "1" ]; then
@@ -2332,6 +3508,7 @@ run_gate_specs() {
         PONYGO_AUDIT_SPEC_DEPTH=$spec_depth bash "$f" >"$outfile" 2>&1 3>&-; rc=$?
       fi
       tail_=$(tail -n 3 "$outfile" 2>/dev/null | tr '\n' ' ')
+      allout=$(cat "$outfile" 2>/dev/null)
     else
       if command -v timeout >/dev/null 2>&1; then
         out=$(PONYGO_AUDIT_SPEC_DEPTH=$spec_depth timeout -k 5 25 bash "$f" 2>&1 3>&-); rc=$?
@@ -2339,15 +3516,26 @@ run_gate_specs() {
         out=$(PONYGO_AUDIT_SPEC_DEPTH=$spec_depth bash "$f" 2>&1 3>&-); rc=$?
       fi
       tail_=$(printf '%s\n' "$out" | tail -n 3 | tr '\n' ' ')
+      allout="$out"
     fi
     if [ "$rc" -ne 0 ]; then
       bad=$((bad+1))
       printf '  [FAIL] 2.3 spec 自检失败：%s（exit %s；输出尾部：%s）\n' \
         "$f" "$rc" "${tail_:-（无输出）}"
-    elif { [ -n "$outfile" ] && grep -q 'SKIPPED' "$outfile" 2>/dev/null; } \
-      || { [ -z "$outfile" ] && printf '%s' "$out" | grep -q 'SKIPPED'; }; then
+    elif [ -z "$(printf '%s' "${allout:-}" | tr -d '[:space:]')" ]; then
+      # W7（零断言不得记 [ok]）：spec 里只有 `exit 0`（或只 echo 空行）也是 exit 0、输出为空——
+      # 它没有执行任何断言，却会被洗成「[ok] 全部自检通过」。空输出 = 未验证 → 判 FAIL。
+      bad=$((bad+1))
+      printf '  [FAIL] 2.3 spec 自检失败：%s（exit 0 但输出为空——零输出 = 零断言，证明不了任何拒绝语义，不得计为通过）\n' "$f"
+    elif printf '%s\n' "${allout:-}" | grep -qE '(^|[^A-Za-z0-9_-])SKIPPED([^A-Za-z0-9_-]|$)'; then
       # 契约：spec 自报 SKIPPED（如 A2 命中 PONYGO_IN_SPEC=1 的递归护栏）= **不计入 PASS**。
       # 把「自报跳过」当「通过」就是假绿——门没跑，就没证明它还会拒绝非法样本。
+      # 匹配口径（**独立词**，不是裸子串）：`SKIPPED` 的前一个字符与后一个字符都不属于 [A-Za-z0-9_-]，
+      # 或贴着行首/行尾。于是 `SKIPPED（…）` / `SKIPPED: …` / `SKIPPED，` / `（SKIPPED）` 都算自报跳过，
+      # 而 `unskipped` / `NOT-SKIPPED-RUN` / `SKIPPEDNESS` 不算（后者不是「门没跑」的自报，是普通正文）。
+      # 为什么两端都要放宽到「非标识符字符」而不写死空白：spec 的自报跳过几乎总是后接全角括号或冒号
+      # （`SKIPPED（本次未真正跑门）`），只认空白会把真实的「未验证」洗成 [ok]（f2_skipped_exit3 F2-3/F2-9）。
+      # 这才是原判据的病根：裸子串 `SKIPPED` 误报、只认空白的词界漏报，两错都让「门没跑」被计成 PASS。
       skip=$((skip+1))
       printf '  [skipped] 2.3 spec 自检：%s 自报 SKIPPED（不计入 PASS）\n' "$f"
     else
@@ -2385,6 +3573,8 @@ run_gate_specs() {
 # ---------- 「交付即接线」门禁资产（plan-freeze §2/§6.1/§6.3） ----------
 # 双写纪律（§2）：下列 heredoc 与仓库模板文件 EOL 归一后**逐字节一致**：
 #   A1 .meta/gates/adr-verify.sh / A2 .meta/gates/adr-verify.spec.sh / A4 .meta/gates/ci-verify.sh
+#   A6 .meta/gates/archive-verify.sh / A7 .meta/gates/archive-verify.spec.sh
+#   A8 .meta/gates/no-residue.sh / A9 .meta/gates/no-residue.spec.sh
 #   A3 .githooks/pre-commit（落点由 core.hooksPath 决定，见 ensure_gate_wiring）
 #   A5 .github/workflows/ponygo-governance.yml（仅检出厂 github 证据时才落地，§6.3）
 # 只写**缺失**项；A1/A2/A4 例外——它们是框架不可变资产，内容与内置规范不一致时
@@ -3185,11 +4375,17 @@ PONYGO_EOF
 #   - 本地也能直接 `bash .meta/gates/ci-verify.sh` 复现远端结论（不用开 PR 才知道）。
 # 平台适配器是薄壳（A5 不进宇宙表），门禁本体在这里（A4 恒生成、进宇宙表）。
 #
-# 三段：
-#   1) 全树 ADR 格式（判定真源 verify-note.sh 无参模式：1.1–1.10，含 1.9 文档有家与 1.10 备选节）
+# 四段：
+#   1) 全树 ADR 格式（判定真源 verify-note.sh 无参模式：1.1–1.11，含 1.9 文档有家、1.10 备选节
+#      与 1.11 负空间形状 / 重引入条件）
 #   2) 暂存区门的负样本 spec（证明 A1 会拒绝非法样本——门禁自证，非产品检查）
 #   3) 归档 SHA-256 封印（A6 check + A7 负样本自检）——缺 A6/A7 时 **fail-closed**（exit 1），
 #      不静默跳过：全树兜底门缺件 = 封印无人看守，按「未验证不得计为 PASS」处理。
+#   4) 引用残留（A8 no-residue.sh + A9 自检）——**缺件不失败**（A8/A9 属实例登记类门：清单不存在
+#      = 无可判定项，门自己打印跳过并 exit 0），但文件在场就按真实退出码判，不得「在场但跳过」。
+#
+# 参数：本脚本零旗标（runner 直接调）；**未知参数一律 exit 1**（fail-closed）——静默忽略参数会让
+#       `bash ci-verify.sh --strict` 这类误用变成「跑了、全绿」的假证据。`-h|--help` 打印用法后 exit 0。
 #
 # 约定：本目录脚本一律 `chmod +x`（非可执行钩子会被 git 静默忽略，判据会假达标）。
 # 只读：不写仓库任何文件。
@@ -3202,15 +4398,27 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd) || {
 }
 cd "$ROOT" || exit 1
 
+for a in "$@"; do
+  case "$a" in
+    -h|--help)
+      printf '%s\n' '用法：bash .meta/gates/ci-verify.sh    （零旗标；四段：全树 ADR 格式 / 暂存区门自检 / 归档封印 / 引用残留）' \
+        '退出码：0 全部通过；1 任一段 FAIL 或参数错误。'
+      exit 0 ;;
+    *)
+      printf 'ci-verify: FAIL 未知参数：%s（本脚本零旗标；--help 看用法）\n' "$a" >&2
+      exit 1 ;;
+  esac
+done
+
 fail=0
 
-echo "== [1/3] 全树 ADR 格式（verify-note.sh，1.1–1.10）=="
+echo "== [1/4] 全树 ADR 格式（verify-note.sh，1.1–1.11）=="
 if ! bash .agents/skills/write-adr/verify-note.sh; then
   echo "ci-verify: FAIL 全树 ADR 格式门未通过 → 逐项修 FAIL 后重跑" >&2
   fail=1
 fi
 
-echo "== [2/3] 暂存区门负样本 spec（adr-verify.spec.sh）=="
+echo "== [2/4] 暂存区门负样本 spec（adr-verify.spec.sh）=="
 # 分开捕获真实退出码与输出：SKIPPED + 0 同样是未验证，不得被 ! 改写后洗成通过。
 spec_out=$(bash .meta/gates/adr-verify.spec.sh 2>&1); spec_rc=$?
 printf '%s\n' "$spec_out"
@@ -3219,7 +4427,7 @@ if [ "$spec_rc" -ne 0 ] || ! printf '%s\n' "$spec_out" | grep -qF '[adr-verify.s
   fail=1
 fi
 
-echo "== [3/3] 归档封印（archive-verify.sh check + archive-verify.spec.sh）=="
+echo "== [3/4] 归档封印（archive-verify.sh check + archive-verify.spec.sh）=="
 if [ ! -f .meta/gates/archive-verify.sh ]; then
   echo "ci-verify: FAIL 第 3 段缺资产 .meta/gates/archive-verify.sh（fail-closed：缺件不得静默跳过）→ 跑 'ponygo init --repair-skeleton' 补齐" >&2
   fail=1
@@ -3239,11 +4447,33 @@ else
   fi
 fi
 
+echo "== [4/4] 引用残留（no-residue.sh + no-residue.spec.sh）=="
+# 缺件只提示、不失败：A8/A9 属「实例登记」类门（登记什么被删名字由人写清单），
+# 与 A6/A7 的「封印无人看守即安全洞」不同类——没登记不等于有残留。
+if [ -f .meta/gates/no-residue.sh ]; then
+  if ! bash .meta/gates/no-residue.sh; then
+    echo "ci-verify: FAIL 引用残留门未通过（清单登记的被删名字仍能被检索到）→ 清残留，或确认无需再守后移除该条登记" >&2
+    fail=1
+  fi
+else
+  echo "ci-verify: 提示 第 4 段缺资产 .meta/gates/no-residue.sh（不失败：A8 属实例登记类门；需要时跑 'ponygo init --repair-skeleton' 补齐）"
+fi
+if [ -f .meta/gates/no-residue.spec.sh ]; then
+  nr_spec_out=$(bash .meta/gates/no-residue.spec.sh 2>&1); nr_spec_rc=$?
+  printf '%s\n' "$nr_spec_out"
+  if [ "$nr_spec_rc" -ne 0 ] || ! printf '%s\n' "$nr_spec_out" | grep -qF '== no-residue.spec：通过'; then
+    echo "ci-verify: FAIL 残留门自检未通过（exit $nr_spec_rc；缺 A9 精确完成标记即未验证）" >&2
+    fail=1
+  fi
+else
+  echo "ci-verify: 提示 第 4 段缺资产 .meta/gates/no-residue.spec.sh（不失败：A8/A9 属实例登记类门；需要时跑 'ponygo init --repair-skeleton' 补齐）"
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "ci-verify: 未通过（见上方 FAIL）" >&2
   exit 1
 fi
-echo "ci-verify: 通过（三段：全树 ADR 格式 + 暂存区门自检 + 归档封印）"
+echo "ci-verify: 通过（四段：全树 ADR 格式 + 暂存区门自检 + 归档封印 + 引用残留）"
 exit 0
 PONYGO_EOF
   # 已有但丢执行位（如经 Windows/zip 转手）→ 补回；A1/A2/A4 是框架不可变资产，改权限不改字节
@@ -3899,16 +5129,404 @@ printf '== %s：未通过（见上方 [fail] 行）==\n' "$SPEC"
 exit 1
 PONYGO_EOF
   [ -x "$META_DIR/gates/archive-verify.spec.sh" ] || chmod +x "$META_DIR/gates/archive-verify.spec.sh" 2>/dev/null || true
+  gate_asset_put "$META_DIR/gates/no-residue.sh" 755 "A8 no-residue.sh" <<'PONYGO_EOF'
+#!/usr/bin/env bash
+# ============================================================
+# no-residue.sh —— 引用残留门（门禁资产 A8）
+#
+# 用途：删符号/删文件/删目录之后，用「被删名字的字面串」扫全树，证明「搜索零残留」
+#       （常载命约 3：删代码前先搜消费者，验收 = 搜索零残留 + 门禁照常绿）。
+#       门禁只做**判定**；登记什么名字、范围多宽，由人写在清单里。
+#
+# 用法：
+#   bash .meta/gates/no-residue.sh                # 默认清单 .meta/gates/no-residue.manifest
+#   bash .meta/gates/no-residue.sh <清单路径>     # 指定清单（CI / 夹具 / 多清单）
+#   bash .meta/gates/no-residue.sh --help         # 打印本用法
+#
+# 清单格式（UTF-8，每行一条，TAB 分隔）：
+#   <被删名字的字面串><TAB><检索范围>
+#   - 字面串 = 固定字符串（**不做**正则解释）；首个 TAB 之前为字面串，其后整段为范围；
+#   - 范围 = 相对仓库根的路径（目录或文件）；`.` = 全树；范围不存在 = 该条无可检索面（不判）；
+#   - 空行与 `#` 开头的行忽略；非空且无 TAB 的行 = 格式非法 → exit 1（fail-closed）。
+#
+# 退出语义：
+#   0  零残留；或「无可判定项」——清单不存在 / 清单为空（含只有注释）→ 打印「跳过」，不判定；
+#   1  命中残留（逐条列出「字面串 ← 命中文件」）；清单格式非法；参数错误（未知参数 / 多余参数）。
+#
+# 判定口径（固定字符串，字面匹配）：
+#   rg --fixed-strings --hidden --no-messages -l -e <字面串> -- <范围>
+#   （`--hidden` + 只排除 .git：检索面 = 当前树的**全部**文件，含 .meta/ .agents/ .github/ 等
+#     隐藏目录；rg 默认跳过隐藏项，漏了它就是假绿——删掉的符号若只在隐藏目录被引用，门会说"零残留"）
+#   本框架的运行时承诺只有 bash，rg 不是保证存在的依赖 → 无 rg 时退化为
+#   grep -rIlF -e <字面串> -- <范围>（同样字面匹配、列文件名、抑制杂音），并在 stderr 声明退化，
+#   不假装「有 rg 的精确度」。两者都：排除 .git/；排除清单文件自身（清单里写着字面串，否则自命中）。
+# 已知边界（诚实条款）：rg 默认尊重 .gitignore/.ignore，grep 退化路径不尊重——被 ignore 的文件在
+#   退化路径下仍会被检索（更严，不放宽）；跨行字符串（一个字面串被换行拆开）两边都查不到。
+#   隐藏目录/文件的检索面**两条分支一致**：rg 分支靠 `--hidden` 纳入（否则 .meta/ .agents/ .github/
+#   会被整片跳过 = 假绿），grep 分支的 `grep -r` 本来就含隐藏项；两边都只排除 .git/。
+# 测试接缝：NO_RESIDUE_FORCE_GREP=1 强制走退化路径（仅 A9 自检用，正常运行不需要设它）。
+#
+# 约定：本目录脚本一律 `chmod +x`（非可执行门禁会被静默跳过，判据会假达标）。
+# 只读：不写仓库任何文件。
+# ============================================================
+set -u
+
+usage() {
+  printf '%s\n' \
+    '用法：bash .meta/gates/no-residue.sh [清单路径]' \
+    '  （无参）      默认清单 = .meta/gates/no-residue.manifest' \
+    '  <清单路径>    指定清单文件' \
+    '  --help        打印用法' \
+    '' \
+    '清单格式（每行一条，TAB 分隔）：<被删名字的字面串><TAB><检索范围>' \
+    '退出码：0 零残留/无可判定项；1 命中残留、清单格式非法或参数错误。'
 }
 
-# A3 全量钩子（仅当目标位置**不存在**时新建）：marker 行 + 哨兵块 + 非注释调用行（§6.5）
-# F4：写入失败不再静默——chmod 的裸 `Permission denied` 会变成失败清单里的一条可执行项。
-write_gate_hook() { # <hook 文件绝对/相对路径>
-  [ -f "$1" ] && return 0
-  if ! mkdir -p "$(dirname "$1")"; then
-    gate_write_fail "$1" "写入失败（父目录不可写，mkdir 失败）——钩子未能生成"; return 1
+ROOT=$(cd "$(dirname "$0")/../.." && pwd) || {
+  printf 'no-residue: 无法解析仓库根\n' >&2
+  exit 1
+}
+cd "$ROOT" || exit 1
+
+MANIFEST=".meta/gates/no-residue.manifest"
+seen_pos=0
+for a in "$@"; do
+  case "$a" in
+    -h|--help) usage; exit 0 ;;
+    -*) printf 'no-residue: 未知参数：%s（用法见 --help）\n' "$a" >&2; exit 1 ;;
+    *)
+      if [ "$seen_pos" -eq 1 ]; then
+        printf 'no-residue: 多余参数：%s（只接受一个清单路径）\n' "$a" >&2
+        exit 1
+      fi
+      MANIFEST="$a"; seen_pos=1 ;;
+  esac
+done
+
+if [ ! -f "$MANIFEST" ]; then
+  printf 'no-residue: 跳过（清单不存在：%s —— 无被删名字登记 = 无可判定项）\n' "$MANIFEST"
+  exit 0
+fi
+
+# 清单路径归一为「相对仓库根」，用于把清单自身从命中里剔掉（绝对路径 → 相对；仓外 → 原样，不命中）
+MANIFEST_REL="$MANIFEST"
+case "$MANIFEST_REL" in
+  "$ROOT"/*) MANIFEST_REL="${MANIFEST_REL#"$ROOT"/}" ;;
+esac
+MANIFEST_REL="${MANIFEST_REL#./}"
+
+HAS_RG=0
+command -v rg >/dev/null 2>&1 && HAS_RG=1
+# 测试接缝（A9 用）：强制走 grep 退化路径，证明「有 rg / 无 rg」两条检索路径语义一致
+# （否则退化路径只在没装 rg 的机器上被跑过，等于没看守）。
+[ "${NO_RESIDUE_FORCE_GREP:-0}" = "1" ] && HAS_RG=0
+
+n=0 hits=0 bad=0 lineno=0 noted_fallback=0 pat="" scope="" found="" line=""
+while IFS= read -r line || [ -n "$line" ]; do
+  lineno=$((lineno+1))
+  line="${line%$'\r'}"
+  case "$line" in ''|'#'*) continue ;; esac
+  case "$line" in
+    *$'\t'*) pat="${line%%$'\t'*}"; scope="${line#*$'\t'}" ;;
+    *)
+      printf 'no-residue: 清单第 %s 行格式非法（应为 <字面串>TAB<范围>）：%s\n' "$lineno" "$line" >&2
+      bad=1; continue ;;
+  esac
+  if [ -z "$pat" ]; then
+    printf 'no-residue: 清单第 %s 行字面串为空（空串会命中一切）→ 拒绝\n' "$lineno" >&2
+    bad=1; continue
   fi
-  if ! write_atomic "$1" 755 <<'PONYGO_EOF'
+  [ -n "$scope" ] || scope="."
+  n=$((n+1))
+  if [ "$HAS_RG" = "0" ] && [ "$noted_fallback" = "0" ]; then
+    printf 'no-residue: 注：rg 不可用 → 退化 grep -F（字面匹配语义等价；不尊重 .gitignore，更严）\n' >&2
+    noted_fallback=1
+  fi
+  found=""
+  if [ "$HAS_RG" = "1" ]; then
+    # `--hidden` 必须有：rg 默认跳过隐藏文件/目录，范围 `.` 时 `.meta/`、`.agents/`、`.github/`
+    # 会整个不被检索 → 「删掉的符号只在隐藏目录被引用」时门报零残留 = 假绿（真机复现过）。
+    # `.git/` 不是检索面（历史不是当前树），显式排除；清单自身也排除（否则清单里的字面串自命中）。
+    found=$(rg --fixed-strings --hidden --no-messages -l \
+      --glob '!.git' --glob '!.git/**' --glob "!$MANIFEST_REL" \
+      -e "$pat" -- "$scope" 2>/dev/null || true)
+  else
+    found=$(grep -rIlF --exclude-dir=.git -e "$pat" -- "$scope" 2>/dev/null || true)
+  fi
+  # 路径归一（去掉 rg 的 ./ 前缀）后剔除清单自身：清单里登记的字面串不该被自己命中
+  if [ -n "$found" ]; then
+    found=$(printf '%s\n' "$found" | sed 's|^\./||' | grep -vxF -e "$MANIFEST_REL" || true)
+  fi
+  if [ -n "$found" ]; then
+    hits=$((hits+1))
+    printf 'no-residue: 残留命中「%s」← %s\n' "$pat" "$(printf '%s' "$found" | tr '\n' ' ')"
+  fi
+done < "$MANIFEST"
+
+if [ "$bad" -ne 0 ]; then
+  printf 'no-residue: FAIL 清单格式非法（见上）——宁拒不猜，修好清单再跑\n' >&2
+  exit 1
+fi
+if [ "$n" -eq 0 ]; then
+  printf 'no-residue: 跳过（清单为空/只有注释：%s —— 无可判定项）\n' "$MANIFEST"
+  exit 0
+fi
+if [ "$hits" -ne 0 ]; then
+  printf 'no-residue: FAIL %s/%s 条登记仍有残留（删干净 = 搜索零残留；修法：清掉残留，或确认无需再守后移除该条登记）\n' \
+    "$hits" "$n" >&2
+  exit 1
+fi
+printf 'no-residue: 通过（%s 条登记的被删名字全树零残留）\n' "$n"
+exit 0
+PONYGO_EOF
+  # 已有但丢执行位（如经 Windows/zip 转手）→ 补回；A8/A9 是框架不可变资产，改权限不改字节
+  [ -x "$META_DIR/gates/no-residue.sh" ] || chmod +x "$META_DIR/gates/no-residue.sh" 2>/dev/null || true
+  gate_asset_put "$META_DIR/gates/no-residue.spec.sh" 755 "A9 no-residue.spec.sh" <<'PONYGO_EOF'
+#!/usr/bin/env bash
+# ============================================================
+# no-residue.spec.sh —— A8（no-residue.sh）的负样本执行判据（门禁资产 A9）
+#
+# 为什么需要它：一个「永远 exit 0」的残留门等于没有门。本 spec 用 mktemp -d 造**独立**样本仓，
+# 把被测门禁复制进去（门按自身所在位置解析仓库根，故不看 cwd、不从 PATH 取同名脚本），
+# 逐类断言「该拒的必拒、该放行的必放行」：
+#   ① 命中残留 → 必拒，且必须点名命中文件
+#   ② 零残留 → 必放行（门不得一律拒绝 = 正控制）
+#   ③ 空清单 → 放行并打印「跳过」（无可判定项，不是通过）
+#   ④ 清单缺文件 → 放行并打印「跳过」（缺登记 ≠ 有残留）
+#   ⑤ 未知参数 / 多余参数 → 必拒（fail-closed，不静默忽略）
+#   ⑥ 正则元字符按**字面**匹配（`a.b*c[d]` 命中原文；`a.b` 不命中 `axb`）
+#   ⑦ 范围生效（scope 外的命中不计分）
+#   ⑧ 清单格式非法（非空行无 TAB）→ 必拒
+#   ⑨ 清单登记的字面串不得被清单文件自身命中
+#   ⑩ grep 退化路径（NO_RESIDUE_FORCE_GREP=1）与 rg 路径语义一致（命中/放行两个方向）
+#   ⑪ 隐藏目录（.agents/ .meta/ .github/ …）同样在检索面内——两条检索路径都必须命中
+#      （防「rg 默认跳过隐藏项 → 范围 . 时 .meta/ 与 .agents/ 整片不检索」的假绿回归）
+#
+# 用法：bash .meta/gates/no-residue.spec.sh
+# 退出码：0 = 全部样本符合预期；1 = 有样本不符预期（逐项 [FAIL]）。
+# 依赖：bash + coreutils/mktemp + grep（rg 可选——缺 rg 时 A8 走 grep 退化路径）。
+# 只读：只在 mktemp 目录里造样本，不写仓库任何文件。
+# ============================================================
+set -u
+
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd) || {
+  printf 'no-residue.spec: 无法解析脚本目录\n' >&2
+  exit 1
+}
+GATE="$HERE/no-residue.sh"
+[ -f "$GATE" ] || {
+  printf 'no-residue.spec: FAIL 缺被测门禁 %s（A9 失去被测对象 → 判未验证）\n' "$GATE" >&2
+  exit 1
+}
+
+FAILN=0
+ok()  { printf '  [ok]   %s\n' "$*"; }
+bad() { printf '  [FAIL] %s\n' "$*" >&2; FAILN=$((FAILN+1)); }
+
+TMP=$(mktemp -d 2>/dev/null) || { printf 'no-residue.spec: FAIL 无法创建样本目录\n' >&2; exit 1; }
+trap 'rm -rf "$TMP"' EXIT
+
+CASE=0
+new_case() { # → 打印新建的样本仓根（内含可执行的门禁副本）
+  # 目录名用 mktemp 生成：本函数在 $( ) 子 shell 里跑，变量计数器不会回传，靠 mktemp 保证每次唯一。
+  local d=""
+  CASE=$((CASE+1))
+  d=$(mktemp -d "$TMP/case.XXXXXX" 2>/dev/null) || return 1
+  mkdir -p "$d/.meta/gates" || return 1
+  cp "$GATE" "$d/.meta/gates/no-residue.sh" || return 1
+  chmod +x "$d/.meta/gates/no-residue.sh" 2>/dev/null || true
+  printf '%s' "$d"
+}
+
+OUT=""
+RC=0
+run_gate() { # <样本仓根> [门禁参数…]
+  local d="$1"; shift
+  if [ "$#" -gt 0 ]; then
+    OUT=$( cd "$d" && bash .meta/gates/no-residue.sh "$@" 2>&1 ); RC=$?
+  else
+    OUT=$( cd "$d" && bash .meta/gates/no-residue.sh 2>&1 ); RC=$?
+  fi
+}
+run_gate_grep() { # <样本仓根>（强制 grep 退化路径）
+  local d="$1"
+  OUT=$( cd "$d" && NO_RESIDUE_FORCE_GREP=1 bash .meta/gates/no-residue.sh 2>&1 ); RC=$?
+}
+tail_of() { printf '%s' "$OUT" | tail -n 2 | tr '\n' ' '; }
+assert_rc() { # <期望 rc> <描述>
+  if [ "$RC" -eq "$1" ]; then ok "$2（exit $RC）"
+  else bad "$2（期望 exit $1，实得 $RC；输出尾部：$(tail_of)）"; fi
+}
+assert_out_has() { # <子串> <描述>
+  if printf '%s\n' "$OUT" | grep -qF -- "$1"; then ok "$2"
+  else bad "$2（输出未含「$1」；输出尾部：$(tail_of)）"; fi
+}
+manifest_of() { printf '%s/.meta/gates/no-residue.manifest' "$1"; }
+
+D=""
+
+# ---------- ① 命中残留 → 必拒 ----------
+D=$(new_case) || { bad "A9① 样本仓创建失败"; D=""; }
+if [ -n "$D" ]; then
+  mkdir -p "$D/src"
+  printf 'const gone = "PonyGoResidueProbe42";\n' > "$D/src/app.js"
+  printf 'PonyGoResidueProbe42\t.\n' > "$(manifest_of "$D")"
+  run_gate "$D"
+  assert_rc 1 "A9① 命中残留必须拒"
+  assert_out_has "src/app.js" "A9① 命中必须点名命中文件"
+fi
+
+# ---------- ② 零残留 → 必放行（正控制）----------
+D=$(new_case) || bad "A9② 样本仓创建失败"
+if [ -n "$D" ]; then
+  mkdir -p "$D/src"
+  printf 'clean\n' > "$D/src/app.js"
+  printf 'PonyGoNeverThere99\t.\n' > "$(manifest_of "$D")"
+  run_gate "$D"
+  assert_rc 0 "A9② 零残留必须放行（门不得一律拒绝）"
+fi
+
+# ---------- ③ 空清单 / 只有注释 → 放行 + 打印跳过 ----------
+D=$(new_case) || bad "A9③ 样本仓创建失败"
+if [ -n "$D" ]; then
+  : > "$(manifest_of "$D")"
+  run_gate "$D"
+  assert_rc 0 "A9③ 空清单放行（无可判定项）"
+  assert_out_has "跳过" "A9③ 空清单必须打印「跳过」（不得冒充通过）"
+  printf '# 只有注释，没有登记\n# PonyGoResidueProbe42\n' > "$(manifest_of "$D")"
+  run_gate "$D"
+  assert_rc 0 "A9③ 只有注释的清单放行"
+fi
+
+# ---------- ④ 清单缺文件 → 放行 + 打印跳过 ----------
+D=$(new_case) || bad "A9④ 样本仓创建失败"
+if [ -n "$D" ]; then
+  run_gate "$D"
+  assert_rc 0 "A9④ 清单缺文件放行（缺登记 ≠ 有残留）"
+  assert_out_has "跳过" "A9④ 清单缺文件必须打印「跳过」"
+fi
+
+# ---------- ⑤ 未知参数 / 多余参数 → 必拒 ----------
+D=$(new_case) || bad "A9⑤ 样本仓创建失败"
+if [ -n "$D" ]; then
+  run_gate "$D" --bogus
+  assert_rc 1 "A9⑤ 未知参数必须拒（fail-closed）"
+  assert_out_has "未知参数" "A9⑤ 未知参数必须点名参数"
+  : > "$(manifest_of "$D")"
+  run_gate "$D" a.manifest b.manifest
+  assert_rc 1 "A9⑤ 多余参数必须拒（不静默忽略后照常判定）"
+fi
+
+# ---------- ⑥ 正则元字符按字面匹配 ----------
+D=$(new_case) || bad "A9⑥ 样本仓创建失败"
+if [ -n "$D" ]; then
+  mkdir -p "$D/src"
+  printf 'const re = "a.b*c[d]";\n' > "$D/src/rx.js"
+  printf 'a.b*c[d]\t.\n' > "$(manifest_of "$D")"
+  run_gate "$D"
+  assert_rc 1 "A9⑥ 含正则元字符的字面串命中必须拒（不做正则解释）"
+  D=$(new_case) || bad "A9⑥ 反向样本创建失败"
+  if [ -n "$D" ]; then
+    mkdir -p "$D/src"
+    printf 'axb\n' > "$D/src/x.js"
+    printf 'a.b\t.\n' > "$(manifest_of "$D")"
+    run_gate "$D"
+    assert_rc 0 "A9⑥ 正则等价但字面不存在 → 必须放行（字面口径）"
+  fi
+fi
+
+# ---------- ⑦ 范围（scope）生效 ----------
+D=$(new_case) || bad "A9⑦ 样本仓创建失败"
+if [ -n "$D" ]; then
+  mkdir -p "$D/src" "$D/docs"
+  printf 'PonyGoScopeProbe7\n' > "$D/docs/note.md"
+  printf 'PonyGoScopeProbe7\tsrc\n' > "$(manifest_of "$D")"
+  run_gate "$D"
+  assert_rc 0 "A9⑦ 范围外命中不计（scope 生效）"
+  printf 'PonyGoScopeProbe7\tdocs\n' > "$(manifest_of "$D")"
+  run_gate "$D"
+  assert_rc 1 "A9⑦ 范围内命中必须拒（正控制）"
+fi
+
+# ---------- ⑧ 清单格式非法 → 必拒 ----------
+D=$(new_case) || bad "A9⑧ 样本仓创建失败"
+if [ -n "$D" ]; then
+  printf 'no-tab-line\n' > "$(manifest_of "$D")"
+  run_gate "$D"
+  assert_rc 1 "A9⑧ 清单行缺 TAB → 必拒（宁拒不猜）"
+  assert_out_has "格式非法" "A9⑧ 必须报「格式非法」并指明行号口径"
+fi
+
+# ---------- ⑨ 清单自身不得被自己命中 ----------
+D=$(new_case) || bad "A9⑨ 样本仓创建失败"
+if [ -n "$D" ]; then
+  mkdir -p "$D/src"
+  printf 'untouched\n' > "$D/src/a.js"
+  # 字面串只出现在清单文件自身里 → 全树检索不得把它算成残留
+  printf 'PonyGoManifestOnlyProbe5\t.\n' > "$(manifest_of "$D")"
+  run_gate "$D"
+  assert_rc 0 "A9⑨ 清单文件自身不构成残留命中"
+fi
+
+# ---------- ⑩ grep 退化路径与 rg 路径语义一致 ----------
+D=$(new_case) || bad "A9⑩ 样本仓创建失败"
+if [ -n "$D" ]; then
+  mkdir -p "$D/src"
+  printf 'const gone = "PonyGoResidueProbe42";\n' > "$D/src/app.js"
+  printf 'PonyGoResidueProbe42\t.\n' > "$(manifest_of "$D")"
+  run_gate_grep "$D"
+  assert_rc 1 "A9⑩ 退化 grep 路径：命中同样必须拒"
+  assert_out_has "src/app.js" "A9⑩ 退化路径同样必须点名命中文件"
+  D=$(new_case) || bad "A9⑩ 反向样本创建失败"
+  if [ -n "$D" ]; then
+    mkdir -p "$D/src"
+    printf 'clean\n' > "$D/src/app.js"
+    printf 'PonyGoNeverThere99\t.\n' > "$(manifest_of "$D")"
+    run_gate_grep "$D"
+    assert_rc 0 "A9⑩ 退化 grep 路径：零残留同样必须放行"
+  fi
+fi
+
+# ---------- ⑪ 隐藏目录同样在检索面内（rg 默认跳过隐藏项 = 假绿）----------
+D=$(new_case) || bad "A9⑪ 样本仓创建失败"
+if [ -n "$D" ]; then
+  mkdir -p "$D/.agents/notes"
+  # 字面串只出现在隐藏目录里的文件：rg 不带 --hidden 时整个 .agents/ 不被检索 → 假绿
+  printf 'ref to PonyGoHiddenProbe8 in a hidden dir\n' > "$D/.agents/notes/probe.txt"
+  printf 'PonyGoHiddenProbe8\t.\n' > "$(manifest_of "$D")"
+  run_gate "$D"
+  assert_rc 1 "A9⑪ 命中只在隐藏目录（.agents/）→ 必须拒（rg 须 --hidden）"
+  assert_out_has ".agents/notes/probe.txt" "A9⑪ 必须点名隐藏目录里的命中文件"
+  # 退化路径同样必须命中（grep -r 本就含隐藏项——两条路径口径一致）
+  run_gate_grep "$D"
+  assert_rc 1 "A9⑪ 退化 grep 路径：隐藏目录命中同样必须拒"
+  # 反向控制：隐藏目录里零命中 → 仍必须放行（别把 --hidden 写成一律拒绝）
+  D=$(new_case) || bad "A9⑪ 反向样本创建失败"
+  if [ -n "$D" ]; then
+    mkdir -p "$D/.meta/gates"
+    printf 'clean hidden file\n' > "$D/.meta/gates/note.txt"
+    printf 'PonyGoHiddenNever9\t.\n' > "$(manifest_of "$D")"
+    run_gate "$D"
+    assert_rc 0 "A9⑪ 隐藏目录内零命中 → 放行（正控制）"
+  fi
+fi
+
+if [ "$FAILN" -ne 0 ]; then
+  printf '== no-residue.spec：未通过（%s 项不符预期——门要么失效要么误拒）==\n' "$FAILN" >&2
+  exit 1
+fi
+printf '== no-residue.spec：通过（负样本必拒 + 正样本放行 + 参数/清单/范围/字面口径全部符合预期）==\n'
+exit 0
+PONYGO_EOF
+  [ -x "$META_DIR/gates/no-residue.spec.sh" ] || chmod +x "$META_DIR/gates/no-residue.spec.sh" 2>/dev/null || true
+}
+
+# A3 / A5 的 init 侧模板（**唯一真值**，P1-4 / 2026-11-11）：
+# 用途一 = write_gate_hook / write_ci_adapter 的落盘内容（内容只有一个家，计划与实跑不可能漂移）；
+# 用途二 = 自适应深度信号 4 判「这份治理痕迹是不是 `ponygo init` 自己造的」——与模板逐字节一致
+# （EOL 归一）= 脚手架产物，不是项目自己的痕迹，不计重型信号；否则每个干净实例 init 完就自动
+# 升 M 档，S 档只剩「零治理」项目可用（与 P1-2「仅 .meta 不升 M」同一理由链）。
+init_hook_template() { cat <<'PONYGO_EOF'
 #!/usr/bin/env bash
 # 本地层（秒级）门禁：暂存区 ADR 格式门。
 # 由 `ponygo init` 生成（不存在时）或**非破坏性追加**哨兵块（已存在未接线时可执行时）；
@@ -3923,6 +5541,17 @@ if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
 fi
 # <<< ponygo-gate: adr-verify v1 <<<
 PONYGO_EOF
+}
+
+# A3 全量钩子（仅当目标位置**不存在**时新建）：marker 行 + 哨兵块 + 非注释调用行（§6.5）
+# F4：写入失败不再静默——chmod 的裸 `Permission denied` 会变成失败清单里的一条可执行项。
+# 内容取自 init_hook_template（同一真值；此处不再复制一份正文）。
+write_gate_hook() { # <hook 文件绝对/相对路径>
+  [ -f "$1" ] && return 0
+  if ! mkdir -p "$(dirname "$1")"; then
+    gate_write_fail "$1" "写入失败（父目录不可写，mkdir 失败）——钩子未能生成"; return 1
+  fi
+  if ! init_hook_template | write_atomic "$1" 755
   then
     gate_write_fail "$1" "写入失败（原子替换 mv 失败/目录不可写）——钩子未能生成"; return 1
   fi
@@ -3933,10 +5562,8 @@ PONYGO_EOF
 }
 
 # A5 薄适配器（10 行壳）：只在检出厂 GitHub 证据时落地（§6.3）；换 forge 只换这层壳
-write_ci_adapter() { # 无参；已存在则不覆盖（实例可编辑文件，不进宇宙表，R8）
-  [ -f .github/workflows/ponygo-governance.yml ] && return 0
-  mkdir -p .github/workflows || return 1
-  write_atomic .github/workflows/ponygo-governance.yml 644 <<'PONYGO_EOF'
+# 内容取自 ci_adapter_template（同一真值，理由同 A3）。
+ci_adapter_template() { cat <<'PONYGO_EOF'
 # ponygo 治理门（A5 = 薄适配器）：门禁逻辑本体在 .meta/gates/ci-verify.sh（A4），
 # 换 forge 只换这几行壳；本地等价命令 = bash .meta/gates/ci-verify.sh
 name: ponygo-governance
@@ -3953,6 +5580,12 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: bash .meta/gates/ci-verify.sh
 PONYGO_EOF
+}
+
+write_ci_adapter() { # 无参；已存在则不覆盖（实例可编辑文件，不进宇宙表，R8）
+  [ -f .github/workflows/ponygo-governance.yml ] && return 0
+  mkdir -p .github/workflows || return 1
+  ci_adapter_template | write_atomic .github/workflows/ponygo-governance.yml 644
 }
 
 # ---------- 「交付即接线」装配（plan-freeze §6.1–6.5；幂等、非破坏） ----------
@@ -4126,6 +5759,59 @@ check_gate_spec_pairing() {
   done < <(find "$META_DIR/gates" -maxdepth 1 -type f \
       \( -name '*.sh' -o -name '*.ps1' \) ! -name '*.spec.*' -print0 2>/dev/null | sort -z)
   return "$missing"
+}
+
+# ---------- 2.3 拒绝断言的证据判据（P1-9 / 2026-11-11；单一实现） ----------
+# 为什么加固：旧的 `grep -E '(^|[^[:alnum:]_])(exit|return)[[:space:]]+[1-9]' <spec>` 会被**文本**
+# 骗过——`# 违规必须 exit 1` 这样的注释、或 `echo "违规必须 exit 1"` 这样的字符串，都能让一个只
+# `exit 0` 的空壳 spec 冒充「证明门会拒绝非法样本」。零断言的 pass 比不写 spec 更坏：它把
+# 「没人验证」伪装成「已验证」（零断言 = 零证据）。
+# 判据：先剔除**注释与字符串**（整行注释 / 行内 `#` 起的注释 / 单双引号内全部内容——echo/printf 的
+# 参数因此一律不算证据），再要求非零退出落在真实控制流位置：
+#   (^|[;&|]|then|else)[[:space:]]*(exit|return)[[:space:]]+[1-9]
+# 落地取舍（契约 §P1-9 的语义而非字面）：**不**整行剔除「含 echo/printf 的行」。冻结夹具的标准形态
+# `if bash <gate> --bad; then echo "未拒绝"; exit 1; fi` 正是「含 echo 的行 + 真实断言」，整行剔除
+# 会把它误杀成 FAIL（verify-p0 E/F、verify-p1 add_gate、tests/run.sh add_instance_gate 都这个形态）；
+# 剔除**字符串**同样让「echo 里写 exit 1」不算证据，且不误伤真实断言。
+spec_reject_assertion() { # <spec 文件> → 0 = 含真实的拒绝断言（非注释/非字符串）
+  local f="$1" code=""
+  [ -f "$f" ] || return 1
+  file_has_content "$f" || return 1
+  code=$(awk '
+    { line = $0; sub(/\r$/, "", line) }
+    line ~ /^[[:space:]]*#/ { next }           # 整行注释：不是代码
+    {
+      out = ""; i = 1; sq = 0; dq = 0; n = length(line); prev = ""
+      while (i <= n) {
+        c = substr(line, i, 1)
+        if (sq) { if (c == "\047") { sq = 0 }; i++; continue }
+        if (dq) { if (c == "\"") { dq = 0 }; i++; continue }
+        if (c == "\047") { sq = 1; i++; continue }
+        if (c == "\"") { dq = 1; i++; continue }
+        # 行内注释起点：`#` 出现在行首或空白/命令分隔之后（`${a#b}` 这类参数展开不算注释）
+        if (c == "#" && (prev == "" || prev == " " || prev == "\t" || prev == ";" || prev == "&" || prev == "|")) { break }
+        out = out c; prev = c; i++
+      }
+      print out
+    }
+  ' "$f" 2>/dev/null)
+  printf '%s\n' "$code" | grep -qE '(^|[;&|]|then|else)[[:space:]]*(exit|return)[[:space:]]+[1-9]'
+}
+
+# 2.3 的**扫描面**：只查「与门配对」的 spec（同 Stem、同语言后缀；含框架门自带的 spec）。
+# 为什么收窄：纯正向 smoke spec（只 `exit 0`、没有对应门）不是负样本证据，也不是欠账——把它算进
+# 「缺拒绝断言」等于逼人给冒烟脚本写假的拒绝断言（假门禁）。无对应门的 spec 不在本清单里。
+paired_spec_files() { # 逐个打印与门配对的 spec 路径（maxdepth 1，与 check_gate_spec_pairing 同口径）
+  local gate="" name="" ext="" spec=""
+  while IFS= read -r -d '' gate; do
+    file_has_content "$gate" || continue
+    name="${gate##*/}"; ext="${name##*.}"
+    case "$ext" in sh|ps1) ;; *) continue ;; esac
+    spec="${gate%.*}.spec.${ext}"
+    [ -f "$spec" ] && printf '%s\n' "$spec"
+  done < <(find "$META_DIR/gates" -maxdepth 1 -type f \
+      \( -name '*.sh' -o -name '*.ps1' \) ! -name '*.spec.*' -print0 2>/dev/null | sort -z)
+  return 0
 }
 
 # 文件权限（八进制；GNU/BSD stat 双兼容）
@@ -4310,6 +5996,63 @@ ci_provider() { # → github|gitlab|jenkins|azure|drone|bitbucket|none
   printf 'none'
 }
 
+# ---------- 非 GitHub forge 的 1.10 载体（P1-3 / 2026-11-11） ----------
+# 「有 CI 配置文件」≠「有人在跑 1.10 判定」：零字节占位文件（`touch .gitlab-ci.yml`）或跑别的
+# 流水线的配置都不构成载体。判据 = 该 forge 的 CI 文件**非空**（有效行，空白/注释不算）且含
+# `ci-verify` / `verify-note` 的调用痕迹（与 A4 / A1 的接线口径同源）。未命中 → 按 missing 处理：
+# 1.10 进 unverified（诚实条款：未验证不得放行，也不得因"文件在场"冒充载体）。
+other_forge_ci_wired() { # <provider> → 0 = 该 forge 的 CI 文件是 1.10 的真实载体
+  local p="$1" f=""
+  case "$p" in
+    gitlab)    f=".gitlab-ci.yml" ;;
+    jenkins)   f="Jenkinsfile" ;;
+    azure)     f="azure-pipelines.yml" ;;
+    drone)     f=".drone.yml" ;;
+    bitbucket) f="bitbucket-pipelines.yml" ;;
+    *) return 1 ;;
+  esac
+  [ -f "$f" ] || return 1
+  file_has_content "$f" || return 1
+  grep -qE 'ci-verify|verify-note' "$f" 2>/dev/null
+}
+
+# ---------- 自适应深度信号 4：区分 init 自身产物（P1-4 / 2026-11-11） ----------
+# 信号 4「已有治理痕迹」问的是「**项目自己**已经建了治理面吗」。`ponygo init` 刚铺下的
+# `.githooks/pre-commit`（A3）与 `.github/workflows/ponygo-governance.yml`（A5）是脚手架产物，
+# 不是项目痕迹；把两者算成信号会让每个干净实例 init 完就自动升 M 档。
+# 判据（只读、不执行任何脚本）：文件内容与 init 模板逐字节一致（EOL 归一）= init 产物。
+init_artifact_equal() { # <文件> <模板函数名> → 0 = 内容即 init 模板
+  local f="$1" tplfn="$2" want="" got=""
+  [ -f "$f" ] || return 1
+  want=$("$tplfn" 2>/dev/null | tr -d '\r')
+  got=$(tr -d '\r' < "$f" 2>/dev/null)
+  [ -n "$want" ] && [ "$got" = "$want" ]
+}
+githooks_only_init_artifacts() { # → 0 = .githooks 下只有 init 写的 pre-commit（或无内容）
+  local f rel
+  [ -d .githooks ] || return 0
+  while IFS= read -r f; do
+    rel="${f#./}"
+    case "$rel" in
+      .githooks/pre-commit) init_artifact_equal "$f" init_hook_template && continue ;;
+    esac
+    return 1
+  done < <(find .githooks -type f 2>/dev/null)
+  return 0
+}
+github_only_init_artifacts() { # → 0 = .github 下只有 init 写的 A5 适配器（或无内容）
+  local f rel
+  [ -d .github ] || return 0
+  while IFS= read -r f; do
+    rel="${f#./}"
+    case "$rel" in
+      .github/workflows/ponygo-governance.yml) init_artifact_equal "$f" ci_adapter_template && continue ;;
+    esac
+    return 1
+  done < <(find .github -type f 2>/dev/null)
+  return 0
+}
+
 # hooksPath → 归一化绝对目录（R9：相对/绝对/符号链接同一口径；不可达 → 空串）
 # F6：git 对 core.hooksPath 的 `~` / `~/` 按 $HOME 展开，判定侧必须同口径展开——
 # 否则 `core.hooksPath='~/hk'` 会被当成仓内相对路径 `./~/hk`（既假 FAIL，又诱导人在仓里
@@ -4451,7 +6194,10 @@ ensure_gate_wiring() {
   # --dry-run：只打印计划，不落盘、不动 git config（§4 矩阵）
   if [ "${DRY_RUN:-0}" = "1" ]; then
     local a
-    for a in adr-verify.sh adr-verify.spec.sh ci-verify.sh archive-verify.sh archive-verify.spec.sh; do
+    # 计划清单必须与 write_gate_assets 的真实落盘集**同源**（A1/A2/A4/A6/A7/A8/A9），
+    # 少列一项就是「计划 ≠ 实跑」——dry-run 的意义是让人相信接下来的写盘面。
+    for a in adr-verify.sh adr-verify.spec.sh ci-verify.sh archive-verify.sh archive-verify.spec.sh \
+             no-residue.sh no-residue.spec.sh; do
       [ -f "$META_DIR/gates/$a" ] || info "[dry-run] 将生成 $META_DIR/gates/$a（缺失）+ chmod +x"
     done
     if [ "$provid" = "github" ]; then
@@ -4669,20 +6415,24 @@ ensure_gate_wiring_locked() {
 # 治理门接线现场（status / audit 双挂；报告性输出，不改退出码——硬判据在 verify_ladder 2.4）
 # 本地层结论**复用 gate_24_probe**（与 2.4 同一口径）；F5：未接线时按因给补救，
 # 三类「装配前提未满足」（非 git / 目录不可达 / 钩子不可执行）不得给统一「bash ponygo init」。
+# P1-2（2026-11-11）措辞降级：「已接线」→「已挂载」，并紧随一句「未验证门会拒绝」——
+# 挂载只回答「钩子/适配器在不在位、字节对不对」，**不回答门是否真跑过**（2.4 判据语义不变，
+# 六条 AND 一字未改）；验证入口是 opt-in 的 `ponygo audit --run-specs` 与 CI。
+GATE_VERIFY_HINT='未验证门会拒绝（验证入口：`ponygo audit --run-specs` / CI）'
 gate_wiring_report() {
   local provid="" state="" hp=""
   provid=$(ci_provider)
   hp=$(git config core.hooksPath 2>/dev/null || true)
   if gate_24_probe; then
-    state="已接线（${hp}/pre-commit → .meta/gates/adr-verify.sh，暂存区 ADR 门生效）"
+    state="已挂载（${hp}/pre-commit → .meta/gates/adr-verify.sh，暂存区 ADR 门生效；$GATE_VERIFY_HINT）"
   else
-    state="未接线（本地层不拦截暂存区 ADR）——因由：${G24_CAUSE}；补救：${G24_FIX}"
+    state="未接线（本地层不拦截暂存区 ADR）——因由：${G24_CAUSE}；补救：${G24_FIX}；$GATE_VERIFY_HINT"
   fi
   printf '治理门接线：%s\n' "$state"
   case "$provid" in
     github)
       if github_governance_wired; then
-        printf '远端层：GitHub Actions 治理执行面已接线（ponygo-governance.yml 或 ci.yml 的 governance job → bash .meta/gates/ci-verify.sh）\n'
+        printf '远端层：GitHub Actions 治理执行面已挂载（ponygo-governance.yml 或 ci.yml 的 governance job → bash .meta/gates/ci-verify.sh；%s）\n' "$GATE_VERIFY_HINT"
       else
         printf '远端层：GitHub 证据在但适配器缺失 → 补 bash ponygo init（会生成 .github/workflows/ponygo-governance.yml），或在 ci.yml 增加 governance job 调 bash .meta/gates/ci-verify.sh\n'
       fi
@@ -4691,7 +6441,13 @@ gate_wiring_report() {
       printf '远端层：无 CI（本地层已强制）→ 远端层未生效；补 .github/workflows/ponygo-governance.yml 或自有 CI 调 bash .meta/gates/ci-verify.sh\n'
       ;;
     *)
-      printf '远端层：检出 %s 但未接门 → 在你的 CI 里加一步 bash .meta/gates/ci-verify.sh（A4 门禁本体已就位）\n' "$provid"
+      # P1-3：非 GitHub forge 的「接了没接」由 other_forge_ci_wired 单点判定（非空 + 调用痕迹），
+      # 与 1.10 载体判据同一口径——报告不再把「文件在场」说成「已接」。
+      if other_forge_ci_wired "$provid"; then
+        printf '远端层：%s 流水线已挂载 1.10 门（CI 文件内含 ci-verify / verify-note 调用；%s）\n' "$provid" "$GATE_VERIFY_HINT"
+      else
+        printf '远端层：检出 %s 但未接门（CI 文件为空或无 ci-verify / verify-note 调用痕迹）→ 在你的 CI 里加一步 bash .meta/gates/ci-verify.sh（A4 门禁本体已就位）\n' "$provid"
+      fi
       ;;
   esac
   return 0
@@ -4976,6 +6732,19 @@ level_as_int() { # <read_level 的原始值> → 整数；非法/缺失 → -1�
     *) printf '%s' "$lv" ;;
   esac
 }
+# P1-8（2026-11-11）：`level_declared > level_verified` 时人读面结论行显式写「已声明 Lx，仅验证到 Ly」。
+# 为什么必须显式：`level:` 是**声明**（当前档位），本命令只机械验到 min(声明, 2)；两者差一档时
+# 只印「级自洽验证：通过」会让人把「声明高」读成「已验证高」（假绿）。一致时零噪音（L0–L2 声明即验到）。
+# 与 JSON 的 level_declared / level_verified 同源同一个 VL_VERIFIED_LEVEL（禁第二份计算）。
+status_level_gap_line() { # <声明级（整数；非法/缺失 → 不打印）>
+  local decl="${1:--1}" ver="${VL_VERIFIED_LEVEL:-0}" tail="未验证 ≠ 通过"
+  case "$decl" in ''|*[!0-9]*) return 0 ;; esac
+  case "$ver" in ''|*[!0-9]*) return 0 ;; esac
+  [ "$decl" -gt "$ver" ] || return 0
+  [ "$decl" -ge 3 ] && tail="未验证 ≠ 通过；L3–L5 属目标画像，按 maturity-ladder §2 的依赖清单自证"
+  printf '已声明 L%s，仅验证到 L%s——差额 %s 档未验证（%s）\n' "$decl" "$ver" "$((decl-ver))" "$tail"
+  return 0
+}
 gates_local_state() { # → wired|not_wired|skipped（与 2.4 / gate_wiring_report 同一 probe，禁第二口径）
   git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { printf 'skipped'; return 0; }
   if gate_24_probe; then printf 'wired'; else printf 'not_wired'; fi
@@ -5027,7 +6796,10 @@ lv110_carrier() {
   case "$p" in
     none) return 1 ;;
     github) github_governance_wired && return 0; return 1 ;;
-    *) return 0 ;;
+    # P1-3（2026-11-11）：非 GitHub forge 不再「有文件即算载体」——须该 forge 的 CI 文件非空
+    # 且含 ci-verify / verify-note 调用痕迹（other_forge_ci_wired 单点判定）。零字节占位
+    # 或跑别的流水线的配置 → 载体缺失，1.10 进 unverified（不放行）。
+    *) other_forge_ci_wired "$p" && return 0; return 1 ;;
   esac
 }
 
@@ -5094,7 +6866,69 @@ json_path_list() { # <空格分隔的仓库相对路径> → "a","b"（空 → �
   for v in $1; do out="${out}${out:+,}\"$(json_escape "$v")\""; done
   printf '%s' "$out"
 }
-json_coverage() {
+# 配对豁免门（P1-1 / 2026-11-11）：UPGRADE_UNIVERSE 里「有门无同名 spec」的框架门资产。
+# 为什么需要这份清单：判据 2.3 要求实例门配同名负样本 spec，而框架门 ci-verify.sh（A4）由
+# `ci-verify.sh` 整树跑、无独立 spec——它属**框架侧**豁免，不是实例欠账。把豁免清单从宇宙表
+# **派生**（不手抄第二个名单），保证新增框架门时清单自动跟随；JSON 的 exempt_gates 与将来
+# 的报告/门禁共用这一处实现（禁第二副本）。
+exempt_gate_names() { # → 逐个打印豁免门文件名（至少有 ci-verify.sh）
+  local f base stem rel have_spec
+  for f in $UPGRADE_UNIVERSE; do
+    case "$f" in .meta/gates/*) ;; *) continue ;; esac
+    base="${f##*/}"
+    # 只认**门禁脚本**（.sh / .ps1）：宇宙表同目录下还有 README.md（契约文档，不是门），
+    # 把它算进豁免清单等于给「配对豁免」开一个不可复核的洞。
+    case "$base" in
+      *.spec.*) continue ;;
+      *.sh|*.ps1) ;;
+      *) continue ;;
+    esac
+    stem="${base%.sh}"; stem="${stem%.ps1}"
+    have_spec=0
+    for rel in $UPGRADE_UNIVERSE; do
+      case "$rel" in
+        ".meta/gates/${stem}.spec."*) have_spec=1; break ;;
+      esac
+    done
+    [ "$have_spec" = "1" ] || printf '%s\n' "$base"
+  done
+}
+json_exempt_gates() { # → "exempt_gates":[...]（单项文件名；空 → []）
+  local v out=""
+  for v in $(exempt_gate_names); do out="${out}${out:+,}\"${v}\""; done
+  printf '"exempt_gates":[%s]' "$out"
+}
+# miss_ids（P1-1）：**未达标判据的稳定 id**（级自洽 fail ∪ 缺口 id；去重；hits ≥ total 时为空 = []）。
+# 语义边界：这是「缺了什么证据」的机器词表，不是自由文本；与 level_verified 独立——
+# 未验证 ≠ 通过，两者都不得靠声明抬价。
+json_miss_ids() { # <hits|-> <total|-> [额外 id 列表]
+  local h="$1" t="$2" extra="${3:-}" ids="" v seen="" out=""
+  if [ "$h" = "-" ]; then
+    # status：无四问计分；缺项 = 级自洽判据（verdict 非 pass 时）
+    [ "${VL_VERDICT:-unverified}" = "pass" ] && { printf ''; return 0; }
+    ids="${VL_FAIL_IDS:-}"
+  else
+    [ "$h" -ge 0 ] 2>/dev/null || { printf ''; return 0; }
+    [ "$t" -gt 0 ] 2>/dev/null || { printf ''; return 0; }
+    [ "$h" -lt "$t" ] || { printf ''; return 0; }
+    ids="${VL_FAIL_IDS:-}${extra:+${VL_FAIL_IDS:+ }$extra}"
+  fi
+  for v in $ids; do
+    case " $seen " in *" $v "*) continue ;; esac
+    seen="$seen $v"; out="${out}${out:+,}\"${v}\""
+  done
+  printf '%s' "$out"
+}
+json_warnings() { # P1-10：残留投影等人工处置项 → "warnings":[...]（稳定 id：<类别>:<文件>）
+  # 只收**可处置**告警（不是自由文本、不是退出码依据）：`residual_projection:AGENTS.md` 表示
+  # 「声明已关掉 AI 投影但该文件仍留 BEGIN 哨兵块」——机器可据此提醒人手工删块。
+  local v out=""
+  for v in ${RESID_PROJ_FILES:-}; do out="${out}${out:+,}\"residual_projection:${v}\""; done
+  printf '"warnings":[%s]' "$out"
+}
+json_coverage() { # 判据覆盖块 → "coverage":{...}（status / audit **同源**，禁第二副本）
+  # L1 未实际运行（含 L0、无 meta 与提前退出）时不得沿用任何非空 verified 默认值。
+  # L1 已跑时才按 1.9b 的真实判定状态区分；1.10 始终只读未执行，不冒充已验证。
   if [ "${L1_JUDGED:-0}" != "1" ]; then
     printf '%s' '"coverage":{"verified":[],"unverified":["1.1-1.10"],"reason":"l1-not-run"}'
   elif [ "${AS19_JUDGED:-0}" = "1" ]; then
@@ -5103,27 +6937,35 @@ json_coverage() {
     printf '%s' '"coverage":{"verified":["1.1-1.8"],"unverified":["1.10"],"skipped":["1.9b"],"reason":"readonly-no-repo-exec"}'
   fi
 }
-
 audit_json_line() { # <exit code> → 单行 JSON
   # coverage：判据覆盖固定词表（1.10 不由本命令验证）；drift：骨架漂移观察项（不参与退出码）。
+  # skills：技能三层归属块（spec §5.5；与 status **同源** compute_skills_state + json_skills）。
   # 键序不作为契约（只保证字段存在/值正确），但保持**单行**。
-  printf '{"schema":"ponygo.audit/1","command":"audit","tier":"%s","hits":%s,"total":%s,"level":%s,"ladder":{"verdict":"%s","fails":[%s]},"gates":{"local":"%s","remote":"%s"},"gaps":[%s],%s,"drift":{"count":%s,"files":[%s]},"exit":%s}\n' \
+  # P1-1（2026-11-11）：level_declared/level_verified 分离（未验证 ≠ 通过）、miss_ids（未达标判据
+  # id）、exempt_gates（配对豁免门，派生自 UPGRADE_UNIVERSE）。四者与 status 同源同词表。
+  printf '{"schema":"ponygo.audit/1","command":"audit","tier":"%s","hits":%s,"total":%s,"level":%s,"level_declared":%s,"level_verified":%s,"ladder":{"verdict":"%s","fails":[%s]},"gates":{"local":"%s","remote":"%s"},"miss_ids":[%s],%s,"gaps":[%s],%s,%s,%s,"drift":{"count":%s,"files":[%s]},"exit":%s}\n' \
     "${AUDIT_TIER:-S}" "${AUDIT_HIT:-0}" "${AUDIT_TOTAL:-0}" "${AUDIT_LEVEL_INT:--1}" \
+    "${AUDIT_LEVEL_INT:--1}" "${VL_VERIFIED_LEVEL:-0}" \
     "${VL_VERDICT:-unverified}" "$(json_id_list "${VL_FAIL_IDS:-}")" \
     "$(gates_local_state)" "$(gates_remote_state)" \
-    "$(json_id_list "${AUDIT_GAP_IDS:-}")" "$(json_coverage)" \
+    "$(json_miss_ids "${AUDIT_HIT:-0}" "${AUDIT_TOTAL:-0}" "${AUDIT_GAP_IDS:-}")" "$(json_exempt_gates)" \
+    "$(json_id_list "${AUDIT_GAP_IDS:-}")" "$(json_coverage)" "$(json_skills)" "$(json_warnings)" \
     "${AUDIT_DRIFT_COUNT:--1}" "$(json_path_list "${AUDIT_DRIFT_FILES:-}")" "$1"
 }
 status_json_line() { # <exit code> → 单行 JSON（W9-B2：skeleton 三字段是**仓库相对路径数组**，非计数）
   # coverage：判据覆盖固定词表（lv=0 也带，词表不随级别变化）；drift 在 skeleton 内（与人类输出同源）。
-  printf '{"schema":"ponygo.status/1","command":"status","level":%s,"skeleton":{"missing_dirs":[%s],"missing_files":[%s],"drift":[%s]},"gates":{"local":"%s","remote":"%s"},"ladder":{"verdict":"%s","fails":[%s]},%s,"exit":%s}\n' \
-    "${STATUS_LEVEL_INT:--1}" "$(json_path_list "${STATUS_MISSING_DIRS:-}")" \
+  # skills：技能三层归属块（spec §5.5；库缺失在 library.missing，不并入 skeleton.missing_files）。
+  # P1-1（2026-11-11）：与 audit 同源的四字段（level_declared/level_verified/miss_ids/exempt_gates）。
+  printf '{"schema":"ponygo.status/1","command":"status","level":%s,"level_declared":%s,"level_verified":%s,"skeleton":{"missing_dirs":[%s],"missing_files":[%s],"drift":[%s]},"gates":{"local":"%s","remote":"%s"},"ladder":{"verdict":"%s","fails":[%s]},"miss_ids":[%s],%s,%s,%s,%s,"exit":%s}\n' \
+    "${STATUS_LEVEL_INT:--1}" "${STATUS_LEVEL_INT:--1}" "${VL_VERIFIED_LEVEL:-0}" \
+    "$(json_path_list "${STATUS_MISSING_DIRS:-}")" \
     "$(json_path_list "${STATUS_MISSING_FILES:-}")" "$(json_path_list "${STATUS_DRIFT:-}")" \
     "$(gates_local_state)" "$(gates_remote_state)" \
-    "${VL_VERDICT:-unverified}" "$(json_id_list "${VL_FAIL_IDS:-}")" "$(json_coverage)" "$1"
+    "${VL_VERDICT:-unverified}" "$(json_id_list "${VL_FAIL_IDS:-}")" \
+    "$(json_miss_ids "-" "-")" "$(json_exempt_gates)" "$(json_coverage)" "$(json_skills)" "$(json_warnings)" "$1"
 }
 json_verdict_fallback() { # <exit code>：ladder 未落 verdict 时的兜底（W9-A3）
-  # 未跑 ladder 不代表「证据不足」：进程以硬失败退出（非 0）时必须报 fail，不得把失败洗成 unverified。
+  # exit 3 = 证据不足，不是硬失败；其余非零仍按 fail，0 且未判定则为 unverified。
   if [ -z "${VL_VERDICT:-}" ]; then
     if [ "$1" = "3" ]; then VL_VERDICT="unverified";
     elif [ "$1" != "0" ]; then VL_VERDICT="fail";
@@ -5141,6 +6983,360 @@ status_done() { # <exit code>
   exit "$1"
 }
 
+# ============================================================
+# 技能三层归属（spec-ponygo-v2.6 §2 / §5.1–§5.5）
+#   基线     = .agents/skills/{write-adr,change-review,governance-review}（模板逐字节锁，不计 L3）
+#   模板库   = .meta/skills-library/（init 播种、**不自动安装**；= OPTIONAL_UNIVERSE 九文件）
+#   实例自有 = 其余 .agents/skills/*（L3 唯一证据来源）
+# 只读纪律：只做存在性探测 / sha256 比较 / 文本解析，**不执行**任何仓库脚本
+#   （含 install.sh 的 check——判定优先只读，见文件头 C3）。
+# 归属真源 = 文件位置 + `.ponygo-installed` 标记；副本三态与 install.sh check 同一口径
+#   （spec §3.2：modified 优先，其次 stale，否则 ok），此处不另立第二套判定。
+# ============================================================
+SKILLS_LIBRARY_DIR="$META_DIR/skills-library"
+SKILL_CATALOG="$SKILLS_LIBRARY_DIR/catalog.tsv"
+SKILL_MARKER_FILE=".ponygo-installed"
+SKILL_BASELINE_NAMES="write-adr change-review governance-review"
+
+# sha256 比较依赖 GNU sha256sum（与 .meta/gates 既有资产同一平台前提：GNU 用户态）。
+skill_sha() { sha256sum "$1" 2>/dev/null | awk '{print $1}'; }
+
+skill_names() { # → 逐个打印 .agents/skills/ 下的技能名（以 SKILL.md 在场为「是技能」）
+  local d="" n=""
+  [ -d "$SKILLS_DIR" ] || return 0
+  for d in "$SKILLS_DIR"/*/; do
+    [ -d "$d" ] || continue
+    [ -f "$d/SKILL.md" ] || continue
+    n="${d%/}"
+    printf '%s\n' "${n##*/}"
+  done
+}
+
+skill_marked() { # <name> → 0 = 该技能是库安装副本（带 .ponygo-installed 标记）
+  [ -f "$SKILLS_DIR/$1/$SKILL_MARKER_FILE" ]
+}
+
+skill_copy_exists() { # <name> → 0 = .agents/skills/<name> 已有副本（不论带不带标记）
+  [ -d "$SKILLS_DIR/$1" ]
+}
+
+skill_marker_sha() { # <marker 文件> → library_sha256 值（无该行则空）
+  sed -n 's/^library_sha256=//p' "$1" 2>/dev/null | head -n1 | tr -d '[:space:]'
+}
+
+skill_copy_state() { # <name> → ok|stale|modified|-（- = 非库安装副本）
+  # 三态口径同 spec §3.2：本地改过（installed sha ≠ marker.library_sha256）= modified（优先）；
+  # 否者库已更新或库侧已不可得（library sha 缺失/不等 marker）= stale；否则 ok。
+  local n="$1" mf="$SKILLS_DIR/$1/$SKILL_MARKER_FILE" msha="" inst="" cur=""
+  [ -f "$mf" ] || { printf '%s' '-'; return 0; }
+  msha=$(skill_marker_sha "$mf")
+  inst=$(skill_sha "$SKILLS_DIR/$n/SKILL.md")
+  cur=$(skill_sha "$SKILLS_LIBRARY_DIR/$n/SKILL.md")
+  if [ -n "$msha" ] && [ "$inst" != "$msha" ]; then
+    printf '%s' 'modified'
+  elif [ -z "$msha" ] || [ -z "$cur" ] || [ "$cur" != "$msha" ]; then
+    printf '%s' 'stale'
+  else
+    printf '%s' 'ok'
+  fi
+}
+
+skill_fm_field() { # <SKILL.md> <键> → frontmatter（首个 --- 区块）内该键的值；无则空
+  awk -v k="$2" '
+    NR == 1 { if ($0 !~ /^---[[:space:]]*$/) exit; infm = 1; next }
+    infm && /^---[[:space:]]*$/ { exit }
+    infm {
+      i = index($0, ":"); if (i < 2) next
+      key = substr($0, 1, i - 1); gsub(/[[:space:]]/, "", key)
+      if (key != k) next
+      v = substr($0, i + 1); sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v)
+      print v; exit
+    }
+  ' "$1" 2>/dev/null
+}
+
+skill_description_ok() { # <SKILL.md> → 0 = frontmatter description 内联触发词（spec §3.3）
+  local desc=""
+  desc=$(skill_fm_field "$1" description)
+  [ -n "$desc" ] || return 1
+  printf '%s' "$desc" | grep -Eqi '何时用|use when|when to use|trigger'
+}
+
+skill_missing_sections() { # <SKILL.md> → 缺失要素标签（空格分隔；空 = 四要素齐）
+  # 四要素（spec §3.3 / §5.2 3.4）：`## 真相源` / `## 步骤` / `## 校准样例` / `## 验证与报告`，
+  # 允许英文等价；**围栏感知**——围栏内的标题不算在场（复用 heading_outside_fence，
+  # 与 1.8/1.10 同一实现，禁第二份围栏解析）。标题用前缀匹配而非整行等值：既有基线写法
+  # `## 真相源（冲突以它们为准）` 必须算在场。
+  local f="$1" miss=""
+  heading_outside_fence "$f" '## (真相源|Truth sources)'                || miss="$miss 真相源"
+  heading_outside_fence "$f" '## (步骤|Steps)'                          || miss="$miss 步骤"
+  heading_outside_fence "$f" '## (校准样例|Calibration examples)'        || miss="$miss 校准样例"
+  heading_outside_fence "$f" '## (验证与报告|Verification and report)'   || miss="$miss 验证与报告"
+  printf '%s' "$miss"
+}
+
+skill_shape_audit() { # 3.3 / 3.4 逐技能判定 → SKILL_SHAPE_BAD_33 / SKILL_SHAPE_BAD_34 / SKILL_FAIL_LINES
+  # FAIL 行的三要素：判据号 + 技能名 + 缺什么 + **最小修法**（spec §5.2 要求逐技能逐项打印）。
+  local n="" f="" nm="" miss="" fix=""
+  SKILL_SHAPE_BAD_33=0; SKILL_SHAPE_BAD_34=0; SKILL_FAIL_LINES=""
+  for n in $(skill_names); do
+    f="$SKILLS_DIR/$n/SKILL.md"
+    nm=$(skill_fm_field "$f" name)
+    if [ "$nm" != "$n" ]; then
+      SKILL_SHAPE_BAD_33=1
+      SKILL_FAIL_LINES="${SKILL_FAIL_LINES}  - 3.3 ${n}：frontmatter name 与目录不同名（实得 '${nm:-空}'）"$'\n'
+      SKILL_FAIL_LINES="${SKILL_FAIL_LINES}    修法：把 SKILL.md 头部改为 name: ${n}（kebab-case，必须与目录同名）"$'\n'
+    elif ! printf '%s' "$nm" | grep -qE '^[a-z0-9]+(-[a-z0-9]+)*$'; then
+      SKILL_SHAPE_BAD_33=1
+      SKILL_FAIL_LINES="${SKILL_FAIL_LINES}  - 3.3 ${n}：name 不是 kebab-case（实得 '${nm}'）"$'\n'
+      SKILL_FAIL_LINES="${SKILL_FAIL_LINES}    修法：改为 name: ${n}（小写字母/数字，单词间用连字符）"$'\n'
+    fi
+    if ! skill_description_ok "$f"; then
+      SKILL_SHAPE_BAD_33=1
+      if [ -z "$(skill_fm_field "$f" description)" ]; then
+        SKILL_FAIL_LINES="${SKILL_FAIL_LINES}  - 3.3 ${n}：frontmatter 缺 description（或首行不是 --- 区块）"$'\n'
+        SKILL_FAIL_LINES="${SKILL_FAIL_LINES}    修法：首两行写 --- / name / description，description 以「何时用：…」开头"$'\n'
+      else
+        SKILL_FAIL_LINES="${SKILL_FAIL_LINES}  - 3.3 ${n}：description 未内联触发词（缺 何时用 / Use when / When to use / trigger）"$'\n'
+        SKILL_FAIL_LINES="${SKILL_FAIL_LINES}    修法：description 写成「何时用：<用变更本身的可见特征写触发条件>」"$'\n'
+      fi
+    fi
+    miss=$(skill_missing_sections "$f")
+    if [ -n "$miss" ]; then
+      SKILL_SHAPE_BAD_34=1
+      SKILL_FAIL_LINES="${SKILL_FAIL_LINES}  - 3.4 ${n}：缺要素${miss}"$'\n'
+      SKILL_FAIL_LINES="${SKILL_FAIL_LINES}    修法：补齐缺失小节（英文等价可用：## Truth sources / ## Steps / ## Calibration examples / ## Verification and report；围栏内的标题不算在场）"$'\n'
+    fi
+  done
+  return 0
+}
+
+skill_evidence_met() { # <kind> <arg> <min> → 0 = 证据达阈值；1 = 未达/不可求值。副作用：SK_EV_TEXT
+  # 证据求值口径 = spec §3.1 的封闭集合；`min` 对布尔型 kind 忽略（写 1）。
+  local kind="$1" arg="$2" min="$3" n=0 d="" hit="" td="" ci="" c="" sr=""
+  SK_EV_TEXT=""
+  case "$kind" in
+    none) SK_EV_TEXT="catalog 声明 none（永不建议）"; return 1 ;;
+    notes_class)
+      d="$DECISIONS_DIR/implemented/$arg"
+      if [ -n "$arg" ] && [ "$arg" != "-" ] && [ -d "$d" ]; then
+        n=$(find "$d" -maxdepth 1 -type f -name '*.md' ! -name 'README.md' ! -name '*.zh.md' 2>/dev/null | wc -l | tr -d ' ')
+      fi
+      SK_EV_TEXT="implemented/${arg} 决策 ${n} 篇（阈值 ${min}）"
+      [ "${n:-0}" -ge "${min:-1}" ] 2>/dev/null && return 0
+      return 1 ;;
+    archive_sealed)
+      if [ -f "$DECISIONS_DIR/archived/manifest.sha256" ]; then
+        n=$(tr -d '\r' < "$DECISIONS_DIR/archived/manifest.sha256" 2>/dev/null | grep -cE '^[0-9a-f]{64}  .' || true)
+      fi
+      SK_EV_TEXT="已封印归档件 ${n} 条（阈值 ${min}）"
+      [ "${n:-0}" -ge "${min:-1}" ] 2>/dev/null && return 0
+      return 1 ;;
+    docs_scale)
+      # 非 .agents/notes/ 的 *.md 计数；.git / .scratch / node_modules 是噪声面，排除。
+      n=$(find . -type f -name '*.md' -not -path './.git/*' -not -path './.agents/notes/*' \
+            -not -path './.scratch/*' -not -path '*/node_modules/*' 2>/dev/null | wc -l | tr -d ' ')
+      SK_EV_TEXT="notes 之外的文档 ${n} 篇（阈值 ${min}）"
+      [ "${n:-0}" -ge "${min:-1}" ] 2>/dev/null && return 0
+      return 1 ;;
+    web_dirs)
+      for d in src app web ui packages/client; do [ -e "$d" ] && { hit="$d"; break; }; done
+      SK_EV_TEXT="Web 面目录 ${hit:-无}"
+      [ -n "$hit" ] && return 0
+      return 1 ;;
+    test_dirs)
+      for d in tests test spec __tests__; do [ -d "$d" ] && { td="$d"; break; }; done
+      for c in .github/workflows .gitlab-ci.yml bitbucket-pipelines.yml azure-pipelines.yml .drone.yml Jenkinsfile ci; do
+        [ -e "$c" ] && { ci="$c"; break; }
+      done
+      SK_EV_TEXT="测试目录 ${td:-无} + CI 配置 ${ci:-无}"
+      [ -n "$td" ] && [ -n "$ci" ] && return 0
+      return 1 ;;
+    release_surface)
+      for d in CHANGELOG*; do [ -e "$d" ] && { sr="$d"; break; }; done
+      if [ -z "$sr" ] && [ -d bin ]; then sr="bin/"; fi
+      if [ -z "$sr" ] && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        [ -n "$(git tag 2>/dev/null | head -n1)" ] && sr="git tag"
+      fi
+      SK_EV_TEXT="发布面 ${sr:-无}"
+      [ -n "$sr" ] && return 0
+      return 1 ;;
+    *) SK_EV_TEXT="未知 evidence_kind '${kind}'（catalog 语法违例）"; return 1 ;;
+  esac
+}
+
+skill_catalog_eval() { # catalog.tsv × evidence → SK_CANDIDATES（未装且达阈值）/ SK_RETIRE（已装但证据消失）
+  # 只读、不安装、不计分、不改退出码（spec §5.3）；一行一条技能，禁止刷屏。
+  local name="" kind="" arg="" min="" hint="" met=0
+  SK_CANDIDATES=""; SK_RETIRE=""
+  [ -f "$SKILL_CATALOG" ] || return 0
+  while IFS=$'\t' read -r name kind arg min hint; do
+    name=$(printf '%s' "$name" | tr -d '[:space:]')
+    case "$name" in ''|'#'*) continue ;; esac
+    kind=$(printf '%s' "$kind" | tr -d '[:space:]')
+    arg=$(printf '%s' "$arg" | tr -d '[:space:]')
+    min=$(printf '%s' "$min" | tr -d '[:space:]')
+    hint=$(printf '%s' "$hint" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    [ -n "$kind" ] || continue
+    case "$arg" in ''|-) arg="-" ;; esac
+    case "$min" in ''|*[!0-9]*) min=1 ;; esac
+    case "$kind" in
+      notes_class|archive_sealed|docs_scale|web_dirs|test_dirs|release_surface|none) ;;
+      *) printf 'ponygo: WARN %s：未知 evidence_kind（%s）→ 该行不求值；合法集合见 spec §3.1\n' "$SKILL_CATALOG" "$kind" >&2 ;;
+    esac
+    if skill_evidence_met "$kind" "$arg" "$min"; then met=1; else met=0; fi
+    if [ "$met" = "1" ] && ! skill_copy_exists "$name"; then
+      # 第 4 字段 = 可安装性：`ok` = 库模板在场（打印可复制的安装命令）；
+      # `template_missing` = catalog 有行但库内 <name>/SKILL.md 不在场 → **禁止**打印
+      # `install.sh install <name>`（该调用会 exit 2 且不写盘），改指 'ponygo init --repair-skeleton'。
+      if [ -f "$SKILLS_LIBRARY_DIR/$name/SKILL.md" ]; then
+        SK_CANDIDATES="${SK_CANDIDATES}${name}"$'\t'"${SK_EV_TEXT}"$'\t'"${hint}"$'\t'ok$'\n'
+      else
+        SK_CANDIDATES="${SK_CANDIDATES}${name}"$'\t'"${SK_EV_TEXT}"$'\t'"${hint}"$'\t'template_missing$'\n'
+      fi
+    elif [ "$met" = "0" ] && skill_copy_exists "$name" && [ "$kind" != "none" ]; then
+      SK_RETIRE="${SK_RETIRE}${SK_RETIRE:+ }${name}"
+    fi
+  done < <(sed 's/\r$//' "$SKILL_CATALOG" 2>/dev/null)
+  return 0
+}
+
+compute_skills_state() { # 一次求值，供 audit 计分面 / status·audit 机读面共用（禁第二份口径）
+  # 结果（文件级变量；调用方读）：
+  #   SKILLS_JUDGED      1 = 本次**真的判过**（JSON 才允许投影成数组；未判不得投影为 [] 通过）
+  #   SK_BASELINE_MISSING 基线缺口（空格分隔路径）；SK_BASELINE_OK = 基线技能三篇在场数
+  #   SK_LIB_MISSING     库九文件缺口；SK_LIB_INSTALLED = "name:state" 列表；SK_LIB_INSTALLED_N
+  #   SK_INSTANCE_OWNED  实例自有技能名；SK_INSTANCE_N
+  #   SKILL_LIB_BAD      非 ok 的已装副本 "name:state"；SK_SKILL_N = 技能总数
+  #   SKILL_SHAPE_BAD_33 / SKILL_SHAPE_BAD_34 / SKILL_FAIL_LINES / SKILL_HARD_FAIL
+  #   SK_CANDIDATES / SK_RETIRE
+  SKILLS_JUDGED=1
+  SK_BASELINE_MISSING=""; SK_BASELINE_OK=0; SK_LIB_MISSING=""
+  SK_LIB_INSTALLED=""; SK_LIB_INSTALLED_N=0
+  SK_INSTANCE_OWNED=""; SK_INSTANCE_N=0
+  SKILL_LIB_BAD=""; SK_SKILL_N=0
+  SKILL_SHAPE_BAD_33=0; SKILL_SHAPE_BAD_34=0; SKILL_FAIL_LINES=""; SKILL_HARD_FAIL=0
+  SK_CANDIDATES=""; SK_RETIRE=""
+  local f="" n="" st=""
+  # ---- B1-a 基线五文件（UPGRADE_UNIVERSE 内的 .agents/skills/**）：缺 → 硬失败 ----
+  for f in $UPGRADE_UNIVERSE; do
+    case "$f" in
+      .agents/skills/*) [ -f "$f" ] || SK_BASELINE_MISSING="${SK_BASELINE_MISSING}${SK_BASELINE_MISSING:+ }$f" ;;
+    esac
+  done
+  for n in $SKILL_BASELINE_NAMES; do
+    [ -f "$SKILLS_DIR/$n/SKILL.md" ] && SK_BASELINE_OK=$((SK_BASELINE_OK + 1))
+  done
+  # ---- B1-b 库九文件（OPTIONAL_UNIVERSE）：缺 → 仅提示（可选资产）----
+  for f in $OPTIONAL_UNIVERSE; do
+    [ -f "$f" ] || SK_LIB_MISSING="${SK_LIB_MISSING}${SK_LIB_MISSING:+ }$f"
+  done
+  # ---- B1-c 已装副本三态 + 三层归属（基线名 / 库副本 / 实例自有）----
+  for n in $(skill_names); do
+    SK_SKILL_N=$((SK_SKILL_N + 1))
+    if skill_marked "$n"; then
+      st=$(skill_copy_state "$n")
+      SK_LIB_INSTALLED="${SK_LIB_INSTALLED}${SK_LIB_INSTALLED:+ }${n}:${st}"
+      SK_LIB_INSTALLED_N=$((SK_LIB_INSTALLED_N + 1))
+      case "$st" in ok) : ;; *) SKILL_LIB_BAD="${SKILL_LIB_BAD}${SKILL_LIB_BAD:+ }${n}:${st}" ;; esac
+    else
+      case " $SKILL_BASELINE_NAMES " in
+        *" $n "*) : ;;
+        *) SK_INSTANCE_OWNED="${SK_INSTANCE_OWNED}${SK_INSTANCE_OWNED:+ }$n"; SK_INSTANCE_N=$((SK_INSTANCE_N + 1)) ;;
+      esac
+    fi
+  done
+  # ---- B2 形状（3.3 / 3.4）；零技能不判（无技能可判 ≠ 通过，评分面另有 SK_SKILL_N 门槛）----
+  if [ "$SK_SKILL_N" -gt 0 ]; then skill_shape_audit; fi
+  # ---- B3 能力缺口建议（advisory）----
+  skill_catalog_eval
+  # ---- 硬失败 = 基线缺失 + 形状不齐（库缺失 / 副本非 ok 仅提示，不进退出码）----
+  # **作用域门槛**：只有声明了治理根（.meta/ 在场）的实例，才把基线缺失 / 形状不齐当硬失败。
+  # 理由（与 audit 既有契约一致）：audit 是「打分 + 缺口」命令，可在任意陌生仓库上跑；
+  # 无 .meta/ 的仓库连治理根都没有（meta_yaml_missing 已是 gap、级自洽整体跳过），此时把
+  # "框架基线三篇不在场" 判成非零退出，等于要求一个从未 `ponygo init` 的仓库自带框架文件，
+  # 与该命令「替代物认可 / 只做机械形状探测」的定位冲突。有 .meta/（= 已声明 ponygo 治理）
+  # 时，基线缺失与形状不齐是**实例自身的承诺缺口** → vl_fail + 非零退出（spec §5.1/§5.2、A8/A9）。
+  # 提示层（gap / advisory）不受此门槛影响：任何仓库都会照实报出缺口，只是不改退出码。
+  if [ -d "$META_DIR" ]; then
+    if [ -n "$SK_BASELINE_MISSING" ]; then SKILL_HARD_FAIL=1; fi
+    if [ "$SKILL_SHAPE_BAD_33" = "1" ] || [ "$SKILL_SHAPE_BAD_34" = "1" ]; then SKILL_HARD_FAIL=1; fi
+  fi
+  return 0
+}
+
+json_skills() { # skills 块（status / audit **同源**，spec §5.5）
+  # 未真判定（提前退出分支）→ judged:false + reason，**不投影成 [] 通过**（沿用 coverage 保守语义）。
+  if [ "${SKILLS_JUDGED:-0}" != "1" ]; then
+    printf '%s' '"skills":{"judged":false,"reason":"not-run"}'
+    return 0
+  fi
+  local x="" n="" st="" inst="" cand="" nm="" ev="" hint=""
+  for x in $SK_LIB_INSTALLED; do
+    n="${x%:*}"; st="${x##*:}"
+    inst="${inst}${inst:+,}{\"name\":\"$(json_escape "$n")\",\"state\":\"${st}\"}"
+  done
+  while IFS=$'\t' read -r nm ev hint flag; do
+    [ -n "$nm" ] || continue
+    cand="${cand}${cand:+,}{\"name\":\"$(json_escape "$nm")\",\"evidence\":\"$(json_escape "$ev")\",\"hint\":\"$(json_escape "$hint")\"}"
+  done <<< "${SK_CANDIDATES:-}"
+  printf '%s' "\"skills\":{\"baseline_missing\":[$(json_path_list "${SK_BASELINE_MISSING:-}")],\"library\":{\"missing\":[$(json_path_list "${SK_LIB_MISSING:-}")],\"installed\":[${inst}]},\"instance_owned\":[$(json_path_list "${SK_INSTANCE_OWNED:-}")],\"candidates\":[${cand}]}"
+}
+
+audit_skills_report() { # 人读面（前缀冻结，spec §5.4）+ 缺口 id 登记；advisory 不计分、不改退出码
+  local x="" n="" st=""
+  echo ""
+  echo "===== 技能（三层归属：基线 / 模板库 / 实例自有） ====="
+  printf '技能：基线 %s/3 齐；库 %s 安装；实例自有 %s\n' "$SK_BASELINE_OK" "$SK_LIB_INSTALLED_N" "$SK_INSTANCE_N"
+  if [ -n "$SK_BASELINE_MISSING" ]; then
+    printf '  基线缺失（硬失败——框架必播的三篇技能不在场，缺口 id: skill_baseline_missing）：%s\n' "$SK_BASELINE_MISSING"
+    printf '    修法：git checkout 恢复，或跑 '\''ponygo init --repair-skeleton'\'' 只补缺失文件\n'
+    AUDIT_GAP_IDS="${AUDIT_GAP_IDS}${AUDIT_GAP_IDS:+ }skill_baseline_missing"
+  fi
+  if [ -n "$SK_LIB_MISSING" ]; then
+    printf '  库缺口（可选资产，仅提示——不计分、不改退出码）：%s\n' "$SK_LIB_MISSING"
+    printf '    → 跑 '\''ponygo init --repair-skeleton'\'' 只补缺失的库文件（不覆盖既有文件）\n'
+    AUDIT_GAP_IDS="${AUDIT_GAP_IDS}${AUDIT_GAP_IDS:+ }skill_library_missing"
+  fi
+  for x in $SKILL_LIB_BAD; do
+    n="${x%:*}"; st="${x##*:}"
+    case "$st" in
+      stale)
+        printf '  已装副本过期（库已更新，仅提示）：%s\n' "$n"
+        printf '    → bash .meta/skills-library/install.sh check；确认后可手删 .agents/skills/%s 再重装（安装永不覆盖）\n' "$n"
+        AUDIT_GAP_IDS="${AUDIT_GAP_IDS}${AUDIT_GAP_IDS:+ }skill_library_stale" ;;
+      modified)
+        printf '  已装副本被本地改造（仅提示，通常正当）：%s\n' "$n"
+        printf '    → 本地校准样例是正当改造；若想回到库版本，手删 .agents/skills/%s 再 install\n' "$n"
+        AUDIT_GAP_IDS="${AUDIT_GAP_IDS}${AUDIT_GAP_IDS:+ }skill_library_modified" ;;
+    esac
+  done
+  if [ -n "$SKILL_FAIL_LINES" ]; then
+    printf '  技能形状判据 FAIL（缺口 id：skill_shape_incomplete；逐技能逐项见下）：\n'
+    printf '%s' "$SKILL_FAIL_LINES"
+    AUDIT_GAP_IDS="${AUDIT_GAP_IDS}${AUDIT_GAP_IDS:+ }skill_shape_incomplete"
+  fi
+  if [ -n "$SK_CANDIDATES" ]; then
+    echo ""
+    echo "能力缺口建议（advisory，靠 review 判定；不计分、不影响退出码）："
+    while IFS=$'\t' read -r n st x flag; do
+      [ -n "$n" ] || continue
+      printf '  - %s：%s（%s）\n' "$n" "$st" "${x:--}"
+      if [ "${flag:-ok}" = "ok" ]; then
+        printf '    安装：bash .meta/skills-library/install.sh install %s\n' "$n"
+      else
+        # B3 边界（Lead 裁决）：catalog 有行但库内模板缺失 → 不打印安装命令（该调用会 exit 2），
+        # 只打印缺口与补库路径——可复制的命令必须真的能跑通。
+        printf '    缺口：库内模板缺 .meta/skills-library/%s/SKILL.md → 跑 '\''ponygo init --repair-skeleton'\'' 只补缺失库文件（模板不在场时 install 会 exit 2，故不给安装命令）\n' "$n"
+      fi
+    done <<< "$SK_CANDIDATES"
+  fi
+  if [ -n "$SK_RETIRE" ]; then
+    for n in $SK_RETIRE; do printf '退场候选：%s（证据已消失）\n' "$n"; done
+  fi
+  return 0
+}
+
 cmd_audit() {
   # 自适应深度选择：探测重型信号 → M 档；全轻 → S 档
   local heavy=0 reasons="" spec_rc=0
@@ -5148,9 +7344,14 @@ cmd_audit() {
   # W9-8：fd 3 是 JSON 通道，绝不能让**仓库脚本**（*.spec.sh，任意代码执行面）继承——
   # 否则它往 fd3 写一行就会破坏「stdout 恰一行 JSON」；故 run_gate_specs 的每次调用都 `3>&-`。
   AUDIT_JSON="${OBSERVE_JSON:-0}"; AUDIT_GAP_IDS=""; VL_VERDICT=""; VL_FAIL_IDS=""; L1_JUDGED=0
+  VL_VERIFIED_LEVEL=0   # P1-1：未跑 ladder 前不得宣称验过任何非 L0 档位（提前退出也照实报 0）
+  RESID_PROJ_FILES=""   # P1-10：残留投影 WARN 的机读面（warnings 块）
   AUDIT_DRIFT_FILES=""; AUDIT_DRIFT_COUNT=-1
+  # 技能三层归属一次求值（B1 归属完整性 / B2 形状 / B3 advisory 共用一份结果；禁第二份口径）。
+  # 只读解析：不执行任何仓库脚本（含 install.sh check）。
+  compute_skills_state
   if [ "$AUDIT_JSON" = "1" ]; then exec 3>&1 1>&2; fi
-  # 信号1：贡献者数 >= 3
+  # 信号1：贡献者数 >= 3（rev-parse 同时支持普通仓与 .git 为文件的 linked worktree）
   local contrib=0
   if [ -e .git ] && git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git rev-parse --verify HEAD >/dev/null 2>&1; then contrib=$(git shortlog -sne HEAD 2>/dev/null | wc -l | tr -d ' '); fi
   [ "${contrib:-0}" -ge 3 ] && { heavy=1; reasons="$reasons 贡献者≥3($contrib)"; }
@@ -5165,8 +7366,12 @@ cmd_audit() {
   # 信号4：已有治理痕迹（.github/.githooks 任一已存在 → 值得深查）。
   # 刻意不含 .meta：ponygo init 自己的产物不应把项目自动升 M 档——否则 S 档只剩"零治理"
   # 项目可用，与"S 档=起步/小项目"的口径矛盾（EXTERNAL-001 P1-2）。
+  # P1-4（2026-11-11）：同理排除 init 自己写的脚手架——`.githooks/pre-commit`（A3）与
+  # `.github/workflows/ponygo-governance.yml`（A5）内容与 init 模板逐字节一致时不计信号；
+  # 目录里出现任何**非模板**文件/内容（人接手了）才计。只读判定，不执行仓库脚本。
   local gov=0
-  for g in .github .githooks; do [ -e "$g" ] && gov=$((gov+1)); done
+  if [ -d .github ] && ! github_only_init_artifacts; then gov=$((gov+1)); fi
+  if [ -d .githooks ] && ! githooks_only_init_artifacts; then gov=$((gov+1)); fi
   [ "$gov" -ge 1 ] && { heavy=1; reasons="$reasons 已有治理痕迹×$gov"; }
   # 信号5：强合规（存在认证/合规/追溯相关目录；仅做粗筛，最终靠 review）
   local comp=0
@@ -5196,20 +7401,24 @@ cmd_audit() {
 
   # ---- 四问打分（S 档查骨架层，M 档追加机制层；每项一条现成命令，命中+1）----
   local hit=0 total=0 hook_ok=0
+  # hook 的评分与 gap 共用 2.4 严格探针；同一次审计不另造「目录/文件存在即接线」口径。
+  # **有意设计**（勿再报「一处探针服务两个判据 = 重复计分」）：问①里的 hook 项与 2.4 本地层接线
+  # 考察的是**同一个物理事实**——core.hooksPath 指向的 pre-commit 里真有一份可执行、位置正确的
+  # ADR 门块。一个事实只该有一次判定：两个判据各消费一次结果，拆成两份探针必然漂移（P9）。
   if gate_24_probe; then hook_ok=1; fi
 
-  # 问① 决策记在哪
+  # 问① 决策记在哪：目录与四态是独立结构项；零真实决策不得拿决策数或 vacuous Status 分。
+  n_dec=$(count_decisions)
   total=$((total+1)); [ -d "$DECISIONS_DIR" ] && hit=$((hit+1))
   total=$((total+1))
   found=0; for lc in $LIFECYCLES; do [ -d "$DECISIONS_DIR/$lc" ] && found=$((found+1)); done
   [ "$found" -eq 4 ] && hit=$((hit+1))
   total=$((total+1))
-  n_dec=$(count_decisions)
   [ "${n_dec:-0}" -gt 0 ] && hit=$((hit+1))   # 有至少一条决策
   total=$((total+1))
   if [ -d "$DECISIONS_DIR/rejected" ] && [ -n "$(ls -A "$DECISIONS_DIR/rejected" 2>/dev/null | grep -vE '^(README\.md|\.gitkeep)$')" ]; then hit=$((hit+1)); fi  # 被否选项留痕（占位文件不计）
   total=$((total+1))
-  # 状态与内容一致：反向查缺 Status 头的 md（允许义务外的 README/AGENTS.md 豁免）
+  # 状态与内容一致：必须有真实决策，且所有决策都有 Status 头（README/AGENTS.md 豁免）。
   bad_status=$(find "$DECISIONS_DIR" -name '*.md' ! -name 'README.md' ! -name 'AGENTS.md' -exec grep -L '^Status:' {} + 2>/dev/null | wc -l | tr -d ' ')
   [ "${n_dec:-0}" -gt 0 ] && [ "${bad_status:-0}" -eq 0 ] && hit=$((hit+1))
 
@@ -5217,37 +7426,37 @@ cmd_audit() {
     total=$((total+1))
     n_alt=$(grep -rl 'Alternatives' "$DECISIONS_DIR" 2>/dev/null | grep -v '/README\.md$' | wc -l | tr -d ' ')
     [ "${n_alt:-0}" -gt 0 ] && hit=$((hit+1))  # 有 Alternatives 节
-    total=$((total+1)); [ "$hook_ok" = "1" ] && hit=$((hit+1))  # 触发条件/门禁痕迹
+    total=$((total+1)); [ "$hook_ok" = "1" ] && hit=$((hit+1))  # 触发条件/门禁痕迹（与 2.4 同口径）
   fi
 
   # 问② 承诺怎么强制
-  local gate_spec_gap_txt="" gate_spec_missing=0
-  if ! gate_spec_gap_txt=$(check_gate_spec_pairing); then gate_spec_missing=1; fi
+  local gate_spec_gap_txt="" gate_spec_missing=0 gate_spec_fail=0
+  if ! gate_spec_gap_txt=$(check_gate_spec_pairing); then gate_spec_missing=1; gate_spec_fail=1; fi
   # 只有出现真正的实例门才启用配对硬判据；初始化骨架的 A1/A6 仍由各自内置 spec 看守。
   local instance_gate_count=0 igf=""
   while IFS= read -r -d '' igf; do
+    is_framework_gate "${igf##*/}" && continue   # 框架门资产不算实例门（名单派生自 UPGRADE_UNIVERSE）
     file_has_content "$igf" && instance_gate_count=$((instance_gate_count+1))
   done < <(find "$META_DIR/gates" -maxdepth 1 -type f \
-      \( -name '*.sh' -o -name '*.ps1' \) ! -name '*.spec.*' \
-      ! -name 'adr-verify.sh' ! -name 'archive-verify.sh' ! -name 'ci-verify.sh' -print0 2>/dev/null)
-  if [ "$instance_gate_count" -eq 0 ]; then gate_spec_missing=0; gate_spec_gap_txt=""; fi
+      \( -name '*.sh' -o -name '*.ps1' \) ! -name '*.spec.*' -print0 2>/dev/null)
+  [ "$instance_gate_count" -gt 0 ] || gate_spec_fail=0
   total=$((total+1))
   # gates/ 有实例自己的实质门禁。README/.gitkeep 占位不计分；框架随 `ponygo init` 交付的
-  # ADR 门资产（A1/A2/A4：adr-verify.sh / adr-verify.spec.sh / ci-verify.sh）与归档封印门资产
-  # （A6/A7：archive-verify.sh / archive-verify.spec.sh）同样不计分——
+  # ADR 门资产（A1/A2/A4：adr-verify.sh / adr-verify.spec.sh / ci-verify.sh）、归档封印门资产
+  # （A6/A7：archive-verify.sh / archive-verify.spec.sh）与引用残留门资产
+  # （A8/A9：no-residue.sh / no-residue.spec.sh）同样不计分——
   # 那是**框架侧**证据（每个实例都有），计进来等于白送一分，四问分数就失去区分度。
   # W2/W6：无有效内容的文件同样不计分（空白行/# 注释行之外无内容 = 不是门禁，占位即假绿）。
   local g2=0 g2f=""
   while IFS= read -r -d '' g2f; do
+    is_framework_gate_asset "${g2f##*/}" && continue   # 框架门资产不计分（名单派生自 UPGRADE_UNIVERSE）
     if file_has_content "$g2f"; then g2=1; break; fi
   done < <(find "$META_DIR/gates" -maxdepth 1 -type f \
-      ! -name 'README.md' ! -name '.gitkeep' \
-      ! -name 'adr-verify.sh' ! -name 'adr-verify.spec.sh' ! -name 'ci-verify.sh' \
-      ! -name 'archive-verify.sh' ! -name 'archive-verify.spec.sh' -print0 2>/dev/null)
+      ! -name 'README.md' ! -name '.gitkeep' -print0 2>/dev/null)
   [ "$g2" = "1" ] && hit=$((hit+1))
   total=$((total+1))
-  # 本地钩子已挂：仅在 git 仓库内判定（非 git 目录读到的全局配置与本项目无关）
-  [ "$hook_ok" = "1" ] && hit=$((hit+1))  # 本地钩子已挂
+  # 本地钩子已挂：复用上方 gate_24_probe 结果，评分与 gap 不可能互相矛盾。
+  [ "$hook_ok" = "1" ] && hit=$((hit+1))
   total=$((total+1))
   # CI 存在：跨平台探测（GitHub/GitLab/Bitbucket/Azure/Drone/Jenkins/通用 ci 目录）
   has_ci=0
@@ -5257,7 +7466,9 @@ cmd_audit() {
   [ "$has_ci" = "1" ] && hit=$((hit+1))
 
   if [ "$LEVEL_CHOICE" = "M" ]; then
-    total=$((total+1)); [ -d .github/workflows ] && hit=$((hit+1))
+    # 已删除的重复计分项：M 档原本额外加一项「[ -d .github/workflows ]」，它与问②上层的跨平台
+    # has_ci 探测（.github/workflows / .gitlab-ci.yml / … / ci，用 [ -e ] 已覆盖目录）查的是同一件事，
+    # 等于给 GitHub 仓库白送一分。删除后 M 档 total=16（S 档 12 不变）；**不要**再加回来。
     total=$((total+1))
     # 负样本 spec（F5）：只认门禁侧负样本——.meta/gates/ 下的 *.spec.*（与 2.3 同一判定域）。
     # 全仓普通单测（*.spec.ts / *_test.go / test_*.py …）不再计分：它不是「门会拒绝非法样本」
@@ -5269,20 +7480,30 @@ cmd_audit() {
     # 都能过 -s，纯可操纵性——故按有效行判定，与 2.3、run_gate_specs 同一口径）。
     negspec=""
     while IFS= read -r -d '' ns1; do
+      is_framework_gate_asset "${ns1##*/}" && continue   # 框架自带 spec 不计分（名单派生自 UPGRADE_UNIVERSE）
       if file_has_content "$ns1" && [ "$gate_spec_missing" = "0" ]; then negspec="$ns1"; break; fi
-    done < <(find "$META_DIR/gates" -type f -name '*.spec.*' \
-        ! -name 'adr-verify.spec.sh' ! -name 'archive-verify.spec.sh' -print0 2>/dev/null)
+    done < <(find "$META_DIR/gates" -type f -name '*.spec.*' -print0 2>/dev/null)
     [ -n "$negspec" ] && hit=$((hit+1))
-    # 配对分与「实例门存在分」成对：合法门+spec 得 2；缺 spec 两者皆失，净差 1。
+    # 配对分与上方「实例门存在分」成对：合法门+spec 得 2；缺 spec 两者皆失，净差 1。
+    # **有意设计**（勿再报「两条判据考察同一组文件 = 重复计分」）：两个分量的语义不同——
+    # 「实例门存在分」问『有没有门』，「配对分」问『门有没有负样本证据（会拒绝非法样本）』。
+    # 只建门不写 spec 得 1 分而非 2；缺 spec 时存在分不扣（门确实在），故两分净差 1、不会双扣。
     total=$((total+1)); [ "$gate_spec_missing" = "0" ] && [ "$instance_gate_count" -gt 0 ] && hit=$((hit+1))
     if [ "$gate_spec_missing" = "1" ] && [ -z "$negspec" ]; then
       printf 'ponygo: 2.3 gates/ 无负样本 spec（实例门无有效同名配对）\n' >&2
     fi
   fi
 
-  # 问③ 重复劳动怎么复用
-  total=$((total+1))
-  [ -d "$SKILLS_DIR" ] && [ -n "$(ls -A "$SKILLS_DIR" 2>/dev/null | grep -vE '^(README\.md|\.gitkeep)$')" ] && hit=$((hit+1))
+  # 问③ 重复劳动怎么复用（spec-ponygo-v2.6 §5.2：1 项 → 3 项，替换原「skills/ 目录非空」）
+  #   3.2 实例自有技能 ≥1——排除基线三名与带 `.ponygo-installed` 的库安装副本（归属见
+  #       .agents/skills/README.md 三层归属；库安装一条 install 命令即可得，计进来等于白送一分）
+  #   3.3 全部技能 frontmatter name 与目录同名（kebab-case）且 description 内联触发词
+  #   3.4 全部技能四要素齐（真相源/步骤/校准样例/验证与报告；英文等价允许，围栏内标题不算在场）
+  # 零技能不判 3.3/3.4（无技能可判 ≠ 通过）；不齐项另见「技能」段的逐技能修法与 gap id。
+  total=$((total+3))
+  [ "$SK_INSTANCE_N" -gt 0 ] && hit=$((hit+1))
+  [ "${SK_SKILL_N:-0}" -gt 0 ] && [ "$SKILL_SHAPE_BAD_33" = "0" ] && hit=$((hit+1))
+  [ "${SK_SKILL_N:-0}" -gt 0 ] && [ "$SKILL_SHAPE_BAD_34" = "0" ] && hit=$((hit+1))
 
   # 问④ 过时怎么退场：**形态不是证据**——`archived/` 目录存在（init 就预建）证明不了任何东西。
   # 只认「已封印归档件」：`archived/manifest.sha256` 存在且含 ≥1 条非空登记
@@ -5298,7 +7519,7 @@ cmd_audit() {
 
   # ---- 输出 ----
   # 缺配对是明确硬 FAIL：先让机读面、分数与人读缺口完整落盘，再统一非零收口。
-  if [ "$gate_spec_missing" = "1" ]; then vl_fail "2.3 gate_spec_missing 实例门缺同名负样本 spec：${gate_spec_gap_txt}"; fi
+  if [ "$gate_spec_fail" = "1" ]; then vl_fail "2.3 gate_spec_missing 实例门缺同名负样本 spec：${gate_spec_gap_txt}"; fi
   AUDIT_HIT="$hit"; AUDIT_TOTAL="$total"
   echo ""
   echo "===== ponygo 审计结果（${LEVEL_CHOICE} 档）====="
@@ -5307,6 +7528,9 @@ cmd_audit() {
   warn_meta_violations
   warn_governance_hygiene
   warn_adaptation_pending
+  # P1-10：与 status **同源同文案**——填槽态 + ai-surface 非 on + 根 AGENTS.md/CLAUDE.md 仍含
+  # BEGIN 哨兵块 → WARN（不自动删）。命中项同时进 --json 的 warnings 块（residual_projection:<文件>）。
+  warn_residual_projection
   # D5：revisions/ 轨道冻结（只读；WARN-only，不改变 hit 与退出码）
   audit_revisions_report
   # F6b：缺口标题只在**确有**缺口条目时打印（零缺口时不留空标题）
@@ -5333,6 +7557,10 @@ cmd_audit() {
     echo "缺口与最小改进动作（按杠杆排序，优先「强制层」）："
     printf '%s' "$gap_txt"
   fi
+  # ---- 技能三层归属（B1 归属完整性 / B2 形状 / B3 advisory；前缀冻结见 spec §5.4）----
+  # 只读报告段：基线缺失与形状不齐是硬失败（退出码非零，收口在级自洽验证之后）；
+  # 库缺失 / 副本非 ok 是**仅提示**（可选资产，不改退出码）；advisory 段不计分、不改退出码。
+  audit_skills_report
   echo ""
   echo "提示：程序只判「有无/对不对」，不判「值不值」——是否值得建某机制，靠 review（P6）。"
   echo ""
@@ -5373,6 +7601,7 @@ cmd_audit() {
     echo "漂移 ${AUDIT_DRIFT_COUNT} 处：${AUDIT_DRIFT_FILES}"
   fi
   # ---- 负样本自检（opt-in：--run-specs；默认不执行仓库脚本，见 run_gate_specs 头注）----
+  if [ "$gate_spec_fail" = "1" ]; then audit_done 1; fi
   if [ "$RUN_SPECS" = "1" ]; then
     echo ""
     echo "===== 2.3 执行判据（--run-specs，opt-in） ====="
@@ -5395,15 +7624,40 @@ cmd_audit() {
   # ---- 级自洽验证（EXTERNAL-001 P1-1：audit 不再把判据推给 status，直接内嵌）----
   # 有治理根且声明了 level 时，audit 顺手验级：判据不符 → 列 FAIL 项并 exit 1
   # （机器可查缺口 = 非零退出；audit 的"打分"语义不变，只是不再漏掉判据级结论）。
+  local ladder_ok=1
   if [ -f "$META_YAML" ]; then
     echo ""
-    if ! verify_ladder "$(read_level)"; then
-      audit_done 1
-    fi
+    verify_ladder "$(read_level)" || ladder_ok=0
+    # P1-8：声明高于实验时显式点明差额（与 status 同一实现；JSON 侧是 level_declared/level_verified）。
+    status_level_gap_line "$AUDIT_LEVEL_INT"
   else
     echo ""
     echo "级自洽验证：跳过（无 .meta/meta.yaml——先 'ponygo init'）。"
   fi
+  # ---- 技能硬失败收口（B1 基线缺失 / B2 形状不齐 = 3.2–3.4 的证据缺口）----
+  # 必须在 verify_ladder **之后**登记：它在开头清空 VL_FAILS/VL_FAIL_IDS，先登记会被抹掉，
+  # JSON 的 ladder.fails 就会丢掉刚判出的 3.x（"判过却报不出来"）。逐项修法已在「技能」段打印。
+  if [ "$SKILL_HARD_FAIL" = "1" ]; then
+    if [ -n "$SK_BASELINE_MISSING" ]; then
+      vl_fail "3.1 技能基线缺失（框架必播三篇不在场）：${SK_BASELINE_MISSING}"
+    fi
+    if [ "$SKILL_SHAPE_BAD_33" = "1" ]; then
+      vl_fail "3.3 技能形状不齐：frontmatter name 未与目录同名或 description 缺触发词（逐技能修法见「技能」段）"
+    fi
+    if [ "$SKILL_SHAPE_BAD_34" = "1" ]; then
+      vl_fail "3.4 技能形状不齐：缺四要素之一（真相源/步骤/校准样例/验证与报告，围栏感知；逐技能修法见「技能」段）"
+    fi
+    # 人读面：级自洽通过时也要让 FAIL 落屏（否则「级自洽验证：通过」+ 非零退出 = 自相矛盾）。
+    # 级自洽已 FAIL 时它的清单已在上方打印，此处不重复。
+    if [ "$ladder_ok" = "1" ] && [ -n "$VL_FAILS" ]; then
+      echo ""
+      echo "技能判据 FAIL（缺口 id：skill_baseline_missing / skill_shape_incomplete；逐技能修法见上「技能」段）："
+      printf '%s' "$VL_FAILS"
+    fi
+    VL_VERDICT="fail"
+    audit_done 1
+  fi
+  if [ "$ladder_ok" != "1" ]; then audit_done 1; fi
   # F2：fail-closed 收口——执行判据证据不足（0 spec / 全 SKIPPED / 护栏拦截）→ exit 3。
   # 走到这里说明级自洽判据无 FAIL（有 FAIL 已在上方 exit 1），故 FAIL(1) > 未验证(3) 成立。
   if [ "${SPEC_UNVERIFIED:-0}" = "1" ]; then
@@ -5422,7 +7676,7 @@ status_tmp_cleanup() {
 }
 
 # ---------- 骨架漂移（status 与 audit 的**唯一**口径，Wave13 P1-3） ----------
-# 基准 = 同一 UPGRADE_UNIVERSE（十五文件）+ 同一模板基准（write_skeleton 0，mktemp 临时目录）+
+# 基准 = 同一 UPGRADE_UNIVERSE（十七文件）+ 同一模板基准（write_skeleton 0，mktemp 临时目录）+
 # EOL 归一逐字节。只读：不写仓库、不执行任何仓库脚本（GI-4）。
 # docs-tier 已激活实例豁免 `.meta/docs-tier/README.md`（激活必改写该文件，比对即恒漂移——与
 # cmd_upgrade 的 dt_skip 同口径）。
@@ -5435,8 +7689,12 @@ skel_tmp_cleanup() {
   return 0
 }
 skeleton_drift() {
-  SKEL_DRIFT_LIST=""; SKEL_CMP_OK=0
-  local st_dt=0 stf t_exit="" t_int="" t_term=""
+  # 可选资产（库九文件）的漂移单独记账，不混进 skeleton.drift（该字段是十七文件口径，W9-B3）；
+  # 只比在场的库文件——库文件缺失是「可选资产缺口」（status 单独一行、不计 exit 1），不是漂移。
+  SKEL_DRIFT_LIST=""; SKEL_CMP_OK=0; SKEL_OPT_DRIFT_LIST=""; SKEL_OPT_UNDECIDED=0
+  # P0-4 结果分类：门资产漂移单独记账（→ vl_fail），其余 universe 漂移留在 SKEL_DRIFT_LIST（观察项）。
+  SKEL_GATE_DRIFT_LIST=""
+  local st_dt=0 stf cmp_rc=0 t_exit="" t_int="" t_term=""
   # 三钩收口（与既有 status 实现同款）：信号落在基准树生成/比对窗口时不残留临时树
   t_exit=$(trap -p EXIT); t_int=$(trap -p INT); t_term=$(trap -p TERM)
   trap 'skel_tmp_cleanup' EXIT
@@ -5457,9 +7715,27 @@ skeleton_drift() {
       cmp_rc=$?
       if [ "$cmp_rc" -eq 1 ]; then
         SKEL_DRIFT_LIST="${SKEL_DRIFT_LIST}${SKEL_DRIFT_LIST:+ }$stf"
+        # 分类（P0-4）：命中框架门资产集合 → 另记一份；status/audit 的级自洽验证据此 vl_fail。
+        case " $GATE_ASSET_UNIVERSE " in
+          *" $stf "*) SKEL_GATE_DRIFT_LIST="${SKEL_GATE_DRIFT_LIST}${SKEL_GATE_DRIFT_LIST:+ }$stf" ;;
+        esac
       elif [ "$cmp_rc" -ge 2 ]; then
-        SKEL_CMP_OK=0
-        SKEL_DRIFT_LIST=""
+        SKEL_CMP_OK=0; SKEL_DRIFT_LIST=""; SKEL_GATE_DRIFT_LIST=""
+        break
+      fi
+    done
+    # 可选资产（库文件，模板所有）：只在**两侧都在场**时比对——实例侧缺失 = 可选资产缺口
+    # （不计 exit 1，由 status 的「骨架可选资产缺口」行表达）；模板侧缺失 = 未判定，
+    # 不得当成"零漂移"（P6 诚实条款：没判过就不许报一致的绿）。
+    for stf in $OPTIONAL_UNIVERSE; do
+      [ -f "$stf" ] || continue
+      if [ ! -f "$SKEL_TMP/$stf" ]; then SKEL_OPT_UNDECIDED=$((SKEL_OPT_UNDECIDED + 1)); continue; fi
+      cmp -s <(tr -d '\r' < "$stf") <(tr -d '\r' < "$SKEL_TMP/$stf")
+      cmp_rc=$?
+      if [ "$cmp_rc" -eq 1 ]; then
+        SKEL_OPT_DRIFT_LIST="${SKEL_OPT_DRIFT_LIST}${SKEL_OPT_DRIFT_LIST:+ }$stf"
+      elif [ "$cmp_rc" -ge 2 ]; then
+        SKEL_CMP_OK=0; SKEL_DRIFT_LIST=""; SKEL_OPT_DRIFT_LIST=""; SKEL_GATE_DRIFT_LIST=""
         break
       fi
     done
@@ -5484,6 +7760,8 @@ cmd_status() {
   # W9-B2/B3：JSON 的 skeleton 与人类清单**同源**——三者都存「仓库相对路径列表」，
   # 计数由列表长度派生（禁两套口径：数组与「骨架文件缺口：N」必须同数）。
   STATUS_MISSING_DIRS=""; STATUS_MISSING_FILES=""; STATUS_DRIFT=""; VL_VERDICT=""; VL_FAIL_IDS=""; L1_JUDGED=0
+  VL_VERIFIED_LEVEL=0
+  RESID_PROJ_FILES=""
   if [ "$STATUS_JSON" = "1" ]; then exec 3>&1 1>&2; fi
   echo "===== ponygo status ====="
   echo "治理级：$(fmt_level "$lv")"
@@ -5492,17 +7770,19 @@ cmd_status() {
   warn_meta_violations
   warn_governance_hygiene
   warn_adaptation_pending
+  # P1-7：`retire --level off` 后无需再跑 sync 即可见残留投影告警（与 sync 同一实现同一文案）。
+  warn_residual_projection
   echo ""
   echo "骨架完整度："
   local missing=0
   for d in "$META_DIR" "$META_DIR/constitution" "$META_DIR/gates" "$META_DIR/docs-tier" "$AGENTS_RUNTIME_DIR" "$DECISIONS_DIR" "$SKILLS_DIR"; do
     if [ -d "$d" ]; then printf '  [ok]  %s\n' "$d"; else printf '  [缺]  %s\n' "$d"; missing=$((missing+1)); STATUS_MISSING_DIRS="${STATUS_MISSING_DIRS}${STATUS_MISSING_DIRS:+ }$d"; fi
   done
-  # meta.yaml 不属 skeleton.missing_files（W9-B3：该字段 = UPGRADE_UNIVERSE 十五文件口径）；
+  # meta.yaml 不属 skeleton.missing_files（W9-B3：该字段 = UPGRADE_UNIVERSE 十七文件口径）；
   # 它缺失由「骨架完整度」行 + 级自洽 0.2 判据表达，退出码照旧非零。
   [ -f "$META_YAML" ] && printf '  [ok]  %s\n' "$META_YAML" || { printf '  [缺]  %s\n' "$META_YAML"; missing=$((missing+1)); }
 
-  # ---- 骨架文件口径（F4：与 'ponygo upgrade' 同一 UPGRADE_UNIVERSE 十五文件）----
+  # ---- 骨架文件口径（F4：与 'ponygo upgrade' 同一 UPGRADE_UNIVERSE 十七文件）----
   # 只判**存在性**（不读模板、不执行任何脚本——只读命令的边界不变）。缺口数必须与 upgrade
   # 的缺口行数逐一相等，否则「status 绿 / upgrade 报缺口」的结论分裂就地复发（P1-4）。
   local sf_n=0 sf_total=0 sf_list="" sf
@@ -5536,6 +7816,40 @@ cmd_status() {
     fi
   fi
 
+  # ---- 可选资产口径（OPTIONAL_UNIVERSE = 模板库九文件，spec-ponygo-v2.6 §4）----
+  # 语义边界（与十七文件不同）：库是**可选资产**——缺失只提示，**不计 exit 1**，
+  # 也不并入 skeleton.missing_files（该字段仍是十七文件口径，W9-B3）；
+  # 存在即模板所有，与模板不一致照常报漂移（观察项，同样不改退出码）。
+  local of_n=0 of_total=0 of_list="" of=""
+  for of in $OPTIONAL_UNIVERSE; do
+    of_total=$((of_total+1))
+    [ -f "$of" ] && continue
+    of_n=$((of_n+1))
+    of_list="$of_list $of"
+  done
+  if [ "$of_n" -gt 0 ]; then
+    printf '骨架可选资产缺口：%s\n' "$of_n"
+    for of in $of_list; do printf '  [缺]  %s\n' "$of"; done
+    echo "  → 跑 'ponygo init --repair-skeleton' 只补缺失的库文件（不覆盖既有文件；缺失属可选资产，不计入 exit 1）"
+  else
+    local of_drift=0 of_why=""
+    of_drift=$(skel_drift_count "${SKEL_OPT_DRIFT_LIST:-}")
+    if [ "${SKEL_CMP_OK:-0}" != "1" ]; then
+      of_why="；内容未比对：模板基准不可得"
+    elif [ "${SKEL_OPT_UNDECIDED:-0}" -gt 0 ]; then
+      of_why="；${SKEL_OPT_UNDECIDED} 个未比对（模板基准缺该文件）"
+    fi
+    if [ "$of_drift" -gt 0 ]; then
+      printf '骨架可选资产齐全（%s 个），但内容漂移 %s 处（模板所有，见 '\''ponygo upgrade'\''）：%s\n' "$of_total" "$of_drift" "${SKEL_OPT_DRIFT_LIST}"
+    elif [ -n "$of_why" ]; then
+      printf '骨架可选资产齐全（%s 个库文件%s）\n' "$of_total" "$of_why"
+    else
+      printf '骨架可选资产齐全（%s 个库文件，逐字节比对）\n' "$of_total"
+    fi
+  fi
+
+  # 技能三层归属一次求值——只为 --json 的 skills 块（人读面在 audit；status 不判分）。
+  compute_skills_state
   local n_dec=0
   n_dec=$(count_decisions)
   printf '  决策数：%s\n' "$n_dec"
@@ -5551,7 +7865,8 @@ cmd_status() {
   else
     echo "骨架完整。"
     # 级自洽验证：失败项输出取代"去下一级"建议文本（不叠床架屋）
-    if ! verify_ladder "$lv"; then status_done 1; fi
+    if ! verify_ladder "$lv"; then status_level_gap_line "$(level_as_int "$lv")"; status_done 1; fi
+    status_level_gap_line "$(level_as_int "$lv")"
     case "$lv" in
       0|1) echo "去 L$((lv+1))：见 https://github.com/lanhui100/ponygo/blob/main/maturity-ladder.md 对应级退出标准与布尔检查项。" ;;
       2)   echo "已达机械判定的上限。L3+ 为「靠 review」的目标画像，按需选装。" ;;
@@ -5570,19 +7885,67 @@ cmd_status() {
 # --check 恒红）。实例侧口径：生成物仍是模板态（由 write_skeleton 的 heredoc 提供）；s14 用同一判据分支，
 # 不再假定"仓库文件 = 模板"——模板仓自身也可以是一个已激活实例。
 # 教训归因（假漂移历史）真源：TASK-002 双审，见 docs/dev-team/reviews/——不塞进用户可见输出。
-# 门禁资产只登记**不可变**的 A1/A2/A4/A6/A7（§6.3/R8）：A3（.githooks/pre-commit）与 A5（workflow）
+# 门禁资产只登记**不可变**的 A1/A2/A4/A6/A7/A8/A9（§6.3/R8）：A3（.githooks/pre-commit）与 A5（workflow）
 # 是实例可编辑文件（有人会追加自己的钩子逻辑、改 CI 触发），进表 = 三仓永久 drift 红。
-# 十五文件 = 十文件骨架 + 门禁资产 A1/A2/A4/A6/A7（A6/A7 = 归档 SHA-256 封印门与其负样本自检）。
+# 十七文件 = 十文件骨架 + 门禁资产 A1/A2/A4/A6/A7/A8/A9
+# （A6/A7 = 归档 SHA-256 封印门与其负样本自检；A8/A9 = 引用残留门与其负样本自检）。
 UPGRADE_UNIVERSE=".agents/notes/README.md .agents/skills/README.md .meta/docs-tier/README.md \
 .agents/skills/write-adr/SKILL.md .agents/skills/write-adr/verify-note.sh \
 .agents/skills/governance-review/SKILL.md .meta/gates/README.md \
 .agents/skills/change-review/SKILL.md .agents/notes/AGENTS.md .agents/notes/archived/AGENTS.md \
 .meta/gates/adr-verify.sh .meta/gates/adr-verify.spec.sh .meta/gates/ci-verify.sh \
+.meta/gates/archive-verify.sh .meta/gates/archive-verify.spec.sh \
+.meta/gates/no-residue.sh .meta/gates/no-residue.spec.sh"
+
+# ---------- 框架门资产集合（P0-4，2026-11-11）：UPGRADE_UNIVERSE 的**判定子集** ----------
+# 语义：这些文件是框架不可变门资产（A1/A2/A4/A6/A7），实例侧不编辑；它们与模板不一致
+# = 门**可能被替换/弱化**（形状判据仍绿，字节已变），故漂移判 vl_fail，而不是观察项。
+# 其余 universe 文件（README / AGENTS / SKILL）漂移仍是 WARN 观察项（不改退出码）——
+# 那是文档面，实例确实会改，判 FAIL 等于逼人 fork 模板。
+# 契约冻结清单（5 文件）；A8/A9（no-residue.*）暂留观察项，扩张需新契约。
+GATE_ASSET_UNIVERSE=".meta/gates/adr-verify.sh .meta/gates/adr-verify.spec.sh .meta/gates/ci-verify.sh \
 .meta/gates/archive-verify.sh .meta/gates/archive-verify.spec.sh"
+
+# 框架门资产名单（P0-2 的「实例门」排除集）：从 UPGRADE_UNIVERSE 的 .meta/gates/ 子集**派生**，
+# 不再手抄文件名。为什么派生：手抄四个名字时，未来新增的框架门（A8/A9 就是这么来的）不会自动进
+# 排除集，2.3 会把框架资产误算成「实例自己的门」——判据白送分且无人发现（第二份清单 = 漂移源）。
+#   framework_gate_names       → 非 spec 框架门（A1/A4/A6/A8…）：不计入实例门
+#   framework_gate_names all   → 含 spec 的框架门资产全集（A1/A2/A4/A6/A7/A8/A9）：不计入「有实质门禁」计分
+framework_gate_names() {
+  local f
+  for f in $UPGRADE_UNIVERSE; do
+    case "$f" in
+      .meta/gates/*)
+        case "${f##*/}" in
+          *.spec.*) [ "${1:-}" = "all" ] && printf '%s\n' "${f##*/}" ;;
+          *) printf '%s\n' "${f##*/}" ;;
+        esac
+        ;;
+    esac
+  done
+}
+is_framework_gate() { # <文件名> → 0 = 不计入实例门的框架门（非 spec 资产）
+  framework_gate_names | grep -qxF -- "$1"
+}
+is_framework_gate_asset() { # <文件名> → 0 = 框架门资产（含 .spec.*，用于「实质门禁」计分排除）
+  framework_gate_names all | grep -qxF -- "$1"
+}
+
+# ---------- 可选资产宇宙（OPTIONAL_UNIVERSE：模板库九文件，spec-ponygo-v2.6 §4） ----------
+# 与 UPGRADE_UNIVERSE（十七文件，**不变**）并列的第二张宇宙表。语义差别只有一条：
+# 库文件是**可选资产**——缺失只提示，不判 drift、不计 exit 1（status 行 / upgrade「缺口（可选资产）」）；
+# 存在即模板所有，与模板不一致照常报 drift（库正文由 write_skeleton 的 heredoc 提供，EOL 归一逐字节）。
+# 为什么与十七文件分表而不是并表：并表会让每个历史实例的 `status` 在获得库的那一刻之前恒红，
+# 与「可选」语义矛盾（决策见 .agents/notes/implemented/process/2026-11-10-skill-tiers-library-and-shape-audit.md）。
+OPTIONAL_UNIVERSE=".meta/skills-library/README.md .meta/skills-library/install.sh \
+.meta/skills-library/catalog.tsv \
+.meta/skills-library/pg-delivery-checks/SKILL.md .meta/skills-library/pg-find-simplifications/SKILL.md \
+.meta/skills-library/pg-doc-hygiene/SKILL.md .meta/skills-library/pg-test-reliability/SKILL.md \
+.meta/skills-library/pg-upgrade-guide/SKILL.md .meta/skills-library/pg-gc-agent-notes/SKILL.md"
 
 # ---------- 骨架缺口补齐（`ponygo init --repair-skeleton`；F3：并入 init，不新增顶层命令） ----------
 # 命令面固定六条（ADR 2026-08-30-six-command-surface）：骨架补缺是 init 的一个旗标，不是新命令。
-# 口径与 cmd_upgrade **完全同一**：同一 UPGRADE_UNIVERSE（十五文件）+ 同一模板基准（write_skeleton 0）。
+# 口径与 cmd_upgrade **完全同一**：同一 UPGRADE_UNIVERSE（十七文件）+ 同一模板基准（write_skeleton 0）。
 # 铁律：
 #   - 只补**缺失**：已存在文件（含内容已漂移的实例文件）一律一字不动，绝不覆盖；
 #   - 写入走 write_atomic（同目录 mktemp + mv 原子替换）——中断/并发下不留 0 字节半截文件；
@@ -5647,7 +8010,7 @@ repair_skeleton_gaps() { # <dry:0|1>
   if ! REPAIR_TMP=$(mktemp -d 2>/dev/null); then
     REPAIR_TMP=""
     warn "骨架补齐：无法创建临时目录——本次未写任何文件，骨架缺口仍在"
-    gate_write_fail "骨架补齐（UPGRADE_UNIVERSE 十五文件）" "mktemp -d 失败——无法生成模板基准，骨架缺口未被补齐"
+    gate_write_fail "骨架补齐（UPGRADE_UNIVERSE 十七文件）" "mktemp -d 失败——无法生成模板基准，骨架缺口未被补齐"
     repair_skeleton_cleanup
     if [ -n "$trap_exit" ]; then eval "$trap_exit"; else trap - EXIT; fi
     if [ -n "$trap_int" ]; then eval "$trap_int"; else trap - INT; fi
@@ -5656,7 +8019,7 @@ repair_skeleton_gaps() { # <dry:0|1>
   fi
   if ! ( cd "$REPAIR_TMP" && write_skeleton 0 ) >/dev/null 2>&1; then
     warn "骨架补齐：无法生成模板基准（write_skeleton 失败）——本次未写任何文件，骨架缺口仍在"
-    gate_write_fail "骨架补齐（UPGRADE_UNIVERSE 十五文件）" "模板基准生成失败（write_skeleton 0 非零）——骨架缺口未被补齐"
+    gate_write_fail "骨架补齐（UPGRADE_UNIVERSE 十七文件）" "模板基准生成失败（write_skeleton 0 非零）——骨架缺口未被补齐"
     fails=1
   else
     for f in $UPGRADE_UNIVERSE; do
@@ -5680,6 +8043,28 @@ repair_skeleton_gaps() { # <dry:0|1>
         fails=1
       fi
     done
+    # 可选资产（OPTIONAL_UNIVERSE：模板库九文件）——历史项目获得库的唯一路径（spec §4）。
+    # 与十七文件的差别只有退出码语义：库是**可选资产**，缺口/写入失败只提示（warn），
+    # 不登记 gate_write_fail、不改 exit 1（缺失由 'ponygo status' 的可选资产缺口行 + audit 的
+    # skill_library_missing 提示表达）。只补缺失、绝不覆盖的纪律与十七文件完全相同。
+    for f in $OPTIONAL_UNIVERSE; do
+      [ -f "$f" ] && continue   # 已存在（含内容漂移）→ 一字不动：只补缺失，绝不覆盖
+      if [ ! -f "$REPAIR_TMP/$f" ]; then
+        warn "骨架补齐：模板基准缺可选资产 $f（OPTIONAL_UNIVERSE 与 write_skeleton 生成集漂移）→ 该项仍是缺失态"
+        continue
+      fi
+      n=$((n+1))
+      if [ "$dry" = "1" ]; then
+        info "[dry-run] 将补库文件 $f（缺失；可选资产，不覆盖既有文件，权限同模板）"
+        continue
+      fi
+      mode=$(file_mode "$REPAIR_TMP/$f")
+      if write_atomic "$f" "$mode" < "$REPAIR_TMP/$f"; then
+        info "补库文件（可选资产）：$f"
+      else
+        warn "骨架补齐：可选资产写入失败 $f（目录不可写 / 原子替换失败）→ 该项仍是缺失态；不计入 exit 1"
+      fi
+    done
   fi
   repair_skeleton_cleanup
   if [ -n "$trap_exit" ]; then eval "$trap_exit"; else trap - EXIT; fi
@@ -5690,10 +8075,10 @@ repair_skeleton_gaps() { # <dry:0|1>
     return 1
   fi
   if [ "$n" -eq 0 ]; then
-    printf '骨架零缺口（UPGRADE_UNIVERSE 十五文件齐全，未写任何文件）\n'
+    printf '骨架零缺口（UPGRADE_UNIVERSE 十七文件齐全，未写任何文件）\n'
   else
     printf '骨架补齐：%s\n' "$n"
-    info "骨架补齐只补缺失项：既有十五文件一字不动（缺口口径与 'ponygo upgrade' 同一宇宙表）"
+    info "骨架补齐只补缺失项：既有十七文件一字不动（缺口口径与 'ponygo upgrade' 同一宇宙表）"
   fi
   return 0
 }
@@ -5702,14 +8087,14 @@ repair_skeleton_gaps() { # <dry:0|1>
 # 为什么是位置子命令而不是旗标：旗标预算受 flag-budget ADR 约束（零新旗标）；语义上 apply 是
 # upgrade 的写路径变体，位置词不会被误当"只读检查"。
 # 与 --check 的**共同口径**（禁第二份判断）：
-#   - 同一宇宙表 UPGRADE_UNIVERSE（十五文件）；
+#   - 同一宇宙表 UPGRADE_UNIVERSE（十七文件）；
 #   - 同一模板基准（write_skeleton 0 到 mktemp 目录）；
 #   - 同一 docs-tier 跳过规则（已激活实例的 .meta/docs-tier/README.md 不参与比对/刷新）；
 #   - 同一内容比较口径（EOL 归一后 diff）。
 # 差别只在**有漂移时做什么**：--check 报 drift 并非零退出；apply 原子写回模板字节。
 cmd_upgrade_apply() {
   echo "===== ponygo upgrade apply ====="
-  has_meta || die "无 .meta/ 治理根（meta.yaml 缺失）——先 'ponygo init'；apply 只刷新宇宙内十五文件，不播种骨架"
+  has_meta || die "无 .meta/ 治理根（meta.yaml 缺失）——先 'ponygo init'；apply 只刷新宇宙内十七文件，不播种骨架"
   if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     printf 'ponygo: WARN 不在 git 仓库内——apply 不依赖 git，但无法派生版本/血缘（与 --check 同款 WARN）\n' >&2
   fi
@@ -5721,7 +8106,7 @@ cmd_upgrade_apply() {
   # docs-tier 已激活实例：该文件跳过（与 --check 完全同一口径）
   if [ -f "$META_DIR/docs-tier/README.md" ] && grep -q '## 已激活文档家清单' "$META_DIR/docs-tier/README.md"; then
     dt_skip=1
-    echo "注：docs-tier 已激活实例——.meta/docs-tier/README.md 跳过刷新（与 --check 同口径：激活必改写它，覆盖即抹掉实例申报）；其余十四文件照常处理。"
+    echo "注：docs-tier 已激活实例——.meta/docs-tier/README.md 跳过刷新（与 --check 同口径：激活必改写它，覆盖即抹掉实例申报）；其余十六文件照常处理。"
   fi
   for f in $UPGRADE_UNIVERSE; do
     [ "$dt_skip" = "1" ] && [ "$f" = ".meta/docs-tier/README.md" ] && continue
@@ -5744,15 +8129,35 @@ cmd_upgrade_apply() {
       fails=$((fails+1))
     fi
   done
+  # 可选资产（OPTIONAL_UNIVERSE：模板库九文件）：只刷新**已在场**的库文件——库文件是模板所有，
+  # 在场即受模板约束（与 --check 的 drift 口径同源）；**缺失不补**，库文件的缺失由
+  # 'ponygo init --repair-skeleton' 只补缺失负责，apply 不越界创建可选资产。
+  for f in $OPTIONAL_UNIVERSE; do
+    [ -f "$f" ] || continue
+    if [ ! -f "$tmp/$f" ]; then
+      printf '内部不一致: 模板基准缺可选资产 %s（OPTIONAL_UNIVERSE 与 write_skeleton 生成集漂移）——该项未刷新\n' "$f" >&2
+      continue
+    fi
+    if diff -q <(tr -d '\r' < "$f") <(tr -d '\r' < "$tmp/$f") >/dev/null 2>&1; then
+      continue
+    fi
+    mode=$(file_mode "$tmp/$f")
+    if write_atomic "$f" "$mode" < "$tmp/$f"; then
+      n=$((n+1)); info "应用（刷新可选资产）：$f"
+    else
+      printf 'ponygo: WARN 写入失败：%s（可选资产，目录不可写 / 原子替换失败）→ 该项未刷新\n' "$f" >&2
+      fails=$((fails+1))
+    fi
+  done
   rm -rf "$tmp"; trap - EXIT INT TERM
   if [ "$fails" -ne 0 ]; then
     printf 'apply 未完成：%s 项写入失败（见上）；本次成功应用 %s 处\n' "$fails" "$n"
     return 1
   fi
   if [ "$n" -eq 0 ]; then
-    printf 'apply 零变更（宇宙内十五文件已与内嵌模板一致，未写任何文件）\n'
+    printf 'apply 零变更（宇宙内十七文件与在场库文件已与内嵌模板一致，未写任何文件）\n'
   else
-    printf '应用 %s 处（宇宙内十五文件已与内嵌模板对齐；跑 ponygo upgrade --check 复核零漂移）\n' "$n"
+    printf '应用 %s 处（宇宙内十七文件与在场库文件已与内嵌模板对齐；跑 ponygo upgrade --check 复核零漂移）\n' "$n"
   fi
   return 0
 }
@@ -5786,14 +8191,14 @@ cmd_upgrade() {
     *)            echo "当前 level：$(fmt_level "$lv")" ;;
   esac
   # 报告头：盲区声明（升级纪律已在函数头打印）
-  echo "漂移报告：本报告只覆盖 s14 宇宙内十五文件（十文件骨架 + 门禁资产 A1/A2/A4/A6/A7）；宇宙外文件无基线，不判定。漂移=观察，非承诺违例（status 管承诺）。"
+  echo "漂移报告：本报告只覆盖 s14 宇宙内十七文件（十文件骨架 + 门禁资产 A1/A2/A4/A6/A7/A8/A9）；宇宙外文件无基线，不判定。漂移=观察，非承诺违例（status 管承诺）。"
   # 已激活 docs-tier 实例：本文件不参与漂移比对（激活必改写该文件，比对即恒漂移、--check 恒红）。
   # 实例侧口径：生成物仍是模板态（由 write_skeleton 的 heredoc 提供）；s14 用同一判据分支，
   # 不再假定"仓库文件 = 模板"——模板仓自身也可以是一个已激活实例。
   local dt_skip=0
   if [ -f "$META_DIR/docs-tier/README.md" ] && grep -q '## 已激活文档家清单' "$META_DIR/docs-tier/README.md"; then
     dt_skip=1
-    echo "注：docs-tier 已激活实例——.meta/docs-tier/README.md 不参与漂移比对（本仓该文件是激活版，模板基准仍是 heredoc 提供的模板态）；其余十四文件照常比对（宇宙 15 − 本文件 1）。"
+    echo "注：docs-tier 已激活实例——.meta/docs-tier/README.md 不参与漂移比对（本仓该文件是激活版，模板基准仍是 heredoc 提供的模板态）；其余十六文件照常比对（宇宙 17 − 本文件 1）。"
   fi
   # 生成模板基准（临时目录，用 write_skeleton 同源 heredoc；eol 归一后逐字节比对）。
   # write_skeleton 是当前进程内的函数（相对路径常量），在子 shell cd 后调用即生成一套模板骨架。
@@ -5835,12 +8240,34 @@ cmd_upgrade() {
       echo "drift: $f"
     fi
   done
+  # ---- 可选资产（OPTIONAL_UNIVERSE = 模板库九文件；spec §4 语义与十七文件不同）----
+  # 缺失 → 打印「缺口（可选资产）」：**不判 drift、不改退出码**（历史实例可暂不装库，
+  # 缺失只由 status 的可选资产缺口行 / audit 的 skill_library_missing 提示表达）；
+  # 存在但与模板不一致 → 照常报 drift（库文件是模板所有，实例改动即漂移）。
+  local opt_missing_n=0 opt_undecided=0
+  for f in $OPTIONAL_UNIVERSE; do
+    if [ ! -f "$f" ]; then
+      opt_missing_n=$((opt_missing_n+1))
+      echo "缺口（可选资产）: $f（可选资产缺失——跑 'ponygo init --repair-skeleton' 只补缺失；不计入退出码）"
+      continue
+    fi
+    if [ ! -f "$tmp/$f" ]; then opt_undecided=$((opt_undecided+1)); continue; fi
+    if ! diff -q <(tr -d '\r' < "$f") <(tr -d '\r' < "$tmp/$f") >/dev/null 2>&1; then
+      drift_n=$((drift_n+1))
+      echo "drift: $f"
+    fi
+  done
   rm -rf "$tmp"
   trap - EXIT INT TERM
   if [ "$drift_n" -eq 0 ] && [ "$missing_n" -eq 0 ]; then
-    echo "宇宙内十五文件与模板基准一致，零漂移。"
+    echo "宇宙内十七文件与模板基准一致，零漂移。"
   else
     echo "发现 $drift_n 处漂移 + $missing_n 处缺口（drift:/缺口: 前缀行）——离线源是模板基准，逐条合入或按升级纪律重建血缘。"
+  fi
+  if [ "$opt_missing_n" -gt 0 ]; then
+    echo "可选资产缺口 $opt_missing_n 处（见上「缺口（可选资产）」行；可选资产缺失不判 drift、不改退出码）"
+  elif [ "$opt_undecided" -gt 0 ]; then
+    echo "可选资产 $opt_undecided 个未比对（模板基准缺该文件——观察项，不计入漂移）"
   fi
   echo "tmpdir 已清理"
   # exit 语义：默认报告 exit 0（漂移是观察）；--check 漂移**或缺口**非零（供 CI——删骨架文件比内容漂移更严重，CI 应拦住）
@@ -7216,12 +9643,12 @@ usage_upgrade() {
 ponygo upgrade —— 骨架漂移报告 / 宇宙内文件刷新
 
 用法：
-  ponygo upgrade              漂移报告（只读；宇宙 = UPGRADE_UNIVERSE 十五文件；默认 exit 0）
+  ponygo upgrade              漂移报告（只读；宇宙 = UPGRADE_UNIVERSE 十七文件；默认 exit 0）
   ponygo upgrade --check      同报告，但存在漂移/缺口 → exit 非零（供 CI；与 --dry-run 互斥）
-  ponygo upgrade apply        把宇宙内十五文件刷新为内嵌模板（写路径；仅内容不同才写）
+  ponygo upgrade apply        把宇宙内十七文件刷新为内嵌模板（写路径；仅内容不同才写）
 
 apply 的边界（诚实条款）：
-  - 只处理 UPGRADE_UNIVERSE 十五文件；宇宙外文件（根 README / meta.yaml / 已填 constitution /
+  - 只处理 UPGRADE_UNIVERSE 十七文件；宇宙外文件（根 README / meta.yaml / 已填 constitution /
     根 AGENTS.md / CLAUDE.md / classes.local / docs-tier 激活版等）无模板基线，一概不动；
   - docs-tier「已激活实例」（.meta/docs-tier/README.md 含「## 已激活文档家清单」）跳过该文件——
     与 --check 同口径：激活必改写它，覆盖即抹掉实例申报；
@@ -7238,7 +9665,7 @@ ponygo —— 项目工程化治理元框架命令行（单文件、零依赖）
   ponygo init     [--dry-run] [--repair-skeleton]  建立/注入 .agents/ + .meta/ 治理骨架（自判新/旧项目；既有 .meta 下按 UPGRADE_UNIVERSE 只补缺失骨架文件）
   ponygo audit    [--level S|M] [--run-specs] [--json]  自适应体检：打分 + 缺口 + 最小改进动作（判据不符 exit 1）
   ponygo status   [--json]               查看成熟度级与骨架完整度（骨架缺口或声明级判据不符 exit 1）
-  ponygo upgrade  [--check] [apply]      骨架漂移报告（宇宙=UPGRADE_UNIVERSE 十五文件；默认 exit 0；--check 漂移非零供 CI；apply 刷新为内嵌模板）
+  ponygo upgrade  [--check] [apply]      骨架漂移报告（宇宙=UPGRADE_UNIVERSE 十七文件；默认 exit 0；--check 漂移非零供 CI；apply 刷新为内嵌模板）
   ponygo sync                            把 constitution 投影到 AGENTS.md / CLAUDE.md（模板态投影初始引导）
   ponygo retire   --level <N|off>        退级 / 整体退场（停止线执行器）
   ponygo observe  status|init|audit|upgrade|probe  可观测性治理维度（ob0/ob1/ob2 判定；详见 'ponygo observe --help'）
@@ -7249,7 +9676,7 @@ ponygo —— 项目工程化治理元框架命令行（单文件、零依赖）
   --run-specs 执行 gates/ 下 *.spec.sh 负样本自检（opt-in；默认不执行仓库脚本）
   --json      固定词表单行 JSON（接受面：audit / status / observe status|audit；其余命令拒绝）
               人类报告改走 stderr，stdout 只留一行 JSON；exit 字段 == 真实退出码
-  --repair-skeleton  ponygo init 专用：按 UPGRADE_UNIVERSE 十五文件只补缺失骨架文件
+  --repair-skeleton  ponygo init 专用：按 UPGRADE_UNIVERSE 十七文件只补缺失骨架文件
               （绝不覆盖既有文件；配 --dry-run 只打印计划、零落盘）
   --check     ponygo upgrade 专用：存在漂移 → exit 非零（供 CI；与 --dry-run 互斥）
 

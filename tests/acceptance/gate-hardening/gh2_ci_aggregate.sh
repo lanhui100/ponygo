@@ -16,5 +16,5 @@ fi
 run_cli "$ROOT" audit --level M
 assert_zero "GH2 本仓 dogfood audit" "$R_RC"
 assert_not_contains "GH2 不得把已聚合的 governance 误报为适配器缺失" "$R_OUT" "适配器缺失"
-assert_contains "GH2 应识别 governance 执行面" "$R_OUT" "治理执行面已接线"
+assert_contains "GH2 应识别 governance 执行面" "$R_OUT" "治理执行面已挂载"
 finish

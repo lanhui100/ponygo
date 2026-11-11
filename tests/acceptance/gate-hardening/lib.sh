@@ -5,6 +5,9 @@ set -u
 GH_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd "$GH_DIR/../../.." && pwd)
 CLI_BIN=${PONYGO_CLI:-$ROOT/ponygo}
+
+# P0-2/P0-3 夹具（2026-11-11）：L2 判据 2.3 现要求 ≥1 实例门 + 含拒绝断言的 spec，单点收口在此。
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/p0_instance_gate.sh"
 SBASE=$(mktemp -d) || { echo "gate-hardening: mktemp 失败" >&2; exit 1; }
 trap 'rm -rf "$SBASE"' EXIT
 new_case() { mktemp -d "$SBASE/case.XXXXXX"; }
@@ -96,6 +99,8 @@ make_gov_repo() { # <dir> [level]：真实 ponygo init + 合法 ADR
   assert_rc_is "夹具：ponygo init" 0 "$R_RC"
   [ "$R_RC" -eq 0 ] || return 1
   printf 'level: %s\n' "$lvl" > "$dir/.meta/meta.yaml"
+  # P0-2：level ≥2 的实例必须有 ≥1 个实例门（框架门资产不计），否则 2.3 恒 FAIL
+  [ "${lvl:-1}" -ge 2 ] && add_instance_gate "$dir"
   mkdir -p "$dir/.agents/notes/implemented/architecture"
   cat > "$dir/.agents/notes/implemented/architecture/2026-01-01-fixture.md" <<'ADREOF'
 # 2026-01-01 gate-hardening 合法夹具
@@ -125,7 +130,12 @@ GATEEOF
   cat > "$dir/.meta/gates/$stem.spec.$ext" <<'SPECEOF'
 #!/usr/bin/env bash
 # 验收夹具：合法负样本 spec 配对。
+# P0-3（2026-11-11）：spec 必须含拒绝断言（exit/return [1-9]），否则 2.3 判 FAIL——
+# 只 exit 0 的 spec 恒绿，证明不了门会拒绝非法样本。
 printf 'fixture negative sample rejected\n'
+if false; then
+  exit 1
+fi
 exit 0
 SPECEOF
 }

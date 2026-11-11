@@ -20,7 +20,8 @@ audit_pairing() { # <dir>：设置 PAIR_*，同时断言人读/JSON 命中数同
 if d.get('schema') != 'ponygo.audit/1': fail.append(d.get('schema'))
 if d.get('exit') != $PAIR_JRC: fail.append((d.get('exit'), $PAIR_JRC))
 if d.get('hits') != int('$PAIR_HIT'): fail.append((d.get('hits'), '$PAIR_HIT'))
-if d.get('total') != 15: fail.append(('M total 必须机械同步为 15', d.get('total')))
+if d.get('total') != 16: fail.append(('M total 必须机械同步为 16', d.get('total')))
+if 'skills' not in d: fail.append(('JSON 机读面缺 skills 字段', sorted(d.keys())))
 "
 }
 

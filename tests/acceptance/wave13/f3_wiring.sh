@@ -2,7 +2,7 @@
 # ============================================================
 # tests/acceptance/wave13/f3_wiring.sh
 # A6/A7 的**接线**验收：init/repair 落盘与执行位、双写一致、A1 调 A6 check、
-# A4 三段门 [1/3][2/3][3/3]、只读命令不执行门禁脚本。
+# A4 四段门 [1/4][2/4][3/4][4/4]、只读命令不执行门禁脚本。
 #
 # 契约真源：.dev-team/contract-matrix-wave13.md §3.1（W-1 ~ W-11）+ §4（RO-1/RO-2）
 #           + Lead 裁决 2026-11-07（W-8 upgrade 只报缺口；A4 缺件 fail-closed）。
@@ -68,15 +68,16 @@ assert_eq "W-3 [GO] 缺 A6 → A1 exit 0（静默跳过归档检查）" 0 "$S_RC
 assert_not_contains "W-3 [NOGO] 缺 A6 时不得出现「归档封印」段" "$S_OUT" "归档封印"
 assert_no_crash "W-3 [NOGO] 缺 A6 时不得崩溃" "$S_OUT"
 
-# ============ W-4 / W-5 / W-6：A4 三段门 ============
+# ============ W-4 / W-5 / W-6：A4 四段门 ============
 T=$(new_case); gov_repo "$T" 2 || finish
 write_adr "$T" "implemented/feature/2026-01-02-ci-ok.md"
 run_script_split "$T" .meta/gates/ci-verify.sh
 assert_eq "W-4 [GO] A4 健康仓 exit 0" 0 "$S_RC"
-assert_eq "W-4 [GO] 段头 == [1/3] 恰 1 次" 1 "$(printf '%s\n' "$S_OUT" | grep -c '^== \[1/3\] ')"
-assert_eq "W-4 [GO] 段头 == [2/3] 恰 1 次" 1 "$(printf '%s\n' "$S_OUT" | grep -c '^== \[2/3\] ')"
-assert_eq "W-4 [GO] 段头 == [3/3] 恰 1 次" 1 "$(printf '%s\n' "$S_OUT" | grep -c '^== \[3/3\] ')"
-assert_eq "W-4 [GO] 三段总数 = 3" 3 "$(printf '%s\n' "$S_OUT" | grep -cE '^== \[[123]/3\] ')"
+assert_eq "W-4 [GO] 段头 == [1/4] 恰 1 次" 1 "$(printf '%s\n' "$S_OUT" | grep -c '^== \[1/4\] ')"
+assert_eq "W-4 [GO] 段头 == [2/4] 恰 1 次" 1 "$(printf '%s\n' "$S_OUT" | grep -c '^== \[2/4\] ')"
+assert_eq "W-4 [GO] 段头 == [3/4] 恰 1 次" 1 "$(printf '%s\n' "$S_OUT" | grep -c '^== \[3/4\] ')"
+assert_eq "W-4 [GO] 段头 == [4/4] 恰 1 次" 1 "$(printf '%s\n' "$S_OUT" | grep -c '^== \[4/4\] ')"
+assert_eq "W-4 [GO] 四段总数 = 4" 4 "$(printf '%s\n' "$S_OUT" | grep -cE '^== \[[1234]/4\] ')"
 assert_not_contains "W-4 [NOGO] 不得残留旧两段编号 [1/2]" "$S_OUT" "[1/2]"
 assert_not_contains "W-4 [NOGO] 不得残留旧两段编号 [2/2]" "$S_OUT" "[2/2]"
 assert_not_contains "W-6 [NOGO] 运行输出不得残留「两道」旧措辞" "$S_OUT" "两道"
@@ -94,7 +95,7 @@ tamper_one_byte "$T/.agents/notes/archived/testing/2026-01-02-ci-tamper.md"
 run_script_split "$T" .meta/gates/ci-verify.sh
 assert_eq "W-5 [GO] 归档篡改 → A4 exit 1" 1 "$S_RC"
 assert_contains "W-5 [GO] stderr 含 ci-verify: FAIL" "$S_ERR" "ci-verify: FAIL"
-NR3=$(printf '%s\n' "$S_OUT" | grep -n '^== \[3/3\] ' | head -n1 | cut -d: -f1)
+NR3=$(printf '%s\n' "$S_OUT" | grep -n '^== \[3/4\] ' | head -n1 | cut -d: -f1)
 NRF=$(printf '%s\n' "$S_OUT" "$S_ERR" | grep -n 'ci-verify: FAIL' | head -n1 | cut -d: -f1)
 if [ -n "$NR3" ] && [ -n "$NRF" ] && [ "$NRF" -gt "$NR3" ]; then
   ok "W-5 [GO] FAIL 归属第 3 段之后（段3@$NR3 < FAIL@$NRF）"
@@ -102,7 +103,7 @@ else
   bad "W-5 [GO] FAIL 未归属第 3 段（段3@${NR3:-?} / FAIL@${NRF:-?}）"
 fi
 
-# W-6b（revision+1）：A6 或 A7 缺席 → 第 3 段 fail-closed（exit 1），段头仍恒为 [3/3]
+# W-6b（revision+1）：A6 或 A7 缺席 → 第 3 段 fail-closed（exit 1），段头仍恒为 [3/4]
 for miss in "$A6_REL" "$A7_REL"; do
   T=$(new_case); gov_repo "$T" 2 || finish
   write_adr "$T" "implemented/feature/2026-01-02-no-asset.md"
@@ -110,12 +111,12 @@ for miss in "$A6_REL" "$A7_REL"; do
   assert_missing "W-6b 夹具：已删除 $miss" "$T/$miss"
   run_script "$T" .meta/gates/ci-verify.sh
   assert_eq "W-6b [GO] 缺 $miss → A4 exit 1（fail-closed，不静默跳过）" 1 "$S_RC"
-  assert_eq "W-6b [GO] 缺 $miss → 段头仍为 [3/3]（不降级 [1/2]）" 1 \
-    "$(printf '%s\n' "$S_OUT" | grep -c '^== \[3/3\] ')"
+  assert_eq "W-6b [GO] 缺 $miss → 段头仍为 [3/4]（不降级 [1/2]）" 1 \
+    "$(printf '%s\n' "$S_OUT" | grep -c '^== \[3/4\] ')"
   assert_not_contains "W-6b [NOGO] 缺 $miss 时不得降级为两段编号" "$S_OUT" "[1/2]"
 done
 
-# ============ W-7：init 落盘 A6/A7（非空 + 执行位）+ upgrade 报零缺口（十五文件口径）============
+# ============ W-7：init 落盘 A6/A7（非空 + 执行位）+ upgrade 报零缺口（十七文件口径）============
 T=$(new_case)
 git_seed_repo "$T"
 run_in "$T" init
@@ -128,7 +129,7 @@ done
 run_in "$T" upgrade
 assert_eq "W-7 upgrade（齐备仓）exit 0" 0 "$R_RC"
 assert_matches "W-7 [GO] upgrade 报零缺口/零漂移" "$R_OUT" '零缺口|零漂移'
-assert_matches "W-7 [GO] 宇宙口径为十五文件（13 → 15）" "$R_OUT" '十五|15 文件|15个文件' 
+assert_matches "W-7 [GO] 宇宙口径为十七文件（13 → 17）" "$R_OUT" '十七|17 文件|17个文件' 
 # W-11 init 幂等：再 init 零写
 PORC_BEFORE=$(git_at "$T" status --porcelain 2>/dev/null)
 run_in "$T" init
@@ -155,7 +156,7 @@ assert_exec "W-8 [GO] repair 补齐后 A7 可执行" "$T/$A7_REL"
 run_in "$T" upgrade
 assert_matches "W-8 [GO] 补齐后 upgrade 报零缺口/零漂移" "$R_OUT" '零缺口|零漂移' 
 
-# ============ W-9：--repair-skeleton 同口径（按 15 文件补）============
+# ============ W-9：--repair-skeleton 同口径（按 17 文件补）============
 T=$(new_case)
 git_seed_repo "$T"
 run_in "$T" init
@@ -188,7 +189,11 @@ printf '#!/usr/bin/env bash\ntouch "$(cd "$(dirname "$0")" && pwd)/CI_RAN"\nexit
 printf '#!/usr/bin/env bash\ntouch "$(cd "$(dirname "$0")" && pwd)/ARCHIVE_RAN"\nexit 0\n' \
   > "$T/$A6_REL"
 run_in "$T" status
-assert_eq "RO-1 status exit 0（只读）" 0 "$R_RC"
+# P0-4（2026-11-11）语义变更：本夹具**改写的是框架门资产**（A4 ci-verify / A6 archive-verify），
+# 而门资产漂移现在是硬 FAIL（可能被替换）→ status 必须 exit 1。RO-1 的立意（只读命令不执行门脚本）
+# 不变，且**加强**：即便门资产已被改写（status 本想判它），也不得为判它而执行它。
+assert_eq "RO-1 status exit 1（P0-4：门资产被改写即判漂移，不得执行它）" 1 "$R_RC"
+assert_contains "RO-1 GO：退出原因写明框架门资产漂移" "$R_OUT" "框架门资产漂移"
 assert_missing "RO-1 [NOGO] status 不得执行 ci-verify" "$T/.meta/gates/CI_RAN"
 assert_missing "RO-1 [NOGO] status 不得执行 archive-verify" "$T/.meta/gates/ARCHIVE_RAN"
 run_in "$T" audit
@@ -246,13 +251,15 @@ assert_eq "W-DEL [GO] 恢复后提交成功（证明拒绝来自删除动作）"
 # ============ W-DRY：init --dry-run 计划行数（L3 ADVISORY 回归，task-10）============
 # 缺陷形态：dry-run 只列 A1/A2/A4（3 行），A6/A7 不在计划里 → 用户看不到新增门禁将被生成，
 # 「计划与实际」不一致（真跑 init 其实会生成 5 个门禁资产）。
-# 判定：fresh 目录 `ponygo init --dry-run` 的「将生成 .meta/gates/」行恰 5 行（A1/A2/A4/A6/A7）。
+# 判定：fresh 目录 `ponygo init --dry-run` 的「将生成 .meta/gates/」行恰 7 行（A1/A2/A4/A6/A7/A8/A9）——
+#       dry-run 必须与实跑一致：真跑 init 会生成 7 个门禁资产，计划少列 = 「计划与实际」不一致。
 T=$(new_case)
 run_in "$T" init --dry-run
 assert_eq "W-DRY init --dry-run（fresh 目录）exit 0" 0 "$R_RC"
 NRY=$(printf '%s\n' "$R_OUT" | grep -c '将生成 \.meta/gates/')
-assert_eq "W-DRY [GO] 「将生成 .meta/gates/」计划行恰 5 行（A1/A2/A4/A6/A7）" 5 "$NRY"
-for a in adr-verify.sh adr-verify.spec.sh ci-verify.sh archive-verify.sh archive-verify.spec.sh; do
+assert_eq "W-DRY [GO] 「将生成 .meta/gates/」计划行恰 7 行（A1/A2/A4/A6/A7/A8/A9）" 7 "$NRY"
+for a in adr-verify.sh adr-verify.spec.sh ci-verify.sh archive-verify.sh archive-verify.spec.sh \
+         no-residue.sh no-residue.spec.sh; do
   assert_contains "W-DRY [GO] 计划含 .meta/gates/$a" "$R_OUT" ".meta/gates/$a"
 done
 assert_missing "W-DRY [NOGO] --dry-run 零落盘（不得创建 .meta/）" "$T/.meta"

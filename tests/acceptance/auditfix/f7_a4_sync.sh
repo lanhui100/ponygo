@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # F7（A4 双写纪律 + W3 契约演进 v4）：
-#   F7-1 heredoc ≡ 仓库 .meta/gates/ci-verify.sh（EOL 归一后逐字节一致，双方均为**固定三段**）
-#   F7-2 新 init 生成物为固定三段 [1/3][2/3][3/3]；NOGO 旧两段编号与任何 hygiene 门 / 守卫式跳过
-#   F7-3 生成态 A4 实跑 exit 0（无 hygiene 资产时三段自洽，不得靠「有资产才跑」的守卫式）
+#   F7-1 heredoc ≡ 仓库 .meta/gates/ci-verify.sh（EOL 归一后逐字节一致，双方均为**固定四段**）
+#   F7-2 新 init 生成物为固定四段 [1/4][2/4][3/4][4/4]；NOGO 旧三段/两段编号与任何 hygiene 门 / 守卫式跳过
+#   F7-3 生成态 A4 实跑 exit 0（四段自洽，不得靠「有资产才跑」的守卫式）
 #
 # 契约演进（Wave13 contract-matrix-wave13.md W-4/W-5，Lead 裁定 2026-11-07）：
 #   A4 由「全树 ADR + A2 spec」两段扩为**三段**——第 3 段 = A6（archive-verify check）+ A7
@@ -93,13 +93,16 @@ assert_zero "F7-2 夹具：ponygo init（新仓）exit 0" "$R_RC"
 GEN="$T/.meta/gates/ci-verify.sh"
 assert_exists "F7-2 生成物 .meta/gates/ci-verify.sh 存在" "$GEN"
 GEN_TXT=$(cat "$GEN" 2>/dev/null || :)
-assert_contains "F7-2 GO：生成物含三段编号 [1/3]" "$GEN_TXT" "[1/3]"
-assert_contains "F7-2 GO：生成物含三段编号 [2/3]" "$GEN_TXT" "[2/3]"
-assert_contains "F7-2 GO：生成物含三段编号 [3/3]" "$GEN_TXT" "[3/3]"
+assert_contains "F7-2 GO：生成物含四段编号 [1/4]" "$GEN_TXT" "[1/4]"
+assert_contains "F7-2 GO：生成物含四段编号 [2/4]" "$GEN_TXT" "[2/4]"
+assert_contains "F7-2 GO：生成物含四段编号 [3/4]" "$GEN_TXT" "[3/4]"
+assert_contains "F7-2 GO：生成物含四段编号 [4/4]" "$GEN_TXT" "[4/4]"
 assert_not_contains "F7-2 NOGO：A4 不得残留旧两段编号 [1/2]" "$GEN_TXT" "[1/2]"
 assert_not_contains "F7-2 NOGO：A4 不得残留旧两段编号 [2/2]" "$GEN_TXT" "[2/2]"
 assert_contains "F7-2 GO：第 3 段覆盖归档封印门（archive-verify.sh）" "$GEN_TXT" "archive-verify.sh"
 assert_contains "F7-2 GO：第 3 段覆盖 A7 自检（archive-verify.spec.sh）" "$GEN_TXT" "archive-verify.spec.sh"
+assert_contains "F7-2 GO：第 4 段覆盖引用残留门 A8（no-residue.sh）" "$GEN_TXT" "no-residue.sh"
+assert_contains "F7-2 GO：第 4 段覆盖 A9 自检（no-residue.spec.sh）" "$GEN_TXT" "no-residue.spec.sh"
 assert_not_contains "F7-2 NOGO：A4 不得再含 hygiene 门（已挪到 A5 的独立 step）" "$GEN_TXT" "scratch-hygiene"
 assert_not_contains "F7-2 NOGO：A4 不得用守卫式跳过（「有资产才跑」= 把门禁做成可选）" \
   "$GEN_TXT" "本实例无 scratch-hygiene 资产"
@@ -107,10 +110,12 @@ assert_not_contains "F7-2 NOGO：A4 不得用守卫式跳过（「有资产才�
 # ---- F7-3：生成态 A4 必须能真跑通（无 hygiene 资产的两步自洽 → exit 0）----
 CIR=$( cd "$T" && bash .meta/gates/ci-verify.sh 2>&1 )
 CIRC=$?
-assert_zero "F7-3 生成态仓内 bash .meta/gates/ci-verify.sh → exit 0（三段自洽）" "$CIRC"
-assert_contains "F7-3 取证：生成态 A4 实跑经过 [1/3]" "$CIR" "[1/3]"
-assert_contains "F7-3 取证：生成态 A4 实跑经过 [2/3]" "$CIR" "[2/3]"
-assert_contains "F7-3 取证：生成态 A4 实跑经过 [3/3]" "$CIR" "[3/3]"
+assert_zero "F7-3 生成态仓内 bash .meta/gates/ci-verify.sh → exit 0（四段自洽）" "$CIRC"
+assert_contains "F7-3 取证：生成态 A4 实跑经过 [1/4]" "$CIR" "[1/4]"
+assert_contains "F7-3 取证：生成态 A4 实跑经过 [2/4]" "$CIR" "[2/4]"
+assert_contains "F7-3 取证：生成态 A4 实跑经过 [3/4]" "$CIR" "[3/4]"
+assert_contains "F7-3 取证：生成态 A4 实跑经过 [4/4]" "$CIR" "[4/4]"
+assert_contains "F7-3 取证：生成态 A4 第 4 段跑过引用残留面" "$CIR" "引用残留"
 assert_not_contains "F7-3 NOGO：实跑不得残留旧两段编号 [1/2]" "$CIR" "[1/2]"
 assert_not_contains "F7-3 NOGO：生成态 A4 实跑不得出现 hygiene 段" "$CIR" "scratch-hygiene"
 

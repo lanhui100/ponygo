@@ -73,11 +73,19 @@ json_assert "CA-10 正对照：verdict=pass" "$R_OUT" "
 if d.get('ladder', {}).get('verdict') != 'pass': fail.append(d.get('ladder'))
 "
 assert_contains "CA-10 正对照：人读已真跑并通过" "$R_ERR" "已真跑并通过"
-assert_not_contains "CA-10 正对照：不得出现未验证" "$R_ERR" "未验证"
+# P1-2（2026-11-11）期望更新：人读输出新增常驻提示句「未验证门会拒绝（验证入口：…）」——
+# 它声明「挂载 ≠ 已验证」，不是本命令的判定结果。剔除该句后再判「无未验证措辞」（原强度不变：
+# 任何其它未验证措辞仍红）。
+R_ERR_NOT_HINT=$(printf '%s\n' "$R_ERR" | sed 's/未验证门会拒绝（验证入口：[^）]*）//g')
+assert_not_contains "CA-10 正对照：不得出现未验证" "$R_ERR_NOT_HINT" "未验证"
 
 # ---------- CA-11：真实 ladder FAIL 优先于证据不足 ----------
 T=$(new_case); make_gov_repo "$T" 2 || finish
 git_at "$T" config --unset core.hooksPath >/dev/null 2>&1 || true
+# P0-2（2026-11-11）：make_gov_repo(2) 会加装一对合规实例门；本用例要测「ladder FAIL 优先于证据不足」，
+# 故先移除该实例门本体，再 remove_specs——否则「实例门存在但 spec 被删」会走 gate_spec_missing 硬失败早退，
+# 根本到不了 ladder（2.4 就不会出现）。移除后：0 实例门 = 2.3 FAIL + 2.4 FAIL，都在 ladder 内，正是本用例要的。
+rm -f "$T/.meta/gates/instance-gate.sh" "$T/.meta/gates/instance-gate.spec.sh"
 remove_specs "$T"
 run_json "$T" audit --run-specs --json
 assert_rc_is "CA-11 GO：ladder FAIL 优先" 1 "$R_RC"

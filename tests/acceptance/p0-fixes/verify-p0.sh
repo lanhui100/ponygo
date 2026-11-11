@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# P0 修复验收（Lead 冻结；实施者只读不可改）
+# 用法：bash tests/acceptance/p0-fixes/verify-p0.sh
+# 语义：全绿 exit 0；任一 FAIL exit 1。所有实例一律 mktemp -d，不污染仓库。
+set -u
+
+ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
+CLI="$ROOT/ponygo"
+PASS=0; FAIL=0
+ok()  { PASS=$((PASS+1)); printf '  ok   %s\n' "$1"; }
+bad() { FAIL=$((FAIL+1)); printf '  FAIL %s\n' "$1"; }
+chk() { # <desc> <期望rc> <实际rc>
+  if [ "$2" = "$3" ]; then ok "$1"; else bad "$1（期望 rc=$2 实得 rc=$3）"; fi
+}
+chk_contains() { case "$2" in *"$3"*) ok "$1" ;; *) bad "$1（输出缺 [$3]）" ;; esac; }
+chk_missing()  { case "$2" in *"$3"*) bad "$1（不应出现 [$3]）" ;; *) ok "$1" ;; esac; }
+
+SB=$(mktemp -d); trap 'rm -rf "$SB"' EXIT
+# 沙箱逃逸 fail-closed：任何写盘动作前断言 cwd 在 $SB 下。
+# 反例（曾发生）：d=$(mk) 在子 shell 里 cd，父进程 cwd 不变 → 相对路径写盘落到仓库根，
+# 把 .meta/meta.yaml 覆盖成桩、往 .meta/gates 塞 my-gate.sh、往 adr-verify.sh 追加篡改行。
+require_sandbox() {
+  case "$PWD" in
+    "$SB"/*) ;;
+    *) printf 'FAIL 沙箱逃逸：cwd=%s 不在 %s 下（拒绝写盘）\n' "$PWD" "$SB" >&2; exit 1 ;;
+  esac
+}
+mk() { # 新实例：mkdir + git init + init。在当前 shell 内 cd（调用方直接 `mk` 而非 `$(mk)`）
+  local d; d=$(mktemp -d "$SB/i.XXXXXX")
+  cd "$d" || exit 1
+  require_sandbox
+  git init -q . || exit 1
+  bash "$CLI" init >/dev/null 2>&1
+  printf '%s' "$d"
+}
+add_adr() { # 合规最小 ADR（1.5–1.8 + 1.10 全过）
+  require_sandbox
+  mkdir -p .agents/notes/implemented/process
+  cat > .agents/notes/implemented/process/2026-01-01-x.md <<'EOF'
+# Agent Note: x
+
+Status: implemented
+
+## Problem
+
+p
+
+## Decision
+
+d
+
+## Alternatives considered
+
+- a — 落选原因
+EOF
+}
+fill_const() { require_sandbox; sed -i 's/【TODO[^】]*】/filled/g' .meta/constitution/constitution.md; }
+meta() { require_sandbox; printf 'level: %s\n%s\n' "$1" "${2:-docs-tier: off}" > .meta/meta.yaml; }
+sync_out() { bash "$CLI" sync 2>&1; }
+
+echo "== P0-1 ai-surface 默认态 =="
+# A：填槽态 + 无 ai-surface 键 → 不得投影常载命约
+mk; fill_const; meta 2; rm -f AGENTS.md CLAUDE.md
+out=$(sync_out)
+if [ -f AGENTS.md ] && grep -q 'BEGIN constitution' AGENTS.md; then
+  bad "A 填槽+无键：不应投影命约（AGENTS.md 含 BEGIN constitution）"
+else ok "A 填槽+无键：未投影命约"; fi
+# B：填槽 + off + 残留投影 → 必须 WARN 残留
+mk; fill_const; meta 2 $'ai-surface: off\ndocs-tier: off'
+printf '<!-- BEGIN constitution -->\n残留\n<!-- END constitution -->\n' > AGENTS.md
+out=$(sync_out)
+case "$out" in *残留*|*WARN*|*警告*) ok "B off+残留：给出残留提示" ;; *) bad "B off+残留：未提示残留投影" ;; esac
+# C：填槽 + on → 投影（回归）
+mk; fill_const; meta 2 $'ai-surface: on\ndocs-tier: off'
+out=$(sync_out)
+if [ -f AGENTS.md ] && grep -q 'BEGIN constitution' AGENTS.md; then ok "C 填槽+on：正常投影"; else bad "C 填槽+on：未投影"; fi
+# D：模板态 → 投影 bootstrap（回归）
+mk
+out=$(sync_out)
+if [ -f AGENTS.md ] && grep -q 'BEGIN constitution' AGENTS.md; then ok "D 模板态：bootstrap 投影保留"; else bad "D 模板态：bootstrap 投影丢失"; fi
+
+echo "== P0-2 L2 必须 ≥1 实例门 =="
+mk; meta 2 $'ai-surface: off\ndocs-tier: off'; add_adr
+out=$(bash "$CLI" audit --json 2>/dev/null); rc=$?
+chk "E 零实例门：audit 拒绝（exit 1）" 1 "$rc"
+chk_contains "E 零实例门：判据 2.3 报 FAIL" "$out" '"2.3"'
+
+echo "== P0-3 spec 最小拒绝断言 =="
+mk; meta 2 $'ai-surface: off\ndocs-tier: off'; add_adr
+require_sandbox
+printf '#!/usr/bin/env bash\nexit 0\n' > .meta/gates/my-gate.sh
+require_sandbox
+printf '#!/usr/bin/env bash\nexit 0\n' > .meta/gates/my-gate.spec.sh
+chmod +x .meta/gates/my-gate.sh .meta/gates/my-gate.spec.sh
+out=$(bash "$CLI" audit 2>&1); rc=$?
+chk "F 空壳 spec：audit 拒绝（exit 1）" 1 "$rc"
+case "$out" in *拒绝断言*|*negative*|*负样本*|*2.3*) ok "F 空壳 spec：报 2.3 缺拒绝断言" ;; *) bad "F 空壳 spec：未报 2.3" ;; esac
+# 回归：含拒绝断言 + 自检通过的 spec → PASS
+mk; meta 2 $'ai-surface: off\ndocs-tier: off'; add_adr
+require_sandbox
+printf '#!/usr/bin/env bash\nexit 0\n' > .meta/gates/my-gate.sh
+require_sandbox
+cat > .meta/gates/my-gate.spec.sh <<'EOF'
+#!/usr/bin/env bash
+# 负样本：违规输入必须被门拒绝
+if bash .meta/gates/my-gate.sh --bad; then echo "门未拒绝"; exit 1; fi
+exit 0
+EOF
+chmod +x .meta/gates/my-gate.sh .meta/gates/my-gate.spec.sh
+bash "$CLI" audit >/dev/null 2>&1; chk "G 合规 spec：audit 通过（exit 0）" 0 "$?"
+
+echo "== P0-4 框架门资产漂移纳入判定 =="
+mk; meta 2 $'ai-surface: off\ndocs-tier: off'; add_adr
+require_sandbox
+printf '\n# tampered\n' >> .meta/gates/adr-verify.sh
+out=$(bash "$CLI" status 2>&1); rc=$?
+chk "H 门资产被改：status 拒绝（exit 1）" 1 "$rc"
+case "$out" in *漂移*|*替换*|*drift*) ok "H 门资产被改：报文提及漂移" ;; *) bad "H 门资产被改：报文未提及漂移" ;; esac
+
+echo "== P0-5 硬数字 =="
+SCN=$(grep -cE '^s[0-9]+_[a-z0-9_]+$' "$ROOT/tests/run.sh")
+chk_contains "I-1 README 场景数与 run.sh 枚举一致（$SCN）" "$(sed -n '270,300p' "$ROOT/README.md")" "$SCN 场景" 
+chk_contains "I-2 depth-selector 骨架 9" "$(grep -o '骨架 9' "$ROOT/audit/depth-selector.md" | head -1)" '骨架 9'
+chk_contains "I-3a depth-selector S total=12" "$(cat "$ROOT/audit/depth-selector.md")" 'total=12'
+chk_contains "I-3b depth-selector M total=16" "$(cat "$ROOT/audit/depth-selector.md")" 'total=16'
+chk_contains "I-4 maturity-ladder doc-sync 43 叶" "$(grep -o '43 叶' "$ROOT/maturity-ladder.md" | head -1)" '43 叶'
+
+echo "== 回归：干净实例（不依赖本仓工作区状态） =="
+mk; bash "$CLI" status >/dev/null 2>&1; chk "J 干净新实例 status exit 0" 0 "$?"
+
+echo ""
+echo "PASS=$PASS FAIL=$FAIL"
+[ "$FAIL" -eq 0 ] || exit 1

@@ -184,6 +184,33 @@ what
 other
 EOF
 }
+# P0-2/P0-3 夹具（2026-11-11）：加装一个合规实例门 + 含拒绝断言的同名 spec。
+# 为什么需要它：判据 2.3 现要求 L2 实例「≥1 个实例门」且其 spec 含至少一条 `exit/return [1-9]`；
+# init 只交付框架门资产（A1/A2/A4/A6/A7，明确不计实例门），故所有 level-2 夹具都要自带一对。
+# 单点收口（禁逐场景复制）：set_level2 与各 level-2 场景都调本函数。
+add_instance_gate() { # <case 目录> [stem，默认 instance-gate]
+  local d="$1" stem="${2:-instance-gate}"
+  mkdir -p "$d/.meta/gates"
+  cat > "$d/.meta/gates/$stem.sh" <<'PGFIXTURE'
+#!/usr/bin/env bash
+# 夹具实例门：无参放行，未知参数非零拒绝——拒绝语义在场，才配得上同名负样本 spec。
+case "${1:-}" in
+  "") exit 0 ;;
+  *)  printf 'instance gate: 拒绝非法样本 %s\n' "$1" >&2; exit 1 ;;
+esac
+PGFIXTURE
+  cat > "$d/.meta/gates/$stem.spec.sh" <<PGFIXTURE
+#!/usr/bin/env bash
+# 负样本夹具：违规输入必须被门拒绝（拒绝断言 = exit 1，P0-3 要求至少一条）。
+if bash "\$(dirname "\$0")/$stem.sh" --bad >/dev/null 2>&1; then
+  echo "$stem 未拒绝非法样本 --bad（负样本失败）"
+  exit 1
+fi
+echo "$stem 负样本：--bad 已被拒绝"
+exit 0
+PGFIXTURE
+  chmod +x "$d/.meta/gates/$stem.sh" "$d/.meta/gates/$stem.spec.sh"
+}
 write_proposal_decision() { # $1=case目录 $2=相对 decisions/ 的子路径（含文件名）
   local dir
   dir="$1/.agents/notes/$(dirname "$2")"
@@ -300,6 +327,9 @@ s04_bootstrap_projection() {
   assert_contains "引导含填槽步骤" "$(cat "$T/AGENTS.md")" "填宪法槽位"
   assert_contains "引导指向 write-adr 技能" "$(cat "$T/AGENTS.md")" "write-adr"
   write_constitution_filled "$T"
+  # P0-1（2026-11-11）：填槽态**只有显式 ai-surface: on** 才投影常载命约；缺键 = 视为关闭
+  # （本场景验的是「bootstrap → 常载命约」的替换语义，故必须显式开启）
+  printf 'ai-surface: on\n' >> "$T/.meta/meta.yaml"
   run_cli "$T" sync
   assert_eq "填槽后 sync exit 0" 0 "$R_RC"
   assert_not_contains "引导已被替换" "$(cat "$T/AGENTS.md")" "初始引导"
@@ -311,6 +341,7 @@ s05_sync_idempotent() {
   local T h1 h2; T=$(new_case)
   run_cli "$T" init
   write_constitution_filled "$T"
+  printf 'ai-surface: on\n' >> "$T/.meta/meta.yaml"   # P0-1：填槽态投影需显式开启
   run_cli "$T" sync
   assert_eq "sync exit 0" 0 "$R_RC"
   [ -f "$T/AGENTS.md" ] && [ -f "$T/CLAUDE.md" ] && ok "投影生成" || bad "投影未生成"
@@ -391,10 +422,17 @@ s09_audit_counts() {
   # 本用例的基线是 init 后空 archived（无 manifest）→ 问④不再命中 → 期望值 5/10 → 4/10、
   # 5/14 → 4/14。carrier-audit CA-05 再收紧：n_dec=0 时 Status 项不得 vacuously 得分，
   # 因而本空 notes 夹具由 4/10、4/14 精确降为 3/10、3/14；四态结构分仍独立保留。
-  assert_contains "S 档命中 3 / 10（空 notes 不送 Status；未封印 archived 不计问④）" "$R_OUT" "命中 3 / 10"
+  # 契约变更（spec-ponygo-v2.6 §5.2，Lead 裁决）：问③ 由 1 项「.agents/skills 非空」拆为 3 项
+  # ——3.2 实例自有 ≥1 / 3.3 触发式 description / 3.4 五要素齐。空实例（init 后仅基线 3 技能）
+  # ⇒ 3.2 不得分、3.3/3.4 得分：净 +1 分、+2 项，故 3/10 → 4/12。
+  # M 档本仓实跑旧值为 3/15（该行既有断言即 15，spec §5.2 的「14 → 16」是旧口径），
+  # 同口径 +2 项 → 4/17；断言锁死实跑值，不以 spec 里的旧总数为准（见 T4 报告「契约歧义」）。
+  assert_contains "S 档命中 4 / 12（空实例：3.2 不得分、3.3/3.4 得分；spec §5.2）" "$R_OUT" "命中 4 / 12"
   # shellcheck disable=SC2046
   run_cli_env "$T" $G audit --level M
-  assert_contains "M 档命中 3 / 15（空 notes 不送 Status；未封印 archived 不计问④）" "$R_OUT" "命中 3 / 15"
+  # 契约变更（负空间批次 C1）：M 档删掉与问② has_ci 跨平台探测重复的「[ -d .github/workflows ]」
+  # 独立计分项（重复计分 = GitHub 仓库白送一分）→ M 档总项数 17 → 16；本夹具无 .github/ 故命中数不变。
+  assert_contains "M 档命中 4 / 16（去冗余后：+2 项、净 +1 分）" "$R_OUT" "命中 4 / 16"
 }
 
 s10_audit_level_arg() {
@@ -559,8 +597,7 @@ s12_l2_criteria() {
   # 契约演进（freeze §3/§6.6）：2.4 判据加强后，正例夹具须含哨兵块 + 非注释调用行
   # + 执行位 + <root>/.meta/gates/adr-verify.sh；断言一条未删、未弱化。
   wire_gate_fixture "$T"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
-  printf 'purpose: negative sample spec\n' > "$T/.meta/gates/format.spec.sh"
+  add_instance_gate "$T" format   # P0-2/P0-3：实例门 + 含拒绝断言的同名 spec
   # 分支：未声明 docs-tier + 已激活 → PASS（实际做到优先于声明）
   printf '## 已激活文档家清单\n' >> "$T/.meta/docs-tier/README.md"
   run_cli "$T" status
@@ -573,8 +610,7 @@ s12_l2_criteria() {
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
   printf 'level: 2\n' > "$T/.meta/meta.yaml"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
-  printf 'x\n' > "$T/.meta/gates/format.spec.sh"
+  add_instance_gate "$T" format   # P0-2/P0-3：实例门 + 含拒绝断言的同名 spec
   # 消毒：非 git 目录下全局 core.hooksPath 与本项目无关，不得假 PASS（reviewer-b P1-1）
   # shellcheck disable=SC2046
   run_cli_env "$T" $(sanitize_git) status
@@ -591,8 +627,7 @@ s12_l2_criteria() {
   # 契约演进（freeze §3/§6.6）：2.4 判据加强后，正例夹具须含哨兵块 + 非注释调用行
   # + 执行位 + <root>/.meta/gates/adr-verify.sh；断言一条未删、未弱化。
   wire_gate_fixture "$T"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
-  printf 'x\n' > "$T/.meta/gates/format.spec.sh"
+  add_instance_gate "$T" format   # P0-2/P0-3：实例门 + 含拒绝断言的同名 spec
   run_cli "$T" status
   assert_eq "未声明+模板态（SKIP）→ exit 0" 0 "$R_RC"
   assert_contains "催声明 WARN" "$R_OUT" "未声明 docs-tier"
@@ -609,8 +644,7 @@ s12_l2_criteria() {
   # 契约演进（freeze §3/§6.6）：2.4 判据加强后，正例夹具须含哨兵块 + 非注释调用行
   # + 执行位 + <root>/.meta/gates/adr-verify.sh；断言一条未删、未弱化。
   wire_gate_fixture "$T"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
-  printf 'x\n' > "$T/.meta/gates/format.spec.sh"
+  add_instance_gate "$T" format   # P0-2/P0-3：实例门 + 含拒绝断言的同名 spec
   run_cli "$T" status
   assert_eq "docs-tier: off → exit 0" 0 "$R_RC"
   assert_contains "off 改写结论行" "$R_OUT" "2.1–2.4 PASS；2.5 未启用"
@@ -627,8 +661,7 @@ s12_l2_criteria() {
   # 契约演进（freeze §3/§6.6）：2.4 判据加强后，正例夹具须含哨兵块 + 非注释调用行
   # + 执行位 + <root>/.meta/gates/adr-verify.sh；断言一条未删、未弱化。
   wire_gate_fixture "$T"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
-  printf 'x\n' > "$T/.meta/gates/format.spec.sh"
+  add_instance_gate "$T" format   # P0-2/P0-3：实例门 + 含拒绝断言的同名 spec
   # 模板态 docs-tier/README.md 未激活（无已激活锚点）
   run_cli "$T" status
   assert_eq "docs-tier: on + 模板态 → exit 1" 1 "$R_RC"
@@ -653,8 +686,7 @@ s12_l2_criteria() {
   # 契约演进（freeze §3/§6.6）：2.4 判据加强后，正例夹具须含哨兵块 + 非注释调用行
   # + 执行位 + <root>/.meta/gates/adr-verify.sh；断言一条未删、未弱化。
   wire_gate_fixture "$T"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
-  printf 'x\n' > "$T/.meta/gates/format.spec.sh"
+  add_instance_gate "$T" format   # P0-2/P0-3：实例门 + 含拒绝断言的同名 spec
   printf '## 已激活文档家清单\n\n| tier | 家 |\n|---|---|\n| 决策记录 | .agents/notes/ |\n' > "$T/.meta/docs-tier/README.md"
   run_cli "$T" status
   assert_eq "off + 已激活（矛盾 WARN）→ exit 0" 0 "$R_RC"
@@ -673,8 +705,7 @@ s12_l2_criteria() {
   # 契约演进（freeze §3/§6.6）：2.4 判据加强后，正例夹具须含哨兵块 + 非注释调用行
   # + 执行位 + <root>/.meta/gates/adr-verify.sh；断言一条未删、未弱化。
   wire_gate_fixture "$T"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
-  printf 'x\n' > "$T/.meta/gates/format.spec.sh"
+  add_instance_gate "$T" format   # P0-2/P0-3：实例门 + 含拒绝断言的同名 spec
   # 清零模板态 TODO：重写为已激活清单（无 TODO 残留）
   printf '## 已激活文档家清单\n\n| tier | 家 |\n|---|---|\n| 决策记录 | .agents/notes/ |\n' > "$T/.meta/docs-tier/README.md"
   run_cli "$T" status
@@ -692,8 +723,7 @@ s12_l2_criteria() {
   # 契约演进（freeze §3/§6.6）：2.4 判据加强后，正例夹具须含哨兵块 + 非注释调用行
   # + 执行位 + <root>/.meta/gates/adr-verify.sh；断言一条未删、未弱化。
   wire_gate_fixture "$T"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
-  printf 'x\n' > "$T/.meta/gates/format.spec.sh"
+  add_instance_gate "$T" format   # P0-2/P0-3：实例门 + 含拒绝断言的同名 spec
   run_cli "$T" status
   assert_eq "引号值不兑现 off → exit 0（未声明 SKIP）" 0 "$R_RC"
   assert_contains "引号值报非法键 WARN" "$R_OUT" "非法键"
@@ -881,21 +911,24 @@ s17_dry_run() {
 }
 
 s18_repo_consistency() {
-  echo "--- 场景18：F1 口径 grep（checklist.md 骨架8/机制18/精微8）+ .gitattributes"
-  if grep -Eq '骨架[[:space:]]*8|8[[:space:]]*项' "$ROOT/audit/checklist.md" 2>/dev/null; then
-    ok "checklist.md 含骨架层数 8"
+  echo "--- 场景18：F1 口径 grep（checklist.md 骨架9/机制19 + depth-selector 精微7）+ .gitattributes"
+  # 计数随条目增删而变（负空间批次：机制层 −1 项去冗余、表条目数 18 → 19）——断言的是
+  # 「文档自报的层数可被 grep 到且与当前真值一致」，不是把某一年的数字焊死。
+  if grep -Eq '骨架[[:space:]]*9|9[[:space:]]*项' "$ROOT/audit/checklist.md" 2>/dev/null; then
+    ok "checklist.md 含骨架层数 9"
   else
-    bad "checklist.md 缺骨架层数 8 口径"
+    bad "checklist.md 缺骨架层数 9 口径"
   fi
-  if grep -Eq '机制[[:space:]]*18|18[[:space:]]*项' "$ROOT/audit/checklist.md" 2>/dev/null; then
-    ok "checklist.md 含机制层数 18"
+  if grep -Eq '机制[[:space:]]*19|19[[:space:]]*项' "$ROOT/audit/checklist.md" 2>/dev/null; then
+    ok "checklist.md 含机制层数 19"
   else
-    bad "checklist.md 缺机制层数 18 口径"
+    bad "checklist.md 缺机制层数 19 口径"
   fi
-  if grep -Eq '精微[[:space:]]*8|精微层.{0,10}8[[:space:]]*项' "$ROOT/audit/checklist.md" 2>/dev/null; then
-    ok "checklist.md 含精微层数 8"
+  # 精微层条目数只在 depth-selector（人读选档表）里自报：checklist.md 的精微节标题不带数字。
+  if grep -Eq '精微[[:space:]]*7' "$ROOT/audit/depth-selector.md" 2>/dev/null; then
+    ok "depth-selector 含精微层数 7"
   else
-    bad "checklist.md 缺精微层数 8 口径"
+    bad "depth-selector 缺精微层数 7 口径"
   fi
   if [ -f "$ROOT/.gitattributes" ] && grep -q 'eol=lf' "$ROOT/.gitattributes"; then
     ok ".gitattributes 含 eol=lf"
@@ -932,6 +965,8 @@ s19_boundary_regress() {
   assert_contains "报 1.7" "$R_OUT" "1.7"
   # sync：既有 AGENTS.md 带标记区 → 只替换块内、块外保留
   T=$(new_case); run_cli "$T" init; write_constitution_filled "$T"
+  # P0-1（2026-11-11）：填槽态投影常载命约需显式声明 ai-surface: on（缺键默认关）
+  printf 'ai-surface: on\n' >> "$T/.meta/meta.yaml"
   printf 'my notes head\n<!-- BEGIN constitution -->\nold body\n<!-- END constitution -->\nmy notes tail\n' > "$T/AGENTS.md"
   run_cli "$T" sync
   assert_eq "标记区替换 exit 0" 0 "$R_RC"
@@ -941,6 +976,7 @@ s19_boundary_regress() {
   [ -f "$T/AGENTS.md.tmp" ] && bad "残留 .tmp" || ok "无 .tmp 残留"
   # sync：既有 AGENTS.md 无标记区 → 追加、原文保留
   T=$(new_case); run_cli "$T" init; write_constitution_filled "$T"
+  printf 'ai-surface: on\n' >> "$T/.meta/meta.yaml"   # P0-1：填槽态投影需显式开启
   printf 'handwritten rules\n' > "$T/AGENTS.md"
   run_cli "$T" sync
   assert_eq "无标记区追加 exit 0" 0 "$R_RC"
@@ -1035,6 +1071,7 @@ s21_external001_regress() {
 ## Standing Orders
 1. Decisions must be recorded.
 EOF
+  printf 'ai-surface: on\n' >> "$T/.meta/meta.yaml"   # P0-1：填槽态投影需显式开启
   run_cli "$T" sync
   assert_eq "sync 锚点（英文标题）exit 0" 0 "$R_RC"
   grep -q 'Standing Orders' "$T/AGENTS.md" && ok "英文投影体生成" || bad "英文投影体未生成"
@@ -1193,7 +1230,9 @@ s27_run_specs() {
   T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
-  printf '#!/usr/bin/env bash\ntouch "$(cd "$(dirname "$0")" && pwd)/WITNESS.txt"\nexit 0\n' \
+  # 夹具 compliance：spec 必须**产出输出**（C2 收紧：exit 0 且零输出 = 零断言 → 判 FAIL，
+  # 故见证用的合规 spec 也要打印一行，否则它是「零断言样本」而不是正样本）。
+  printf '#!/usr/bin/env bash\ntouch "$(cd "$(dirname "$0")" && pwd)/WITNESS.txt"\necho "[x.spec] 合规样本：断言已跑"\nexit 0\n' \
     > "$T/.meta/gates/x.spec.sh"
   run_cli "$T" status
   assert_eq "status 默认 exit 0" 0 "$R_RC"
@@ -1220,7 +1259,7 @@ s27_run_specs() {
   T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
-  printf '#!/usr/bin/env bash\ntouch "$(cd "$(dirname "$0")" && pwd)/WITNESS.txt"\nexit 0\n' \
+  printf '#!/usr/bin/env bash\ntouch "$(cd "$(dirname "$0")" && pwd)/WITNESS.txt"\necho "[x.spec] 合规样本：断言已跑"\nexit 0\n' \
     > "$T/.meta/gates/x.spec.sh"
   run_cli "$T" audit --run-specs
   assert_eq "--run-specs 全过 → exit 0" 0 "$R_RC"
@@ -1234,7 +1273,7 @@ s27_run_specs() {
   T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
-  printf '#!/usr/bin/env bash\n[ "${PONYGO_AUDIT_SPEC_DEPTH:-0}" -ge 1 ] || { echo "missing guard env" >&2; exit 3; }\nprintf "%%s\\n" "${PONYGO_IN_SPEC:-unset}" > "$(cd "$(dirname "$0")" && pwd)/ENV_WITNESS.txt"\nexit 0\n' \
+  printf '#!/usr/bin/env bash\n[ "${PONYGO_AUDIT_SPEC_DEPTH:-0}" -ge 1 ] || { echo "missing guard env" >&2; exit 3; }\nprintf "%%s\\n" "${PONYGO_IN_SPEC:-unset}" > "$(cd "$(dirname "$0")" && pwd)/ENV_WITNESS.txt"\necho "[env.spec] 护栏见证已落盘"\nexit 0\n' \
     > "$T/.meta/gates/env.spec.sh"
   run_cli "$T" audit --run-specs
   assert_eq "深度护栏变量已导出给 spec → exit 0" 0 "$R_RC"
@@ -1297,8 +1336,8 @@ s28_l2_reachability() {
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
   # L2 四件套：门禁脚本 + 负样本 spec + 本地钩子挂载 + 文档分层激活
-  printf '#!/usr/bin/env bash\n[ -f README.md ] || exit 1\nexit 0\n' > "$T/.meta/gates/readme.sh"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/readme.spec.sh"
+  # P0-2/P0-3：门必须是**实例门**且 spec 含拒绝断言 → 用统一夹具（单点收口，不逐场景复制）
+  add_instance_gate "$T" readme
   ( cd "$T" && git init -q && git config core.hooksPath .githooks && mkdir -p .githooks \
       && printf '#!/usr/bin/env bash\nexit 0\n' > .githooks/pre-commit ) >/dev/null 2>&1
   # 契约演进（freeze §6.6）：L2 四件套的「本地钩子挂载」须含哨兵块 + 非注释调用行 + 执行位
@@ -1479,7 +1518,7 @@ s32_task004_static() {
   grep -q '^| 2\.B ' "$ROOT/audit/checklist.md" && ok "2.B 状态同步存在" || bad "缺 2.B（audit/checklist.md）"
   grep -q '^| 2\.C ' "$ROOT/audit/checklist.md" && ok "2.C 处置静默存在" || bad "缺 2.C（audit/checklist.md）"
   g "判据链到家" "audit/checklist.md" 'methodology §4.7'
-  g "用法小结已同步 18" "audit/checklist.md" '追加「机制层」（18 项）'
+  g "用法小结已同步 19" "audit/checklist.md" '追加「机制层」（19 项）'
   g "checklist 纪律数已同步五条" "audit/checklist.md" '五条纪律'
   g "gates 链入行声明非门禁" ".meta/gates/README.md" '本行非门禁'
   g "gates 掩盖清单附注" ".meta/gates/README.md" '加超时'
@@ -1498,8 +1537,8 @@ s32_task004_static() {
   g "救命话：旧格式有效" "docs/methodology.md" '旧整文件哈希记录仍有效'
   g "scorecard 精确句存在" "audit/scorecard.md" '2.A–2.C 任一有 review 记录'
   g "scorecard 9-10 分句存在" "audit/scorecard.md" '分类表可指到'
-  g "depth-selector 已同步 18" "audit/depth-selector.md" '机制 18'
-  g "README 已同步 18" "README.md" '机制 18'
+  g "depth-selector 已同步 19" "audit/depth-selector.md" '机制 19'
+  g "README 已同步 19" "README.md" '机制 19'
 }
 
 # ============================================================
@@ -1915,9 +1954,10 @@ s35_observe_audit() {
   assert_eq "observe audit --level bogus → die 1" 1 "$R_RC"
 
   # ⑥ 顶层 audit 行为不变（§7.8 另一侧）
+  # 裸目录（无 .meta/）未声明治理根，audit 保持既有行为（退出码 0，级自洽跳过）。
   T=$(new_case)
   run_cli "$T" audit --level S
-  assert_eq "顶层 audit --level S 行为不变（exit 0）" 0 "$R_RC"
+  assert_eq "顶层 audit --level S 在裸目录保持既有退出码 0" 0 "$R_RC"
   assert_contains "顶层 audit 仍打印审计结果头" "$R_OUT" "===== ponygo 审计结果"
 
   # ⑦ audit / upgrade --check 只读：零写（快照）
@@ -2797,6 +2837,7 @@ s50_preexisting_hook_preserved() {
   # 追加块必须被 2.4 机器识别
   printf 'level: 2\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
+  add_instance_gate "$T"   # P0-2：L2 需 ≥1 实例门 + 含拒绝断言的同名 spec
   # shellcheck disable=SC2046
   run_cli_env "$T" $(sanitize_git) status
   assert_eq "追加块后 level:2 status exit 0（2.4 认块）" 0 "$R_RC"
@@ -2821,6 +2862,7 @@ s51_husky_foreign_hookspath() {
   # 2.4 接线判定：level: 2 下必须 PASS（证明判据按 hooksPath 归一化目录判定，不写死 .githooks）
   printf 'level: 2\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-husky.md"
+  add_instance_gate "$T"   # P0-2：L2 需 ≥1 实例门 + 含拒绝断言的同名 spec
   # shellcheck disable=SC2046
   run_cli_env "$T" $(sanitize_git) status
   assert_eq "husky 接线后 status exit 0（2.4 PASS）" 0 "$R_RC"
@@ -2900,8 +2942,11 @@ s55_ladder_24_strong() {
   printf 'level: 2\n' > "$T/.meta/meta.yaml"
   write_valid_decision "$T" "implemented/feature/2026-01-02-gate.md"
   # 2.1–2.3 隔离：保证 FAIL 只能归因到 2.4（否则「报 2.4」断言会被别的原因顶掉）
+  # 2.3 自 P0-3（2026-11-11）起还要求 spec 含拒绝断言，故夹具 spec 带一条 `exit 1`，
+  # 否则本场景会被 2.3 的拒绝断言判据顶掉，测不出 2.4。
   printf '#!/usr/bin/env bash\nexit 0\n' > "$T/.meta/gates/format.sh"
-  printf 'x\n' > "$T/.meta/gates/format.spec.sh"
+  printf '#!/usr/bin/env bash\nif bash "$(dirname "$0")/format.sh" --bad; then echo "未拒绝"; exit 1; fi\nexit 0\n' \
+    > "$T/.meta/gates/format.spec.sh"
   git_local "$T" config core.hooksPath .githooks >/dev/null 2>&1
   mkdir -p "$T/.githooks"
 
@@ -3067,9 +3112,14 @@ make_canonical_block() { # → 打印规范块文件路径（由一次性 ref �
   b="$SBASE/canon.block"; sentinel_block "$r/.githooks/pre-commit" > "$b"
   printf '%s' "$b"
 }
-set_level2() { # <case 目录>：level: 2 + 一条合法决策（2.1–2.3 由 init 落地的 A1/A2/A4 满足）
+set_level2() { # <case 目录>：level: 2 + 一条合法决策 + 一个合规实例门（含拒绝断言的同名 spec）
+  # P0-2/P0-3（2026-11-11）语义变更：L2 判据 2.3 现要求「≥1 个**实例门**」且其 spec 含**拒绝断言**。
+  # init 只交付框架门资产（A1/A2/A4/A6/A7，明确不计实例门），故 level-2 夹具必须自带一对最小实例门
+  # ——否则 2.3 恒 FAIL，既有 level-2 场景会集体因夹具不足而红（不是它们要测的东西）。
+  # 单点收口：门 + spec 的写法只在 add_instance_gate 一处；专测 2.3 负向行为的场景自行覆盖/删除它。
   printf 'level: 2\n' > "$1/.meta/meta.yaml"
   write_valid_decision "$1" "implemented/feature/2026-01-02-gate.md"
+  add_instance_gate "$1"
 }
 stage_status_violation() { # <dir> <文件名>：写 implemented/ 下 Status: proposed（1.7 违例）并暂存
   local f=".agents/notes/implemented/feature/$2"
@@ -4455,6 +4505,389 @@ s79_wave1_contract_c1_c2_c3_c6
 s80_wave2_contract_d1_d2_d4
 s81_carrier_audit_acceptance
 
+# ============================================================
+# 场景82–87：技能三层化（模板库 / 三态 / 形状审计 / 能力缺口建议）
+# 契约真源（黑盒）：docs/dev-team/specs/spec-ponygo-v2.6.md
+#   §2 三层归属与六个库技能名 · §3.1 catalog.tsv · §3.2 install.sh 动词与退出码 + marker
+#   §3.3 五要素 · §4 OPTIONAL_UNIVERSE 与 status 可选缺口 · §5.1 B1 基线缺件
+#   §5.2 B2 问③ 3.2/3.3/3.4 · §5.3 B3 advisory · §5.4 冻结输出前缀
+# 纪律：只按冻结前缀 / 退出码 / 文件内容断言，不读 ponygo 内部实现；
+#       断言失败一律把「实得输出」打到 stderr（物理取证，禁止只报「未找到」）。
+# 隔离：mktemp 夹具 + 共用 SBASE（EXIT trap 清理）；git 相关一律 GIT_CONFIG 消毒。
+# ============================================================
+
+# audit 输出「命中 N / M 项」→ "N/M"；解析不到给空串（禁「空 == 空」假绿）
+audit_hit_nm() {
+  printf '%s\n' "$1" | sed -n 's/^命中 \([0-9][0-9]*\) \/ \([0-9][0-9]*\) 项$/\1\/\2/p' | head -n1
+}
+# "N/M" → "(N+1)/M"（差分断言：只许 N 变 1、M 必须不变）
+bump_n() {
+  case "${1:-}" in
+    [0-9]*/[0-9]*) printf '%s' "$1" | awk -F/ '{printf "%d/%s\n", $1+1, $2}' ;;
+    *) printf 'UNPARSED' ;;
+  esac
+}
+# 断言「输出含固定子串」；失败时把实得相关行打到 stderr
+assert_out_has() { # <描述> <输出> <固定子串> [取证过滤 ERE]
+  if printf '%s\n' "$2" | grep -qF -- "$3"; then ok "$1"; return 0; fi
+  bad "$1（未找到 [$3]）"
+  printf '       实得输出（grep -E %s）：\n' "${4:-.}" >&2
+  printf '%s\n' "$2" | grep -E -- "${4:-.}" | sed -n '1,10p' | sed 's/^/         /' >&2
+  return 1
+}
+# 断言「输出不含固定子串」（反向对照，防无条件打印/假绿）
+assert_out_lacks() { # <描述> <输出> <固定子串> [取证过滤 ERE]
+  if printf '%s\n' "$2" | grep -qF -- "$3"; then
+    bad "$1（不应出现 [$3]）"
+    printf '       实得输出（grep -E %s）：\n' "${4:-.}" >&2
+    printf '%s\n' "$2" | grep -E -- "${4:-.}" | sed -n '1,10p' | sed 's/^/         /' >&2
+    return 1
+  fi
+  ok "$1"
+}
+# 退出码断言；失败时打印输出头部（知道「为什么非零 / 为什么零」）
+assert_rc_ev() { # <描述> <期望 rc> <实得 rc> <输出>
+  if [ "$2" = "$3" ]; then ok "$1"; return 0; fi
+  bad "$1（期望 exit [$2] 实得 [$3]）"
+  printf '       实得输出前 12 行：\n' >&2
+  printf '%s\n' "$4" | sed -n '1,12p' | sed 's/^/         /' >&2
+  return 1
+}
+file_sha() { # <文件> → sha256；缺失打印 MISSING（防「空 == 空」）
+  if [ -f "$1" ]; then sha256sum "$1" 2>/dev/null | awk '{print $1}'; else printf 'MISSING'; fi
+}
+tree_sha() { # <目录> → 内容指纹（只读命令不得改动它）；缺失打印 MISSING
+  if [ -d "$1" ]; then
+    ( cd "$1" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum ) 2>/dev/null \
+      | sha256sum | awk '{print $1}'
+  else printf 'MISSING'; fi
+}
+
+# 库技能清单（spec §2 封闭清单）；list 的行序不作断言，按名字逐一查
+SKILL_LIB_NAMES='pg-delivery-checks pg-find-simplifications pg-doc-hygiene pg-test-reliability pg-upgrade-guide pg-gc-agent-notes'
+
+# 形状完整的实例自有技能（frontmatter 触发式 description + 四节 = 五要素，spec §3.3）
+# 第 3 参传 calibration = 故意抽掉「## 校准样例」（A9 负样本；只抽这一节，其余保持齐全）
+write_shaped_skill() { # <case-dir> <name> [calibration]
+  local T="$1" name="$2" drop="${3:-}"
+  mkdir -p "$T/.agents/skills/$name"
+  {
+    printf -- '---\n'
+    printf 'name: %s\n' "$name"
+    printf 'description: 何时用：验收夹具技能 %s ——由 tests/run.sh 按五要素契约生成。\n' "$name"
+    printf -- '---\n\n'
+    printf '# %s —— 验收夹具\n\n' "$name"
+    printf '## 真相源\n\n- `.agents/skills/README.md`（五要素契约）\n\n'
+    printf '## 步骤\n\n1. 夹具步骤（不执行真实动作）。\n\n'
+    if [ "$drop" != "calibration" ]; then
+      printf '## 校准样例\n\n- 正例：本节在场 → 3.4 得分。\n- 反例：本节缺失 → 3.4 不得分。\n\n'
+    fi
+    printf '## 验证与报告\n\n- 跑 `ponygo audit --level S`；输出形状分。\n'
+  } > "$T/.agents/skills/$name/SKILL.md"
+}
+
+# 跑库内 install.sh（位置子命令、零旗标）；L_OUT 合并输出、L_RC 退出码
+L_OUT=""; L_RC=0; L_STDOUT=""; L_STDERR=""
+lib_sh() { # <case-dir> <list|install NAME|check>
+  local dir="$1"; shift
+  L_OUT=$( cd "$dir" && bash .meta/skills-library/install.sh "$@" 2>&1 ); L_RC=$?
+}
+# 同 lib_sh，但 stdout / stderr 分开捕获（契约：全部错误走 stderr）
+lib_sh_split() { # <case-dir> <args...>
+  local dir="$1"; shift
+  local errf; errf=$(mktemp "$SBASE/liberr.XXXXXX")
+  L_STDOUT=$( cd "$dir" && bash .meta/skills-library/install.sh "$@" 2>"$errf" ); L_RC=$?
+  L_STDERR=$(cat "$errf" 2>/dev/null || true)
+  rm -f "$errf"
+}
+
+# ---- 场景82：A5 安装闭环 ----
+
+s82_skill_library_install_closure() {
+  echo "--- 场景82：A5 模板库安装闭环（list → install → check → 二次 install 拒绝 → 不计问③ 3.2）"
+  local T G n line base_hits lib_sha inst_sha marker_sha tree_before
+  T=$(new_case); run_cli "$T" init
+  assert_rc_ev "A5⓪ init exit 0" 0 "$R_RC" "$R_OUT"
+  assert_exists "A5⓪ init 播种库 install.sh（spec §3）" "$T/.meta/skills-library/install.sh"
+  assert_exists "A5⓪ init 播种库 catalog.tsv（spec §3.1）" "$T/.meta/skills-library/catalog.tsv"
+  assert_exists "A5⓪ init 播种库 README.md（spec §3）" "$T/.meta/skills-library/README.md"
+  for n in $SKILL_LIB_NAMES; do
+    assert_exists "A5⓪ 库技能 $n 播种" "$T/.meta/skills-library/$n/SKILL.md"
+  done
+  assert_missing "A5⓪ init 只播种不安装（spec §2：模板库不安装）" "$T/.agents/skills/pg-doc-hygiene"
+
+  # ⓪ 前置取证：安装前 audit 命中数 = 「已装副本不计 3.2」的对照基线
+  G=$(sanitize_git)
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G audit --level S
+  base_hits=$(audit_hit_nm "$R_OUT")
+  case "$base_hits" in
+    [0-9]*/[0-9]*) ok "A5⓪ 安装前 audit 命中行可解析（$base_hits）" ;;
+    *) bad "A5⓪ 安装前 audit 无「命中 N / M 项」行（末尾：$(printf '%s\n' "$R_OUT" | tail -n 2 | tr '\n' '|')）" ;;
+  esac
+  assert_out_has "A5⓪ 安装前技能行：库 0 安装、实例自有 0（spec §5.4 冻结前缀）" \
+    "$R_OUT" "技能：基线 3/3 齐；库 0 安装；实例自有 0" "技能："
+
+  # ① list：每技能一行 <name>\t<installed|absent>\t<ok|stale|modified|->（spec §3.2 冻结列序）
+  lib_sh "$T" list
+  assert_rc_ev "A5① install.sh list exit 0" 0 "$L_RC" "$L_OUT"
+  for n in $SKILL_LIB_NAMES; do
+    line=$(printf '%s\n' "$L_OUT" | awk -F'\t' -v want="$n" '$1==want{print; exit}')
+    if [ -z "$line" ]; then
+      bad "A5① list 缺 $n 行（实得：$(printf '%s' "$L_OUT" | tr '\n' '|' | tr '\t' '>')）"
+    else
+      assert_eq "A5① list $n = 未装（absent/-）" "$n	absent	-" "$line"
+    fi
+  done
+
+  # ② install pg-doc-hygiene → 0；副本 + marker 契约（spec §3.2）
+  lib_sh "$T" install pg-doc-hygiene
+  assert_rc_ev "A5② install pg-doc-hygiene exit 0（spec §3.2：成功 0）" 0 "$L_RC" "$L_OUT"
+  assert_exists "A5② 副本落位 .agents/skills/pg-doc-hygiene/SKILL.md" "$T/.agents/skills/pg-doc-hygiene/SKILL.md"
+  assert_exists "A5② 写 .ponygo-installed 标记" "$T/.agents/skills/pg-doc-hygiene/.ponygo-installed"
+  lib_sha=$(file_sha "$T/.meta/skills-library/pg-doc-hygiene/SKILL.md")
+  inst_sha=$(file_sha "$T/.agents/skills/pg-doc-hygiene/SKILL.md")
+  if [ "$lib_sha" = "MISSING" ] || [ "$inst_sha" = "MISSING" ]; then
+    bad "A5② 库或副本 SKILL.md 缺失（lib=$lib_sha inst=$inst_sha）"
+  else
+    assert_eq "A5② 副本与库 SKILL.md 逐字节一致（sha256）" "$lib_sha" "$inst_sha"
+  fi
+  marker_sha=$(sed -n 's/^library_sha256=//p' "$T/.agents/skills/pg-doc-hygiene/.ponygo-installed" 2>/dev/null | head -n1)
+  assert_eq "A5② marker.library_sha256 = 安装时库内 SKILL.md 的 sha256" "$lib_sha" "$marker_sha"
+  if grep -Eq '^installed_at=[0-9]{4}-[0-9]{2}-[0-9]{2}$' "$T/.agents/skills/pg-doc-hygiene/.ponygo-installed" 2>/dev/null; then
+    ok "A5② marker.installed_at 为 yyyy-mm-dd"
+  else
+    bad "A5② marker.installed_at 非 yyyy-mm-dd（实得 [$(tr '\n' '|' < "$T/.agents/skills/pg-doc-hygiene/.ponygo-installed" 2>/dev/null)]）"
+  fi
+
+  # ③ check → 0 且状态 ok；只读不写盘。check 输出格式按 Lead 裁决冻结为 <name>\t<state>
+  tree_before=$(tree_sha "$T/.agents/skills")
+  lib_sh "$T" check
+  assert_rc_ev "A5③ install.sh check exit 0（只读、advisory）" 0 "$L_RC" "$L_OUT"
+  line=$(printf '%s\n' "$L_OUT" | awk -F'\t' '$1=="pg-doc-hygiene"{print; exit}')
+  assert_eq "A5③ check 行 = pg-doc-hygiene<TAB>ok（冻结两列）" "pg-doc-hygiene	ok" "$line"
+  if [ "$line" != "pg-doc-hygiene	ok" ]; then
+    printf '       实得 check 输出（TAB→|）：\n' >&2
+    printf '%s\n' "$L_OUT" | sed -n '1,10p' | tr '\t' '|' | sed 's/^/         /' >&2
+  fi
+  assert_eq "A5③ 只读 check 不改 .agents/skills（树指纹不变）" "$tree_before" "$(tree_sha "$T/.agents/skills")"
+
+  # ④ 二次 install → 1（拒绝且不写）；错误走 stderr；已装内容逐字节未变
+  lib_sh_split "$T" install pg-doc-hygiene
+  assert_rc_ev "A5④ 二次 install exit 1（已存在 → 拒绝且不写）" 1 "$L_RC" "$L_STDERR"
+  assert_eq "A5④ 拒绝时 stdout 为空（错误全走 stderr）" "" "$L_STDOUT"
+  if [ -n "$L_STDERR" ]; then
+    ok "A5④ 拒绝原因写 stderr（首行 [$(printf '%s\n' "$L_STDERR" | head -n1)]）"
+  else
+    bad "A5④ 拒绝时 stderr 为空（错误未走 stderr）"
+  fi
+  assert_eq "A5④ 拒绝覆盖：副本 SKILL.md sha256 未变" "$inst_sha" "$(file_sha "$T/.agents/skills/pg-doc-hygiene/SKILL.md")"
+  assert_eq "A5④ 拒绝覆盖：库 SKILL.md sha256 未变" "$lib_sha" "$(file_sha "$T/.meta/skills-library/pg-doc-hygiene/SKILL.md")"
+  assert_eq "A5④ 拒绝覆盖：marker 未被改写" "$marker_sha" \
+    "$(sed -n 's/^library_sha256=//p' "$T/.agents/skills/pg-doc-hygiene/.ponygo-installed" 2>/dev/null | head -n1)"
+  lib_sh "$T" list
+  line=$(printf '%s\n' "$L_OUT" | awk -F'\t' '$1=="pg-doc-hygiene"{print; exit}')
+  assert_eq "A5④ list 已装态 = installed/ok" "pg-doc-hygiene	installed	ok" "$line"
+
+  # ⑤ 已装副本不计入问③ 3.2：audit 命总数不变 + 技能行「库 1 安装；实例自有 0」
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G audit --level S
+  assert_out_has "A5⑤ 已装副本不计「实例自有」：库 1 安装、实例自有 0" \
+    "$R_OUT" "技能：基线 3/3 齐；库 1 安装；实例自有 0" "技能："
+  assert_eq "A5⑤ 已装副本不送分：命总数与安装前一致（$base_hits）" "$base_hits" "$(audit_hit_nm "$R_OUT")"
+  # 正向对照（防「3.2 写死不得分」假绿）：真·实例自有技能必须让命总数 +1、总项数不变
+  write_shaped_skill "$T" fixture-owned
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G audit --level S
+  assert_out_has "A5⑤对照 加一篇实例自有技能 → 实例自有 1" \
+    "$R_OUT" "技能：基线 3/3 齐；库 1 安装；实例自有 1" "技能："
+  assert_eq "A5⑤对照 加一篇实例自有技能 → 命总数 +1、总项数不变" "$(bump_n "$base_hits")" "$(audit_hit_nm "$R_OUT")"
+}
+
+# ---- 场景83：A6 modified 且永不覆盖 ----
+s83_skill_library_modified_detected() {
+  echo "--- 场景83：A6 手工改已装技能 → check 报 modified 且文件未被覆盖"
+  local T line inst_sha
+  T=$(new_case); run_cli "$T" init
+  lib_sh "$T" install pg-doc-hygiene
+  assert_rc_ev "A6⓪ 安装基线 exit 0" 0 "$L_RC" "$L_OUT"
+  assert_exists "A6⓪ 已装副本就位" "$T/.agents/skills/pg-doc-hygiene/SKILL.md"
+  # 手工改造已装副本（本地校准样例属正当改造，但必须可被 check 观测到 → modified）
+  printf '\n## 校准样例（本地追加）\n\n- 正例：本地追加在场 → check 报 modified，而不是 ok。\n' \
+    >> "$T/.agents/skills/pg-doc-hygiene/SKILL.md"
+  inst_sha=$(file_sha "$T/.agents/skills/pg-doc-hygiene/SKILL.md")
+  lib_sh "$T" check
+  assert_rc_ev "A6① check exit 0（advisory 不因 modified 变红）" 0 "$L_RC" "$L_OUT"
+  line=$(printf '%s\n' "$L_OUT" | awk -F'\t' '$1=="pg-doc-hygiene"{print; exit}')
+  assert_eq "A6② check 行 = pg-doc-hygiene<TAB>modified（冻结两列）" "pg-doc-hygiene	modified" "$line"
+  if [ "$line" != "pg-doc-hygiene	modified" ]; then
+    printf '       实得 check 输出（TAB→|）：\n' >&2
+    printf '%s\n' "$L_OUT" | sed -n '1,10p' | tr '\t' '|' | sed 's/^/         /' >&2
+  fi
+  assert_eq "A6③ check 后文件未被覆盖（sha256 仍为改动后的值）" "$inst_sha" "$(file_sha "$T/.agents/skills/pg-doc-hygiene/SKILL.md")"
+  assert_file_has "A6④ 本地追加内容仍在（未被回滚成库模板）" \
+    "$T/.agents/skills/pg-doc-hygiene/SKILL.md" "校准样例（本地追加）"
+  lib_sh "$T" list
+  line=$(printf '%s\n' "$L_OUT" | awk -F'\t' '$1=="pg-doc-hygiene"{print; exit}')
+  assert_eq "A6⑤ list 三态列同步 = installed/modified" "pg-doc-hygiene	installed	modified" "$line"
+  # 反向对照（防「一律报 modified」假绿）：未改动的另一已装技能仍须报 ok
+  lib_sh "$T" install pg-delivery-checks
+  assert_rc_ev "A6⓪2 第二技能 pg-delivery-checks 安装 exit 0" 0 "$L_RC" "$L_OUT"
+  lib_sh "$T" check
+  line=$(printf '%s\n' "$L_OUT" | awk -F'\t' '$1=="pg-delivery-checks"{print; exit}')
+  assert_eq "A6⑥ 对照：未改动的 pg-delivery-checks 行 = <name><TAB>ok" "pg-delivery-checks	ok" "$line"
+  if [ "$line" != "pg-delivery-checks	ok" ]; then
+    printf '       实得 check 输出（TAB→|）：\n' >&2
+    printf '%s\n' "$L_OUT" | sed -n '1,10p' | tr '\t' '|' | sed 's/^/         /' >&2
+  fi
+}
+
+# ---- 场景84：A7 可选资产缺口（status exit 0）----
+s84_skill_library_optional_gap_status() {
+  echo "--- 场景84：A7 删库内一 SKILL.md → status 报可选资产缺口但 exit 0"
+  local T
+  T=$(new_case); run_cli "$T" init
+  run_cli "$T" status
+  assert_rc_ev "A7⓪ 库完整时 status exit 0" 0 "$R_RC" "$R_OUT"
+  assert_out_lacks "A7⓪ 库完整时不出可选缺口行（防无条件打印）" "$R_OUT" "骨架可选资产缺口" "可选资产|缺口"
+  rm -f "$T/.meta/skills-library/pg-gc-agent-notes/SKILL.md"
+  run_cli "$T" status
+  assert_rc_ev "A7① 缺 1 个库文件 → status exit 0（可选资产不计 exit 1，spec §4）" 0 "$R_RC" "$R_OUT"
+  assert_out_has "A7② status 打「骨架可选资产缺口：1」（spec §4）" "$R_OUT" "骨架可选资产缺口：1" "可选资产|缺口"
+  assert_out_has "A7③ 缺口行带 init --repair-skeleton 指引" "$R_OUT" "init --repair-skeleton" "repair"
+  run_cli "$T" init --repair-skeleton
+  assert_rc_ev "A7④ init --repair-skeleton exit 0" 0 "$R_RC" "$R_OUT"
+  assert_exists "A7⑤ repair 补回被删的库 SKILL.md（只补不覆盖）" "$T/.meta/skills-library/pg-gc-agent-notes/SKILL.md"
+  run_cli "$T" status
+  assert_rc_ev "A7⑥ 补齐后 status exit 0" 0 "$R_RC" "$R_OUT"
+  assert_out_lacks "A7⑦ 补齐后可选缺口行消失" "$R_OUT" "骨架可选资产缺口" "可选资产|缺口"
+}
+
+# ---- 场景85：A8 基线缺件 → audit 非零 + repair 恢复 ----
+s85_skill_baseline_missing_audit_repair() {
+  echo "--- 场景85：A8 删基线 change-review/SKILL.md → audit 非零 + skill_baseline_missing → repair 恢复"
+  local T G
+  T=$(new_case); run_cli "$T" init
+  G=$(sanitize_git)
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G audit
+  assert_rc_ev "A8⓪ 基线齐时 audit exit 0" 0 "$R_RC" "$R_OUT"
+  assert_out_lacks "A8⓪ 基线齐时不出 skill_baseline_missing" "$R_OUT" "skill_baseline_missing" "skill_"
+  rm -f "$T/.agents/skills/change-review/SKILL.md"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G audit
+  assert_nonzero "A8① 删基线 SKILL.md → audit 非零（spec §5.1 vl_fail）" "$R_RC"
+  assert_out_has "A8② audit 报 gap skill_baseline_missing（spec §5.4 冻结 gap id）" \
+    "$R_OUT" "skill_baseline_missing" "skill_|基线|change-review"
+  run_cli "$T" init --repair-skeleton
+  assert_rc_ev "A8③ init --repair-skeleton exit 0" 0 "$R_RC" "$R_OUT"
+  assert_exists "A8④ repair 补回 change-review/SKILL.md" "$T/.agents/skills/change-review/SKILL.md"
+  assert_same_as_template "A8⑤ 补回内容与仓库模板逐字节一致（eol 归一）" \
+    "$T/.agents/skills/change-review/SKILL.md" "$ROOT/.agents/skills/change-review/SKILL.md"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G audit
+  assert_rc_ev "A8⑥ 恢复后 audit exit 0" 0 "$R_RC" "$R_OUT"
+  assert_out_lacks "A8⑦ 恢复后无 skill_baseline_missing" "$R_OUT" "skill_baseline_missing" "skill_"
+  # ⑧ 裸目录（无 .meta/、无 .agents/）：未初始化实例只做形状探测，级自洽跳过，audit exit 0
+  local T2
+  T2=$(new_case)
+  assert_missing "A8⓪2 裸目录确实无 .meta/（夹具前提）" "$T2/.meta"
+  # shellcheck disable=SC2046
+  run_cli_env "$T2" $G audit
+  assert_eq "A8⑧ 裸目录（无 .meta/）未声明治理根，audit 保持既有退出码 0" 0 "$R_RC"
+  assert_out_has "A8⑨ 裸目录 audit 报基线缺失提示" \
+    "$R_OUT" "基线缺失" "基线"
+}
+
+# ---- 场景86：A9 形状审计（3.3 / 3.4 计分面 + skill_shape_incomplete）----
+s86_skill_shape_incomplete() {
+  echo "--- 场景86：A9 缺「## 校准样例」/ 坏 frontmatter → skill_shape_incomplete + 非零；补齐转绿"
+  local T G base_hits
+  T=$(new_case); run_cli "$T" init
+  G=$(sanitize_git)
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G audit --level S
+  base_hits=$(audit_hit_nm "$R_OUT")
+  assert_rc_ev "A9⓪ 空实例 audit exit 0" 0 "$R_RC" "$R_OUT"
+  case "$base_hits" in
+    [0-9]*/[0-9]*) ok "A9⓪ 空实例命中行可解析（$base_hits）" ;;
+    *) bad "A9⓪ 空实例无「命中 N / M 项」行（末尾：$(printf '%s\n' "$R_OUT" | tail -n 2 | tr '\n' '|')）" ;;
+  esac
+  # 3.4 负样本：五要素缺「## 校准样例」（其余四要素齐）
+  write_shaped_skill "$T" broken-shape calibration
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G audit --level S
+  assert_nonzero "A9① 缺 ## 校准样例 → audit 非零（spec §5.2 vl_fail）" "$R_RC"
+  assert_out_has "A9② 报 gap skill_shape_incomplete（spec §5.4 冻结 gap id）" \
+    "$R_OUT" "skill_shape_incomplete" "skill_|校准|shape"
+  assert_out_has "A9③ 逐项打印缺什么（点名「校准样例」）" "$R_OUT" "校准样例" "skill_|校准"
+  assert_out_has "A9④ 逐技能打印（点名字技能 broken-shape）" "$R_OUT" "broken-shape" "broken-shape"
+  # 3.3 负样本：frontmatter name 与目录不同名、description 缺触发词
+  write_shaped_skill "$T" wrong-name
+  sed -i 's/^name: wrong-name$/name: not-the-dir/' "$T/.agents/skills/wrong-name/SKILL.md"
+  sed -i 's/^description: .*/description: 一段描述，说明该技能的用途与适用场景。/' \
+    "$T/.agents/skills/wrong-name/SKILL.md"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G audit --level S
+  assert_nonzero "A9⑤ 3.3：name≠目录名且 description 缺触发词 → audit 非零" "$R_RC"
+  assert_out_has "A9⑥ 3.3 不齐 → 报 skill_shape_incomplete 且点名叫技能 wrong-name" \
+    "$R_OUT" "wrong-name" "skill_|name|description|wrong-name"
+  # 补齐：两篇都写成形状完整 → 转绿，且命总数 = 基线 +1（3.2 计分、3.3/3.4 恢复）
+  write_shaped_skill "$T" broken-shape
+  write_shaped_skill "$T" wrong-name
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G audit --level S
+  assert_rc_ev "A9⑦ 补齐五要素 → audit exit 0（转绿）" 0 "$R_RC" "$R_OUT"
+  assert_out_lacks "A9⑧ 补齐后无 skill_shape_incomplete" "$R_OUT" "skill_shape_incomplete" "skill_"
+  assert_eq "A9⑨ 补齐后命总数 = 空实例基线 +1（3.2 计分；3.3/3.4 恢复，总项数不变）" \
+    "$(bump_n "$base_hits")" "$(audit_hit_nm "$R_OUT")"
+}
+
+# ---- 场景87：A10 能力缺口建议（advisory，不改退出码）----
+s87_skill_advisory_catalog() {
+  echo "--- 场景87：A10 catalog×证据达阈值 → 打印 advisory 与安装命令，且 exit 码不受影响"
+  local T G base_out
+  T=$(new_case); run_cli "$T" init
+  G=$(sanitize_git)
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G audit
+  base_out="$R_OUT"
+  assert_rc_ev "A10⓪ 无 simplification 证据时 audit exit 0" 0 "$R_RC" "$base_out"
+  # 反向对照：证据不足时不得打印该技能的「安装命令」行（名字会在库缺口清单里出现，
+  # 故只锚 install.sh install 行——那才是 §5.3 的推荐动作，未达阈值不许出现）
+  assert_out_lacks "A10⓪ 对照：证据不足时不打印 pg-find-simplifications 的安装命令" \
+    "$base_out" "install.sh install pg-find-simplifications" "install.sh install|能力缺口建议"
+  # 造 3 条 implemented/simplification/ 决策（spec §3.1 notes_class 口径：计数去 README/*.zh.md）
+  write_valid_decision "$T" "implemented/simplification/2026-01-02-a.md"
+  write_valid_decision "$T" "implemented/simplification/2026-01-02-b.md"
+  write_valid_decision "$T" "implemented/simplification/2026-01-03-c.md"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G audit
+  assert_rc_ev "A10① 证据达阈值后 audit 仍 exit 0（advisory 不改退出码，spec §5.3）" 0 "$R_RC" "$R_OUT"
+  assert_out_has "A10② 打印「能力缺口建议（advisory」段（spec §5.4 冻结前缀）" \
+    "$R_OUT" "能力缺口建议（advisory" "能力缺口建议|advisory"
+  assert_out_has "A10③ 打印可复制安装命令（pg-find-simplifications）" \
+    "$R_OUT" "install.sh install pg-find-simplifications" "install.sh install|pg-find"
+  assert_out_has "A10④ advisory 段头显式标注「靠 review 判定；不计分、不影响退出码」（spec §5.3 原文）" \
+    "$R_OUT" "能力缺口建议（advisory，靠 review 判定；不计分、不影响退出码）：" "能力缺口建议|不计分|review"
+  # 退场候选：装上之后证据消失 → 一行退场候选（spec §5.3）
+  lib_sh "$T" install pg-find-simplifications
+  assert_rc_ev "A10⑤ 安装候选技能 exit 0" 0 "$L_RC" "$L_OUT"
+  rm -rf "$T/.agents/notes/implemented/simplification"
+  # shellcheck disable=SC2046
+  run_cli_env "$T" $G audit
+  assert_rc_ev "A10⑥ 证据消失后 audit 仍 exit 0" 0 "$R_RC" "$R_OUT"
+  assert_out_has "A10⑦ 已装且证据消失 → 「退场候选：pg-find-simplifications」" \
+    "$R_OUT" "退场候选：pg-find-simplifications" "退场候选"
+}
+
+s82_skill_library_install_closure
+s83_skill_library_modified_detected
+s84_skill_library_optional_gap_status
+s85_skill_baseline_missing_audit_repair
+s86_skill_shape_incomplete
+s87_skill_advisory_catalog
+
 # ---- 场景88：2.6 canonical 投影新鲜度（独立验收）----
 s88_projection_freshness() {
   echo "--- 场景88：2.6 canonical 投影新鲜度（独立验收套件）"
@@ -4467,8 +4900,102 @@ s88_projection_freshness() {
   fi
 }
 s88_projection_freshness
+
+# ---- 场景89：auditfix 验收套件（audit 计分/执行判据修正项 F1–F9 + 对抗样本）----
+# 与 s78/s88 同款接线：子进程自带隔离 mktemp 仓，本场景只做编排与汇总。
+# 红相定位靠 run-all.sh 的 ##CASE / FAIL 行（原样回显），不把「子进程 exit 0」当全部通过。
+s89_auditfix_acceptance() {
+  echo "--- 场景89：auditfix 独立验收套件（run-all.sh）"
+  local out rc
+  out=$( cd "$ROOT" && bash tests/acceptance/auditfix/run-all.sh 2>&1 ); rc=$?
+  if [ "$rc" -eq 0 ] && ! printf '%s\n' "$out" | grep -qE '^##SUMMARY .*failed=[1-9]'; then
+    ok "s89 auditfix 独立验收全绿"
+  else
+    bad "s89 auditfix 独立验收失败（exit $rc）"
+    printf '%s\n' "$out" | grep -E '^(FAIL |##CASE |##SUMMARY |  RED )' | tail -n 25 || true
+  fi
+}
+s89_auditfix_acceptance
+
+# ---- 场景90：gate-hardening 验收套件（门禁收紧：spec 真跑/CI 聚合/配对/发布卫生）----
+s90_gate_hardening_acceptance() {
+  echo "--- 场景90：gate-hardening 独立验收套件（run-all.sh）"
+  local out rc
+  out=$( cd "$ROOT" && bash tests/acceptance/gate-hardening/run-all.sh 2>&1 ); rc=$?
+  if [ "$rc" -eq 0 ] && ! printf '%s\n' "$out" | grep -qE '^##SUMMARY .*failed=[1-9]'; then
+    ok "s90 gate-hardening 独立验收全绿"
+  else
+    bad "s90 gate-hardening 独立验收失败（exit $rc）"
+    printf '%s\n' "$out" | grep -E '^(FAIL |##CASE |##EXIT |##SUMMARY |  RED )' | tail -n 25 || true
+  fi
+}
+s90_gate_hardening_acceptance
+
+# ---- 场景91：deferred 验收套件（audit/status --json 契约 · 2.6 AI 常载 · observe probe）----
+s91_deferred_acceptance() {
+  echo "--- 场景91：deferred 独立验收套件（run-all.sh）"
+  local out rc
+  out=$( cd "$ROOT" && bash tests/acceptance/deferred/run-all.sh 2>&1 ); rc=$?
+  if [ "$rc" -eq 0 ] && ! printf '%s\n' "$out" | grep -qE '^##SUMMARY .*failed=[1-9]'; then
+    ok "s91 deferred 独立验收全绿"
+  else
+    bad "s91 deferred 独立验收失败（exit $rc）"
+    printf '%s\n' "$out" | grep -E '^(FAIL |##CASE |##SUMMARY |  RED )' | tail -n 25 || true
+  fi
+}
+s91_deferred_acceptance
+
+# ---- 场景92：P0 修复批验收套件（ai-surface 默认态 / 2.3 零实例门 / spec 拒绝断言 / 门资产漂移 / 硬数字）----
+# 与 s78/s88/s89/s90/s91 同款接线：子进程自带隔离沙箱（mktemp -d + 沙箱逃逸 fail-closed），
+# 本场景只做编排与汇总；红相定位靠原样回显的 FAIL 行，不把「子进程 exit 0」当全部通过。
+# 编号说明：契约书写的 s90 已被 s90 gate-hardening 占用，故本批场景用 s92（不重号、不重排既有场景）。
+s92_p0_fixes_acceptance() {
+  echo "--- 场景92：P0 修复批独立验收套件（verify-p0.sh）"
+  local out rc
+  out=$( cd "$ROOT" && bash tests/acceptance/p0-fixes/verify-p0.sh 2>&1 ); rc=$?
+  if [ "$rc" -eq 0 ] && ! printf '%s\n' "$out" | grep -qE '^PASS=[0-9]+ FAIL=[1-9]'; then
+    ok "s92 P0 修复批验收全绿（$(printf '%s\n' "$out" | sed -n 's/^PASS=\([0-9]*\) FAIL=\([0-9]*\)$/PASS=\1 FAIL=\2/p' | tail -n1)）"
+  else
+    bad "s92 P0 修复批验收失败（exit $rc）"
+    printf '%s\n' "$out" | grep -E '^(  FAIL |== )' | tail -n 25 || true
+  fi
+}
+s92_p0_fixes_acceptance
+
+# ---- 场景93：negspace 验收套件（负空间批次：1.11 复活条件判据 · A8 零残留门 · A9 自检 · A4 第 4 段 fail-closed）----
+# 与 s78/s88~s92 同款接线：子进程自带 mktemp 沙箱，本场景只做编排与汇总；
+# 红相定位靠原样回显的 FAIL 行，不把「子进程 exit 0」当全部通过（零断言不得记 ok）。
+s93_negspace_acceptance() {
+  echo "--- 场景93：negspace 独立验收套件（run-all.sh）"
+  local out rc
+  out=$( cd "$ROOT" && bash tests/acceptance/negspace/run-all.sh 2>&1 ); rc=$?
+  if [ "$rc" -eq 0 ] && ! printf '%s\n' "$out" | grep -qE '^##SUMMARY .*failed=[1-9]'; then
+    ok "s93 negspace 独立验收全绿"
+  else
+    bad "s93 negspace 独立验收失败（exit $rc）"
+    printf '%s\n' "$out" | grep -E '^(FAIL |##CASE |##SUMMARY |  RED )' | tail -n 25 || true
+  fi
+}
+s93_negspace_acceptance
+
+# ---- 场景94：P1 修复批验收套件（JSON 机读面 / 措辞 / 其它 forge 载体 / 自适应深度 / HANDOFF 归家 /
+#      家清单索引 / 残留投影 WARN / level 口径）----
+# 与 s92/s93 同款接线：子进程自带 mktemp 沙箱，本场景只做编排与汇总；
+# 红相定位靠原样回显的 FAIL 行，不把「子进程 exit 0」当全部通过（零断言不得记 ok）。
+s94_p1_fixes_acceptance() {
+  echo "--- 场景94：P1 修复批独立验收套件（verify-p1.sh）"
+  local out rc
+  out=$( cd "$ROOT" && bash tests/acceptance/p1-fixes/verify-p1.sh 2>&1 ); rc=$?
+  if [ "$rc" -eq 0 ] && ! printf '%s\n' "$out" | grep -qE '^PASS=[0-9]+ FAIL=[1-9]'; then
+    ok "s94 P1 修复批验收全绿（$(printf '%s\n' "$out" | sed -n 's/^PASS=\([0-9]*\) FAIL=\([0-9]*\)$/PASS=\1 FAIL=\2/p' | tail -n1)）"
+  else
+    bad "s94 P1 修复批验收失败（exit $rc）"
+    printf '%s\n' "$out" | grep -E '^(  FAIL |== )' | tail -n 25 || true
+  fi
+}
+s94_p1_fixes_acceptance
+
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
 [ "$FAIL" -eq 0 ] || exit 1
 exit 0
-

@@ -7,6 +7,12 @@ CARRIER_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd "$CARRIER_DIR/../../.." && pwd)
 CLI_BIN=${PONYGO_CLI:-$ROOT/ponygo}
 
+# P0-2/P0-3 夹具（2026-11-11）：L2 判据 2.3 现要求 ≥1 实例门 + 含拒绝断言的 spec，单点收口在此。
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/p0_instance_gate.sh"
+
+# P0-2/P0-3 夹具（2026-11-11）：L2 判据 2.3 现要求 ≥1 实例门 + 含拒绝断言的 spec，单点收口在此。
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/p0_instance_gate.sh"
+
 SBASE=$(mktemp -d) || { echo "无法创建 carrier-audit 临时目录" >&2; exit 1; }
 trap 'rm -rf "$SBASE"' EXIT
 new_case() { mktemp -d "$SBASE/case.XXXXXX"; }
@@ -135,6 +141,7 @@ make_gov_repo() { # <case> [level]；真 init + 一条合法 ADR
   assert_rc_is "夹具：ponygo init" 0 "$R_RC"
   [ "$R_RC" -eq 0 ] || return 1
   printf 'level: %s\n' "$lvl" > "$dir/.meta/meta.yaml"
+  [ "${lvl:-1}" -ge 2 ] && add_instance_gate "$dir"   # P0-2：L2 需 ≥1 个实例门（框架门资产不计）
   write_adr "$dir" implemented/architecture/2026-01-01-fixture.md
   assert_file "夹具：真实 ADR 已落盘" "$dir/.agents/notes/implemented/architecture/2026-01-01-fixture.md"
   assert_eq "夹具：真实决策数为 1" 1 "$(decision_count "$dir")"

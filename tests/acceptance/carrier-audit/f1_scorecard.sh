@@ -19,8 +19,8 @@ audit_m() { # <dir>：人读/JSON 双面同跑，结果存 M_*
   M_HIT=$(json_get "$M_JOUT" "d['hits']")
   M_TOTAL=$(json_get "$M_JOUT" "d['total']")
   assert_eq "M 人读 hits 与 JSON hits 同源" "$hh" "$M_HIT"
-  assert_eq "M 总项数恒为 15" 15 "$M_TOTAL"
-  assert_eq "M 人读 total 与 JSON total 同源" 15 "$(total_of "$M_HOUT")"
+  assert_eq "M 总项数恒为 16" 16 "$M_TOTAL"
+  assert_eq "M 人读 total 与 JSON total 同源" 16 "$(total_of "$M_HOUT")"
 }
 
 # CA-05/07 正对照：有真实 ADR 时，决策数项与 Status 项均正常计分。
@@ -92,7 +92,7 @@ H=$(new_case); make_gov_repo "$H" 2 || finish
 audit_m "$H"
 WIRED_HIT=$M_HIT
 assert_rc_is "CA-08 正对照：真实接线仓 audit M" 0 "$M_HRC"
-assert_contains "CA-09 正对照：人读治理门已接线" "$M_HOUT" "治理门接线：已接线"
+assert_contains "CA-09 正对照：人读治理门已挂载" "$M_HOUT" "治理门接线：已挂载"
 json_assert "CA-08 正对照：gates.local=wired 且无 no_local_hook" "$M_JOUT" "
 if d.get('gates', {}).get('local') != 'wired': fail.append(d.get('gates'))
 if 'no_local_hook' in d.get('gaps', []): fail.append(d.get('gaps'))

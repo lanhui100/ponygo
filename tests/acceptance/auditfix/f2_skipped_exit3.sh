@@ -101,7 +101,10 @@ if gov_repo "$T" 1; then
   run_in "$T" audit --run-specs
   assert_rc_is "F2-9 反向控制：全部真跑通过 → exit 0" 0 "$R_RC"
   assert_contains "F2-9 反向控制 GO：结论行「已真跑并通过」" "$R_OUT" "已真跑并通过"
-  assert_not_contains "F2-9 反向控制 NOGO：不得出现「未验证」" "$R_OUT" "未验证"
+  # P1-2（2026-11-11）期望更新：常驻提示句「未验证门会拒绝（验证入口：…）」不是判定结果，
+  # 剔除后再判（原强度不变：其它任何「未验证」措辞仍红）。
+  R_OUT_NOT_HINT=$(printf '%s\n' "$R_OUT" | sed 's/未验证门会拒绝（验证入口：[^）]*）//g')
+  assert_not_contains "F2-9 反向控制 NOGO：不得出现「未验证」" "$R_OUT_NOT_HINT" "未验证"
 fi
 
 # ---- F2-6 OPEN-1：dry-run 不执行、不判定 → exit 0 ----

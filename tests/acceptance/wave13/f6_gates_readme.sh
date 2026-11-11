@@ -25,13 +25,15 @@ assert_file_lacks "RM-1 [NOGO] 不得含旧句「此目录为空」" "$G" "此�
 assert_file_lacks "RM-1 [NOGO] 不得含旧句「实例仓照旧从空开始」" "$G" "实例仓照旧从空开始"
 assert_file_lacks "RM-1 [NOGO] 不得含片段「照旧从空开始」" "$G" "照旧从空开始"
 
-assert_file_has "RM-2 [GO] 新文案逐字：框架交付资产 A1/A2/A4/A6/A7 常驻；实例自有门禁从 L2 起按需添加" \
-  "$G" "框架交付资产 A1/A2/A4/A6/A7 常驻；实例自有门禁从 L2 起按需添加"
+assert_file_has "RM-2 [GO] 新文案逐字：框架交付资产 A1/A2/A4/A6/A7/A8/A9 常驻；实例自有门禁从 L2 起按需添加" \
+  "$G" "框架交付资产 A1/A2/A4/A6/A7/A8/A9 常驻；实例自有门禁从 L2 起按需添加"
 
 assert_file_has "RM-3 [GO] 资产表含 A6 行" "$G" "A6"
 assert_file_has "RM-3 [GO] 资产表含 A6 路径 .meta/gates/archive-verify.sh" "$G" ".meta/gates/archive-verify.sh"
 assert_file_has "RM-3 [GO] 资产表含 A7 行" "$G" "A7"
 assert_file_has "RM-3 [GO] 资产表含 A7 路径 .meta/gates/archive-verify.spec.sh" "$G" ".meta/gates/archive-verify.spec.sh"
+assert_file_has "RM-3 [GO] 资产表含 A8 路径 .meta/gates/no-residue.sh" "$G" ".meta/gates/no-residue.sh"
+assert_file_has "RM-3 [GO] 资产表含 A9 路径 .meta/gates/no-residue.spec.sh" "$G" ".meta/gates/no-residue.spec.sh"
 
 assert_file_has "RM-4 [GO] pre-push 可选行含命令 bash .meta/gates/ci-verify.sh" "$G" "bash .meta/gates/ci-verify.sh"
 assert_file_has "RM-4 [GO] 同段出现 pre-push" "$G" "pre-push"
@@ -94,7 +96,7 @@ assert_eq "repair 夹具：init exit 0" 0 "$R_RC"
 rm -f "$T/$README_REL"
 run_in "$T" init --repair-skeleton
 assert_eq "repair（README 缺口）exit 0" 0 "$R_RC"
-assert_file_has "repair 补回的 README 同样含 A1/A2/A4/A6/A7" "$T/$README_REL" "A1/A2/A4/A6/A7"
+assert_file_has "repair 补回的 README 同样含 A1/A2/A4/A6/A7/A8/A9" "$T/$README_REL" "A1/A2/A4/A6/A7/A8/A9"
 assert_file_lacks "repair 补回的 README 同样不含「此目录为空」" "$T/$README_REL" "此目录为空"
 
 finish

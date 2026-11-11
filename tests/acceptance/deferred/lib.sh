@@ -17,6 +17,9 @@ PROBE_SERVER="$DEF_DIR/probe_server.py"
 
 CLI() { bash "$ROOT/ponygo" "$@"; }
 
+# P0-2/P0-3 夹具（2026-11-11）：L2 判据 2.3 现要求 ≥1 实例门 + 含拒绝断言的 spec，单点收口在此。
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/p0_instance_gate.sh"
+
 SBASE=$(mktemp -d) || { echo "无法创建临时目录" >&2; exit 1; }
 trap 'stop_probe_server 2>/dev/null || true; rm -rf "$SBASE"' EXIT
 new_case() { mktemp -d "$SBASE/case.XXXXXX"; }
@@ -107,6 +110,8 @@ deferred 验收夹具用的合法决策记录（满足 1.1–1.9 机械判据）
 - 不建夹具：判定器无法被验证。
 ADREOF
   printf 'level: %s\n' "$lvl" > "$dir/.meta/meta.yaml"
+  # P0-2：level ≥2 的实例必须有 ≥1 个实例门（框架门资产不计），否则 2.3 恒 FAIL
+  [ "${lvl:-2}" -ge 2 ] && add_instance_gate "$dir"
   return 0
 }
 # 夹具自检：等价基线本身必须是通过态（后续变红才可归因到被测判据）

@@ -127,7 +127,10 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
 ├── constitution/              # 宪法：语义规范（"什么是好的"），供投影到 AGENTS.md / CLAUDE.md
 │   └── constitution.md        #    模板态（槽位未填）时 sync 投影初始引导 bootstrap：AI agent 进场即有指引，
 │                              #    由 agent 完成填槽/重投影/首篇 ADR；填槽后重跑 sync，引导自动被常载命约替换
-├── gates/                     # 门禁：把承诺转成非零退出命令（框架常驻 A1/A2/A4/A6/A7 + 每门配负样本 spec）
+├── gates/                     # 门禁：把承诺转成非零退出命令（框架常驻 A1/A2/A4/A6/A7/A8/A9 + 每门配负样本 spec）
+│                              #   UPGRADE_UNIVERSE 17 文件，较上一版 +2 = A8 no-residue.sh / A9 no-residue.spec.sh
+├── skills-library/            # 技能模板库（模板所有，init 播种不安装）：catalog.tsv + install.sh（list|install|check）
+│                              #   + 六个 pg- 通用流程技能；安装后才进 .agents/skills/，副本带 .ponygo-installed
 ├── docs-tier/                 # 文档分层：按 tier 分类法给每个事实安一个家
 └── adaptation/                # 替代治理适配任务书：init 检出既有治理形态时生成 alt-governance.md（不阻断注入）
 ```
@@ -150,12 +153,12 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
 | L1 | 决策入册 + 文档有家 | 真判据（机械可判） |
 | L2 | 承诺可验 + 文档分层 | 真判据（机械可判，分层激活形状） |
 | L3 | 流程资产 | 目标画像（靠 review） |
-| L4 | 负空间 | 部分机械（归档封印门 A6/A7 已交付；supersession 审计靠 review） |
+| L4 | 负空间 | 部分机械（复活条件形状判据 1.11 + 归档封印门 A6/A7 已交付；supersession 审计靠 review） |
 | L5 | 领域定制 | 目标画像（靠 review） |
 
-> L0–L2 的判据以 `maturity-ladder.md` §5 的真值表为准，`ponygo status` 已对声明级（L0-L2）的判据逐项机械验证（v1.1 起；v2.0 起文档判据 0.5/1.9/2.5 并入），判据不符时非零退出。L3/L5 仍是"目标画像"，靠 review 校准；L4 的**归档封印**已随框架交付（A6 `archive-verify.sh` + A7 负样本自检），只有 supersession 审计仍靠 review。
+> L0–L2 的判据以 `maturity-ladder.md` §5 的真值表为准，`ponygo status` 已对声明级（L0-L2）的判据逐项机械验证（v1.1 起；v2.0 起文档判据 0.5/1.9/2.5 并入），判据不符时非零退出。L3/L5 仍是"目标画像"，靠 review 校准；L4 的**归档封印**（A6 `archive-verify.sh` + A7 负样本自检）与**复活条件形状判据 1.11**（`implemented/simplification/` 必含围栏外 `## Reintroduction conditions`）已随框架交付，只有 supersession 审计与"复活条件是否真成立"仍靠 review。
 >
-> **判据覆盖的诚实边界**：`status` / `audit` 只机械验证 1.1–1.9，1.10（必含 `## Alternatives considered`）由 A1/A4 门判定——两者都不执行仓库脚本，故结论行显式标注「1.10 未由本命令验证」，`--json` 里给出固定词表 `coverage{verified,unverified,reason}`。未验证不计为 PASS。
+> **判据覆盖的诚实边界**：`status` / `audit` 只机械验证 1.1–1.9；1.10（必含 `## Alternatives considered`）与 1.11（`implemented/simplification/` 必含围栏外 `## Reintroduction conditions`）由 A1/A4 门经判定真源 `verify-note.sh` 判定——两者都不执行仓库脚本，故结论行显式标注「1.10 未由本命令验证」，`--json` 里给出固定词表 `coverage{verified,unverified,reason}`（本仓实测 `verified:["1.1-1.9"]` / `unverified:["1.10"]`）。**词表未列 ≠ 已验证**：1.11 不在该词表内，它的看守面只有 A1/A4。未验证不计为 PASS。
 > 判据 2.6 还校验 `AGENTS.md` 与 `CLAUDE.md` 的投影块正文是否等于 constitution 的 canonical 投影：正文漂移 exit 1；重复/倒序标记区只提示手工清理，不承诺 `ponygo sync` 可修。
 
 ### 4.3 自适应审计（首版两档）
@@ -164,10 +167,10 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
 
 | 档 | 适用规模 | 细目层级 |
 |---|---|---|
-| S（Small） | 起步 / 小项目 | CLI 内嵌精简子集 10 项（判"有没有"） |
-| M（Medium） | 有治理基础但欠体系 | + CLI 内嵌追加 5 项（共 15 项，判"对不对"） |
+| S（Small） | 起步 / 小项目 | CLI 内嵌精简子集，`total=12`（判"有没有"） |
+| M（Medium） | 有治理基础但欠体系 | + CLI 内嵌追加 4 项，`total=16`（判"对不对"） |
 
-> 上方是 **CLI 内嵌的精简子集**（其"10/15 项"与下文 checklist 的"骨架 8 / 机制 18 / 精微 8"是两套计数，勿混用；CLI 内嵌是 checklist 子集故免改）；全量细目见 `audit/checklist.md`（骨架 8 / 机制 18 / 精微 8 标 future，为权威真源——CLI 与文档口径不一致时以 checklist 为准）。四问记分卡：决策记在哪 / 承诺怎么强制 / 重复劳动怎么复用 / 过时怎么退场。
+> 上方两项是 **CLI 内嵌的精简子集**，计数一律派生：跑 `ponygo audit --json` 取 `hits` / `total`（`hits` 随仓库状态变化，本文不写死）。全量细目见 `audit/checklist.md`（**表条目数**：骨架 9 / 机制 19 / 精微 7，标 future）——CLI 内嵌是它的子集，**子集不是冲突**；判据语义的唯一真源是 `maturity-ladder.md` §5，出现口径差额时同批修正双方（不设"以某一份为准"的单边权威）。四问记分卡：决策记在哪 / 承诺怎么强制 / 重复劳动怎么复用 / 过时怎么退场。
 
 > **只读边界**：`status` / `audit` 默认**不执行**仓库里的任何脚本（对陌生遗留仓库执行脚本 = 任意代码执行）。
 > 判据 2.3 的**执行侧**（跑 `gates/*.spec.sh` 并断言 exit 0）由显式开关承担：`ponygo audit --run-specs`，
@@ -275,11 +278,14 @@ ponygo 的双根"变成可逐项勾掉的清单，而不是一句"先 audit 再�
 |---|---|---|
 | `README.md` | 门面 + 使用总纲：命令面、路径、阶梯、边界 | 所有人；第一入口 |
 | `ponygo` | 单文件 CLI（shell、零依赖），六条核心命令 + `observe` 维度 | 使用者；执行入口 |
-| `tests/run.sh` | CLI 自测（纯 bash、零依赖、36 场景，含 `observe` 的 s33~s36），`bash tests/run.sh` 全绿为准 | 维护者；回归门禁 |
+| `install.sh` | 安装 / 升级入口（把 `ponygo` 放到 `$PATH`，并校验随包资产） | 使用者；分发 |
+| `tests/run.sh` | CLI 自测（纯 bash、零依赖）——当前共 **94 场景**（N 由脚本自身枚举派生：`grep -cE '^s[0-9]+_[a-z0-9_]+$' tests/run.sh`，不手抄子计数），`bash tests/run.sh` 全绿为准 | 维护者；回归门禁 |
 | `.github/workflows/ci.yml` | 回归门禁挂载：ubuntu + windows Git Bash 双平台跑 tests/run.sh + 聚合门 | 维护者；分支保护依赖 |
 | `.github/workflows/release.yml` | 发布校验和链：tag-push 触发，生成并发布 ponygo.sha256（裸哈希 + CRLF 断言 + 最小权限） | 维护者；发布动作 |
+| `.githooks/` | 本地层门禁落点（A3）：`ponygo init` 把 ADR 门哨兵块挂到 `pre-commit`，`core.hooksPath` 指向此处 | 使用者；提交时强制 |
+| `docs/` | 文档树：`docs/AGENTS.md`（文档标准）/ `docs/architecture.md`（架构地图）/ `docs/methodology.md`（原理层）/ `docs/dev-team/`（工程过程记录） | 想懂"为什么"与"过程"的人 |
 | `docs/methodology.md` | 原理层：方法论设计依据（源自 deepseek-harness） | 想懂"为什么"的人；机制层的理论源头 |
-| `.meta/` + `.agents/` | 治理根骨架（双根）：.meta/ = constitution / gates（A1/A2/A4/A6/A7 框架资产）/ docs-tier / adaptation（检出替代治理时）/ meta.yaml；.agents/ = notes / skills | 实例化产物；由 `ponygo init` 生成进用户项目 |
+| `.meta/` + `.agents/` | 治理根骨架（双根）：.meta/ = constitution / gates（A1/A2/A4/A6/A7/A8/A9 框架资产）/ docs-tier / adaptation（检出替代治理时）/ meta.yaml；.agents/ = notes / skills | 实例化产物；由 `ponygo init` 生成进用户项目 |
 | `maturity-ladder.md` | 成熟度阶梯定义（L0–L5 逐档判据） | `ponygo status` 与 review 的判定来源 |
 | `audit/` | 四问记分卡 + 分层细目库 + 自适应深度选择器 | `ponygo audit` 的执行依据 |
 | `audit/checklist.md` | 分层细目（骨架 / 机制 / 精微三层条目） | 审计打分时的逐项参照 |

@@ -2,10 +2,15 @@
 # F8（ponygo audit/status --json）：机读审计面。
 #   契约（Lead 裁决）：
 #     * `audit --json`：stdout **单行** JSON，可被 `python3 -m json.tool` 解析；
-#       字段词表固定 schema/command/tier/hits/total/level/ladder{verdict,fails[]}/gates{local,remote}/
-#       coverage/drift/gaps[]/exit，schema=ponygo.audit/1；`exit` 必须等于进程真实退出码；
+#       字段词表固定 schema/command/tier/hits/total/level/level_declared/level_verified/
+#       ladder{verdict,fails[]}/gates{local,remote}/miss_ids[]/exempt_gates[]/coverage/drift/
+#       skills{baseline_missing,library{missing,installed},instance_owned,candidates}/gaps[]/
+#       warnings[]/exit，schema=ponygo.audit/1；`exit` 必须等于进程真实退出码；
 #       stdout 不得混入任何非 JSON 文本。
-#     * `status --json`：ponygo.status/1 + level/skeleton{missing_dirs,missing_files,drift}/gates/ladder/coverage/exit。
+#     * `status --json`：ponygo.status/1 + level/level_declared/level_verified/skeleton{missing_dirs,
+#       missing_files,drift}/gates/ladder/miss_ids[]/exempt_gates[]/coverage/warnings[]/exit。
+#       P1 修复批（2026-11-11，p1-fixes 契约）新增 level_declared/level_verified/miss_ids/
+#       exempt_gates/warnings 五个词表字段（未验证 ≠ 通过；豁免门名单派生自 UPGRADE_UNIVERSE）。
 #
 # 契约演进（Wave13 contract-matrix-wave13.md COV-J1~J6 / DR-J1~J5，Lead 裁定 2026-11-07）：
 #   Wave13 新增两个固定词表字段——status/audit 均增 `coverage`，audit 另增 `drift`。
@@ -51,7 +56,7 @@ if d.get("schema") != "ponygo.audit/1": fail.append("schema=%r" % d.get("schema"
 if d.get("command") != "audit": fail.append("command=%r" % d.get("command"))
 '
 json_assert "F8-1 GO：顶层字段词表固定（多/少皆 FAIL）" "$R_OUT" '
-want = {"schema","command","tier","hits","total","level","ladder","gates","coverage","drift","gaps","exit"}
+want = {"schema","command","tier","hits","total","level","level_declared","level_verified","ladder","gates","coverage","drift","skills","gaps","miss_ids","exempt_gates","warnings","exit"}
 got = set(d.keys())
 if got != want: fail.append("缺 %s / 多 %s" % (sorted(want-got), sorted(got-want)))
 '
@@ -86,6 +91,26 @@ else:
     if not isinstance(dr.get("count"), int): fail.append("drift.count 不是整数: %r" % (dr.get("count"),))
     if not isinstance(dr.get("files"), list): fail.append("drift.files 不是数组")
     if len(dr.get("files") or []) != dr.get("count"): fail.append("drift.count 与 files 长度不一致")
+'
+# skills 块（spec-ponygo-v2.6 §5.5「技能三层归属」；与 status 同源 compute_skills_state + json_skills）。
+# 逐字取自实测（gov_repo lv=1 夹具）：
+#   "skills":{"baseline_missing":[],"library":{"missing":[],"installed":[]},
+#             "instance_owned":[],"candidates":[]}
+# 技能面判不了时机器面据实收窄为 {"judged":false,"reason":"not-run"}——两种形态都必须自洽。
+json_assert "F8-1 GO：skills 块词表固定（baseline_missing/library{missing,installed}/instance_owned/candidates）" "$R_OUT" '
+sk = d.get("skills")
+if not isinstance(sk, dict): fail.append("skills 不是对象: %r" % (sk,))
+elif "judged" in sk:
+    if sk.get("judged") is not False: fail.append("skills.judged 只允许 false: %r" % (sk,))
+    if not isinstance(sk.get("reason"), str) or not sk.get("reason"): fail.append("skills.reason 非法: %r" % (sk,))
+else:
+    if set(sk.keys()) != {"baseline_missing","library","instance_owned","candidates"}:
+        fail.append("skills keys=%s" % sorted(sk.keys()))
+    for k in ("baseline_missing","instance_owned","candidates"):
+        if not isinstance(sk.get(k), list): fail.append("skills.%s 不是数组" % k)
+    lib = sk.get("library")
+    if not isinstance(lib, dict): fail.append("skills.library 不是对象: %r" % (lib,))
+    elif set(lib.keys()) != {"missing","installed"}: fail.append("skills.library keys=%s" % sorted(lib.keys()))
 '
 json_assert "F8-1 GO：gates{local,remote} 词表固定" "$R_OUT" '
 g = d.get("gates")

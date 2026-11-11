@@ -33,6 +33,9 @@ trap cleanup EXIT INT TERM
 GITCONF="$SBASE/gitconfig.empty"; : > "$GITCONF"
 export GIT_CONFIG_GLOBAL="$GITCONF" GIT_CONFIG_SYSTEM="$GITCONF"
 
+# P0-2/P0-3 夹具（2026-11-11）：L2 判据 2.3 现要求 ≥1 实例门 + 含拒绝断言的 spec，单点收口在此。
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/p0_instance_gate.sh"
+
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); printf '  ok   %s\n' "$1"; }
 bad() { FAIL=$((FAIL+1)); printf '  FAIL %s\n' "$1"; }
@@ -102,6 +105,8 @@ projection-freshness 验收夹具用的合法决策记录（满足 L1 机械判�
 - 不建夹具：判定器无法被验证。
 ADREOF
   printf 'level: %s\nai-surface: on\n' "$lvl" > "$d/.meta/meta.yaml"
+  # P0-2：level ≥2 的实例必须有 ≥1 个实例门（框架门资产不计），否则 2.3 恒 FAIL
+  [ "${lvl:-2}" -ge 2 ] && add_instance_gate "$d"
 }
 
 # 填宪法槽位（清掉 TODO: 以脱离模板态，投影体变成「常载命约」）

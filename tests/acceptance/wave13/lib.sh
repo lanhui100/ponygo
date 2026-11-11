@@ -22,6 +22,9 @@ ROOT=$(cd "$W13_DIR/../../.." && pwd)
 
 CLI() { bash "$ROOT/ponygo" "$@"; }
 
+# P0-2/P0-3 夹具（2026-11-11）：L2 判据 2.3 现要求 ≥1 实例门 + 含拒绝断言的 spec，单点收口在此。
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/p0_instance_gate.sh"
+
 # 归档封印资产的契约路径（plan §1 P0-1；契约确认前不得改写）
 A6_REL=".meta/gates/archive-verify.sh"
 A7_REL=".meta/gates/archive-verify.spec.sh"
@@ -167,11 +170,17 @@ git_commit() { # <dir> <message>  —— 满输出/rc → C_OUT / C_RC
 
 # 治理仓夹具：git 仓 + 真 ponygo init 骨架 + level，可选是否放合法 ADR
 gov_repo() { # <dir> [level] [adr:1|0]
-  local dir="$1" lvl="${2:-2}" with_adr="${3:-0}" rc=0
+  local dir="$1" lvl="${2:-2}" with_adr="${3:-0}" rc=0 out=""
   git_seed_repo "$dir"
-  ( cd "$dir" && bash "$ROOT/ponygo" init >/dev/null 2>&1 ) || rc=$?
-  [ "$rc" -eq 0 ] || { bad "夹具失败：ponygo init 在 $dir 退出 $rc"; return 1; }
+  # 保留 init 的人类输出：夹具失败时必须能归因（只看退出码等于把原因藏起来）
+  out=$( cd "$dir" && bash "$ROOT/ponygo" init 2>&1 ) || rc=$?
+  [ "$rc" -eq 0 ] || {
+    bad "夹具失败：ponygo init 在 $dir 退出 $rc；输出尾部：$(printf '%s\n' "$out" | tail -n 3 | tr '\n' ' ')"
+    return 1
+  }
   printf 'level: %s\n' "$lvl" > "$dir/.meta/meta.yaml"
+  # P0-2：level ≥2 的实例必须有 ≥1 个实例门（框架门资产不计），否则 2.3 恒 FAIL
+  [ "${lvl:-2}" -ge 2 ] && add_instance_gate "$dir"
   [ "$with_adr" = "1" ] && write_adr "$dir" "implemented/feature/2026-01-02-fixture-adr.md"
   return 0
 }
