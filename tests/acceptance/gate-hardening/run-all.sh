@@ -9,7 +9,8 @@ for case_file in \
   gh2_ci_aggregate.sh \
   gh3_checklist_alignment.sh \
   gh4_gate_spec_pairing.sh \
-  gh5_release_scratch.sh
+  gh5_release_scratch.sh \
+  gh6_test_tiering_contract.sh
 do
   TOTAL=$((TOTAL+1))
   printf '\n===== %s =====\n' "$case_file"

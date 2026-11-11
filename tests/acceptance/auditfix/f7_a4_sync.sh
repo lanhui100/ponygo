@@ -129,7 +129,78 @@ assert_contains "F7-4 GO：governance 调 A4" "$CI_TXT" "bash .meta/gates/ci-ver
 assert_contains "F7-4 GO：governance 含 scratch-hygiene.sh" "$CI_TXT" "bash .meta/gates/scratch-hygiene.sh"
 assert_contains "F7-4 GO：governance 含 scratch-hygiene.spec.sh" "$CI_TXT" "scratch-hygiene.spec.sh"
 assert_contains "F7-4 GO：governance 含 bash ponygo audit --run-specs" "$CI_TXT" "bash ponygo audit --run-specs"
-assert_contains "F7-4 GO：聚合门 needs governance" "$CI_TXT" "needs: [selftest-linux, selftest-windows, governance]"
+# F7-4b（Wave-14 契约 D1/D6/D7 迁移，.dev-team/contract-wave14.md §4）：
+# job 集合与 needs 四项拓扑必须**结构化解析**，不得用一行注释或模糊子串命中冒充接线。
+# 为什么必须随本轮同批改：`selftest-windows` → `windows-core`（+ 新增 `windows-full`）是改名迁移，
+# 旧字面 `needs: [selftest-linux, selftest-windows, governance]` 已不再是契约形状；该断言在 full/nightly
+# 层（s89 属 NONCORE，core 层不覆盖），漏改只能靠 nightly 抓到。
+CI_TOPO=$(ROOT="$ROOT" python3 - <<'PYTOP' 2>&1
+import os
+import re
+
+try:
+    import yaml
+except ImportError:
+    print("FAIL F7-4 需要 PyYAML 做 ci.yml 结构化解析（缺失即失败，不跳过拓扑断言）")
+    raise SystemExit(0)
+
+with open(os.path.join(os.environ["ROOT"], ".github/workflows/ci.yml"), encoding="utf-8") as fh:
+    doc = yaml.safe_load(fh.read())
+if not isinstance(doc, dict):
+    print("FAIL F7-4 ci.yml 根节点必须是映射")
+    raise SystemExit(0)
+if True in doc:  # YAML 1.1 把裸 on 解析成布尔 True
+    doc["on"] = doc.pop(True)
+jobs = doc.get("jobs") or {}
+lines = []
+expected = {"selftest-linux", "windows-core", "windows-full", "governance", "all-checks-passed"}
+if set(jobs) == expected:
+    lines.append("OK F7-4 job 集合恰为五 job 拓扑（selftest-linux/windows-core/windows-full/governance/all-checks-passed）")
+else:
+    lines.append("FAIL F7-4 job 集合恰为五 job 拓扑（缺 %s 多 %s）"
+                 % (sorted(expected - set(jobs)), sorted(set(jobs) - expected)))
+if "selftest-windows" in jobs:
+    lines.append("FAIL F7-4 selftest-windows 已改名迁移为 windows-core（覆盖由 core+full 承接，非删覆盖）")
+else:
+    lines.append("OK F7-4 selftest-windows 已改名迁移为 windows-core（覆盖由 core+full 承接，非删覆盖）")
+agg = jobs.get("all-checks-passed") if isinstance(jobs.get("all-checks-passed"), dict) else {}
+needs = agg.get("needs") if isinstance(agg.get("needs"), list) else []
+want = ["governance", "selftest-linux", "windows-core", "windows-full"]
+if sorted(str(n) for n in needs) == want:
+    lines.append("OK F7-4 聚合门 needs 恰含四项 linux/core/full/governance")
+else:
+    lines.append("FAIL F7-4 聚合门 needs 恰含四项（实得 %s）" % sorted(str(n) for n in needs))
+text = "\n".join(str(s.get("run", "")) for s in (agg.get("steps") or []) if isinstance(s, dict))
+missing = [j for j in want if ("needs.%s.result" % j) not in text]
+if missing:
+    lines.append("FAIL F7-4 聚合步读取四项 needs.<job>.result（缺 %s）" % ",".join(missing))
+else:
+    lines.append("OK F7-4 聚合步读取四项 needs.<job>.result")
+triple = re.search(
+    r'result="\s*\$\{\{\s*needs\.selftest-linux\.result\s*\}\}\s+'
+    r'\$\{\{\s*needs\.windows-core\.result\s*\}\}\s+'
+    r'\$\{\{\s*needs\.governance\.result\s*\}\}\s*"', text)
+if triple and '"success success success"' in text:
+    lines.append("OK F7-4 required 三元组须恰三 success（required 项 skipped 一律判失败）")
+else:
+    lines.append("FAIL F7-4 required 三元组须恰三 success（linux/core/governance 精确比较）")
+if "needs.windows-full.result" in text and "skipped" in text:
+    lines.append("OK F7-4 windows-full 结果允许 success 或 skipped（failure/cancelled 必须失败）")
+else:
+    lines.append("FAIL F7-4 windows-full 结果允许 success 或 skipped（failure/cancelled 必须失败）")
+print("\n".join(lines))
+PYTOP
+)
+CI_TOPO_RC=$?
+assert_rc_is "F7-4b 拓扑断言器正常结束" 0 "$CI_TOPO_RC"
+while IFS= read -r line; do
+  case "$line" in
+    'OK '*) ok "${line#OK }" ;;
+    'FAIL '*) bad "${line#FAIL }" ;;
+    '') : ;;
+    *) bad "F7-4b 拓扑断言器异常输出：$line" ;;
+  esac
+done <<< "$CI_TOPO"
 
 # 生成模板仍交付 A5：新实例预置 .github/workflows 后 init 应生成薄适配器并调用 A4。
 T=$(new_case)
