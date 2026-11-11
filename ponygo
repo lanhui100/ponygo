@@ -1451,6 +1451,105 @@ cat <<'PONYGO_EOF'
 PONYGO_EOF
 }
 
+# ---------- canonical 投影（单一实现：do_sync 写入 与 2.6 校验共用，F1） ----------
+# 模板态判定（TODO 槽位未填）：投影体选择为 bootstrap，而不是常载命约。
+projection_is_bootstrap() {
+  [ -f "${CONSTITUTION:-.meta/constitution/constitution.md}" ] && grep -q 'TODO:' "${CONSTITUTION:-.meta/constitution/constitution.md}"
+}
+
+# projection_body：求 constitution 的 canonical 投影体并写到 stdout（**字节保真，不做转义**）。
+#   全文件含 TODO:（模板态）→ bootstrap_body()——不能只判截断后的 body，槽位在「## 常载命约」之前
+#     （模板态不再拒绝投影，而是投影初始引导，见 revisions/accepted/2026-08-31-bootstrap-projection.md）
+#   否则 <!-- sync-body --> 锚点之后（语言无关，EXTERNAL-001 P1-3）；无锚点回退中文
+#     「## 常载命约」标题（兼容旧模板）。槽位表与头部 H1 均被跳过。
+#   空体（仅空白）→ source 错误。
+# 返回 0 = 有投影体；非 0 = source 错误。**本函数不 die**：status/audit 的 --json 路径必须能闭合，
+# 错误分类交调用方（sync → die 给修法；2.6 → vl_fail 进 FAIL 清单）。
+projection_body() {
+  local const="${CONSTITUTION:-.meta/constitution/constitution.md}"
+  [ -f "$const" ] || return 1
+  local body=""
+  if grep -q 'TODO:' "$const"; then
+    body=$(bootstrap_body)
+  elif grep -q '<!-- sync-body -->' "$const"; then
+    body=$(awk 'BEGIN{ok=0} /<!-- sync-body -->/{ok=1; next} ok' "$const")
+  else
+    body=$(awk 'BEGIN{ok=0} /^## 常载命约/{ok=1} ok' "$const")
+  fi
+  [ -n "${body//[[:space:]]/}" ] || return 1
+  printf '%s\n' "$body"
+}
+
+# canonical 块序列化（唯一格式）：BEGIN / <body> / END。块内正文的末尾空行只由本函数
+# （= 投影体本身）决定——checker 不得单侧 trim/补空行（EOL 归一仅限比较时的 \r）。
+canonical_block() { # <body>
+  printf '%s\n%s\n%s\n' "$SYNC_BEGIN" "$1" "$SYNC_END"
+}
+
+# 整行哨兵判定（写入与校验共用）：inline marker（行内出现）不算，独占整行才算；
+# 行尾 \r 归一——CRLF 文件不得被当成「无哨兵」（P2-4 已知缺陷的另一半）。
+projection_marker_count() { # <file> <sentinel> → 整行匹配计数
+  awk -v s="$2" '{ l=$0; sub(/\r$/, "", l) } l==s { n++ } END { print n+0 }' "$1"
+}
+projection_marker_line() { # <file> <sentinel> → 首个整行匹配的行号（0 = 无）
+  awk -v s="$2" '{ l=$0; sub(/\r$/, "", l) } l==s { print NR; found=1; exit } END { if (!found) print 0 }' "$1"
+}
+projection_block_body() { # <file> <begin_ln> <end_ln> → 块内正文（\r 归一；不裁剪任何行）
+  awk -v a="$2" -v b="$3" 'NR>a && NR<b { sub(/\r$/, ""); print }' "$1"
+}
+
+# projection_write <target> <body>：把 canonical 块写进 target（写入路径的唯一实现）。
+#   · 无标记区：整块追加（文件末行无换行时先补一个 \n，避免把用户末行粘进 BEGIN）
+#   · 恰一对合法标记区：只替换块内正文，块外用户字节逐行原样保留（顺序不变）
+#   · 标记区结构损坏（缺 END / 重复 / 倒序）：不猜、不写，返回非零交调用方报「手工清理」
+# body 走 stdin（`-`）交给 awk，**禁用 `awk -v body=`**：-v 会解释反斜杠转义
+# （\n、\t、\\ 等被吃掉，PF-18 字节不保真——spec-ponygo-v0-v1.1.md P2-4 已知缺陷）。
+projection_write() {
+  local target="$1" body="$2"
+  local begin="$SYNC_BEGIN" end="$SYNC_END"
+  if [ ! -f "$target" ]; then
+    canonical_block "$body" > "$target"
+    return $?
+  fi
+  local b_cnt e_cnt b_ln e_ln sync_tmp
+  b_cnt=$(projection_marker_count "$target" "$begin")
+  e_cnt=$(projection_marker_count "$target" "$end")
+  if [ "$b_cnt" = "0" ] && [ "$e_cnt" = "0" ]; then
+    [ -n "$(tail -c 1 "$target" 2>/dev/null)" ] && printf '\n' >> "$target"
+    { canonical_block "$body"; printf '\n'; } >> "$target"
+    return 0
+  fi
+  if [ "$b_cnt" != "1" ] || [ "$e_cnt" != "1" ]; then
+    printf 'ponygo: %s 的标记区结构损坏（BEGIN %s 个 / END %s 个——须各恰 1 个）；投影不修结构，未写入 → 手工清理：只保留一对 BEGIN/END 后重跑 sync\n' \
+      "$target" "$b_cnt" "$e_cnt" >&2
+    return 1
+  fi
+  b_ln=$(projection_marker_line "$target" "$begin")
+  e_ln=$(projection_marker_line "$target" "$end")
+  if [ "$e_ln" -le "$b_ln" ]; then
+    printf 'ponygo: %s 的标记区结构损坏（END 行 %s 在 BEGIN 行 %s 之前）；投影不修结构，未写入 → 手工清理：把 END 移到 BEGIN 之后后重跑 sync\n' \
+      "$target" "$e_ln" "$b_ln" >&2
+    return 1
+  fi
+  sync_tmp=$(mktemp "${target}.tmp.XXXXXX" 2>/dev/null || echo "${target}.tmp.$$")
+  if printf '%s\n' "$body" | awk -v b="$begin" -v e="$end" '
+    FILENAME == "-" { bodytext = bodytext $0 "\n"; next }
+    {
+      line = $0; cmp = line; sub(/\r$/, "", cmp)
+      if (cmp == b) { print line; printf "%s", bodytext; inblk = 1; next }
+      if (cmp == e) { print line; inblk = 0; next }
+      if (inblk) next
+      print
+    }
+  ' - "$target" > "$sync_tmp"; then
+    mv -f "$sync_tmp" "$target" || { rm -f "$sync_tmp"; return 1; }
+  else
+    rm -f "$sync_tmp"
+    return 1
+  fi
+  return 0
+}
+
 do_sync() {
   # AI 适配开关：meta.yaml 里 ai-surface: off 时，不生成 AGENTS.md / CLAUDE.md（禁 AI 团队整体退场）
   # 开关读取走 ai_surface_state（与 1.9b/2.6 同一真源）：`off` / `OFF` / `"off"` / `off ` 一律跳过投影，
@@ -1460,51 +1559,15 @@ do_sync() {
     return 0
   fi
   [ -f "$CONSTITUTION" ] || die "无 $CONSTITUTION，无法投影"
-  local begin="$SYNC_BEGIN"
-  local end="$SYNC_END"
-  local body
-  # 对整个 constitution 文件判 TODO（不能只判截断后的 body——槽位在「## 常载命约」之前）：
-  # 模板态不再拒绝投影，而是投影初始引导（bootstrap）——AI agent 进场即有指引（见
-  # revisions/accepted/2026-08-31-bootstrap-projection.md）。
-  if grep -q 'TODO:' "$CONSTITUTION"; then
-    body=$(bootstrap_body)
+  local body=""
+  body=$(projection_body) || die "constitution 缺投影体锚点（<!-- sync-body --> 或「## 常载命约」节）或投影体为空，无法投影"
+  if projection_is_bootstrap; then
     info "宪法槽位未填（模板态）：投影初始引导（bootstrap）。槽位填妥后重跑 'ponygo sync' 自动替换为常载命约。"
-  else
-    # 抽取投影体：优先 <!-- sync-body --> 锚点（语言无关，EXTERNAL-001 P1-3）；
-    # 无锚点回退中文「## 常载命约」标题（兼容旧模板）。槽位表与头部 H1 均被跳过。
-    if grep -q '<!-- sync-body -->' "$CONSTITUTION"; then
-      body=$(awk 'BEGIN{ok=0} /<!-- sync-body -->/{ok=1; next} ok' "$CONSTITUTION")
-    else
-      body=$(awk 'BEGIN{ok=0} /^## 常载命约/{ok=1} ok' "$CONSTITUTION")
-    fi
-    if [ -z "${body//[[:space:]]/}" ]; then
-      die "constitution 缺投影体锚点（<!-- sync-body --> 或「## 常载命约」节），无法投影"
-    fi
   fi
+  local target
   for target in AGENTS.md CLAUDE.md; do
-    if [ -f "$target" ]; then
-      # 文件已存在：只在标记区之间替换；无标记区则追加
-      if grep -q "$begin" "$target"; then
-        local sync_tmp
-        sync_tmp=$(mktemp "${target}.tmp.XXXXXX" 2>/dev/null || echo "${target}.tmp.$$")
-        if awk -v b="$begin" -v e="$end" -v body="$body" '
-          BEGIN{inblk=0; donebody=0}
-          $0==b { print b; print body; inblk=1; donebody=1; next }
-          $0==e { print e; inblk=0; next }
-          inblk { next }
-          { print }
-          END{ if(!donebody){ print b; print body; print e } }
-        ' "$target" > "$sync_tmp"; then
-          mv -f "$sync_tmp" "$target" || { rm -f "$sync_tmp"; die "无法原子更新 $target"; }
-        else
-          rm -f "$sync_tmp"
-          die "awk 模板替换失败: $target"
-        fi
-      else
-        printf '%s\n%s\n%s\n%s\n' "$begin" "$body" "$end" "" >> "$target"
-      fi
-    else
-      printf '%s\n%s\n%s\n' "$begin" "$body" "$end" > "$target"
+    if ! projection_write "$target" "$body"; then
+      return 1
     fi
     info "已投影 → $target"
   done
@@ -1704,10 +1767,59 @@ vl_fail() { # <文案>
   esac
 }
 
+# ---------- 2.6 canonical 投影新鲜度（判据唯一实现；verify_ladder 的 ai-surface: on 分支调用） ----------
+# 顺序（契约 F1）：先判结构，结构合法才比正文；AGENTS.md 与 CLAUDE.md 各自判，任一失败即 FAIL。
+# 文案纪律：缺失/无块/空块可建议 `bash ponygo sync`；重复/倒序只建议手工清理（投影不修结构）；
+# source 错误（constitution 无可抽取投影体）只给 source 修法，不承诺 `ponygo sync` 可修。
+# 只读：不写任何文件；CLAUDE.md 为 symlink 时按读取内容判。失败一律走 vl_fail（id 恒为 2.6，
+# 不新增 2.6b），**不 die**——status/audit --json 的单行 JSON 与 exit 字段必须照常收口。
+verify_26_projection() {
+  local body="" body_ok=1 want="" got="" f=""
+  local b_cnt="" e_cnt="" b_ln="" e_ln=""
+  body=$(projection_body) || body_ok=0
+  if [ "$body_ok" != "1" ]; then
+    vl_fail "2.6 已声明 ai-surface: on 但 constitution 无可抽取的投影体（<!-- sync-body --> 锚点后为空，且无「## 常载命约」节）→ 修 source：补投影体后再判"
+    return 0
+  fi
+  want=$(printf '%s' "$body" | tr -d '\r')
+  for f in AGENTS.md CLAUDE.md; do
+    if [ ! -f "$f" ]; then
+      vl_fail "2.6 已声明 ai-surface: on 但根 $f 不存在（无 AI 常载命约投影）→ 补救：bash ponygo sync"
+      continue
+    fi
+    b_cnt=$(projection_marker_count "$f" "$SYNC_BEGIN")
+    e_cnt=$(projection_marker_count "$f" "$SYNC_END")
+    if [ "$b_cnt" = "0" ] || [ "$e_cnt" = "0" ]; then
+      vl_fail "2.6 已声明 ai-surface: on 但根 $f 缺投影哨兵块（BEGIN $b_cnt 个 / END $e_cnt 个——未投影或哨兵被删）→ 补救：bash ponygo sync"
+      continue
+    fi
+    if [ "$b_cnt" != "1" ] || [ "$e_cnt" != "1" ]; then
+      vl_fail "2.6 已声明 ai-surface: on 但根 $f 哨兵块不成对（BEGIN $b_cnt 个 / END $e_cnt 个——须各恰 1 个；重复哨兵不由投影修复）→ 手工清理：只保留一对 BEGIN/END"
+      continue
+    fi
+    b_ln=$(projection_marker_line "$f" "$SYNC_BEGIN")
+    e_ln=$(projection_marker_line "$f" "$SYNC_END")
+    if [ "$e_ln" -le "$b_ln" ]; then
+      vl_fail "2.6 已声明 ai-surface: on 但根 $f 哨兵块顺序颠倒（BEGIN 行 $b_ln / END 行 $e_ln；倒序不由投影修复）→ 手工清理：把 END 移到 BEGIN 之后"
+      continue
+    fi
+    got=$(projection_block_body "$f" "$b_ln" "$e_ln")
+    if [ -z "$(printf '%s' "$got" | tr -d '[:space:]')" ]; then
+      vl_fail "2.6 已声明 ai-surface: on 但根 $f 投影区为空（BEGIN…END 之间无内容）→ 补救：bash ponygo sync"
+      continue
+    fi
+    if [ "$(printf '%s' "$got" | tr -d '\r')" != "$want" ]; then
+      vl_fail "2.6 已声明 ai-surface: on 但根 $f 的投影块正文与 constitution canonical 投影不一致（正文漂移）→ 补救：bash ponygo sync"
+    fi
+  done
+  return 0
+}
+
 verify_ladder() {
   local lv="$1"
   VL_FAILS=""
   VL_FAIL_IDS=""
+  # L1_JUDGED=1 仅表示本次真的进入 L1 判据；L0 / 未跑 ladder 均不得宣称 L1 已验证。
   L1_JUDGED=0
   # 2.5 条件判据状态（Q1=A）：DT_OFF=1 → 结论行改写为"2.1–2.4 PASS；2.5 未启用"；
   # DT_SKIP=1 → 未声明 docs-tier（2.5 不计入 PASS，WARN 催声明）。
@@ -2030,45 +2142,18 @@ verify_ladder() {
           ;;
       esac
 
-      # 2.6 AI 常载命约已投影（F9；完全仿 2.5 的三态条件判据）：
+      # 2.6 AI 常载命约已投影且新鲜（F9 结构 + F1 新鲜度；完全仿 2.5 的三态条件判据）：
       #   undeclared → SKIP + WARN（不计入 PASS，退出码不变——既有实例不得转红）
       #   off        → 显式 opt-out（结论行禁写「全部 PASS」）
-      #   on         → 校验根 AGENTS.md 含**成对**投影哨兵块；常量共用 SYNC_BEGIN/SYNC_END
-      #                （= do_sync 写标记区用的同一真值，禁第二副本）。本判据只读、不投影。
-      local ai_state="" ai_proj=0
+      #   on         → 根 AGENTS.md **与** CLAUDE.md 的哨兵块须结构合法，且块正文等于
+      #                constitution 的 canonical 投影（projection_body/canonical_block 单一真源，
+      #                = do_sync 写标记区用的同一实现，禁第二副本）。本判据只读、不投影。
+      local ai_state=""
       # 开关值读取收敛到 ai_surface_state（与 1.9b 同一读取真源，禁第二副本）
       ai_state=$(ai_surface_state)
       case "$ai_state" in
         on)
-          # W9-A2：成对性严格判定——恰一个 BEGIN、恰一个 END、BEGIN 行号 < END 行号、块内非空；
-          # 任一不满足即 FAIL（残缺/重复/倒序/空块都不得算「已投影」）。
-          local ab_cnt=0 ae_cnt=0 ab_ln=0 ae_ln=0 abody=""
-          if [ -f "AGENTS.md" ]; then
-            ab_cnt=$(grep -cxF "$SYNC_BEGIN" "AGENTS.md" 2>/dev/null || true)
-            ae_cnt=$(grep -cxF "$SYNC_END" "AGENTS.md" 2>/dev/null || true)
-            ab_ln=$(grep -nxF "$SYNC_BEGIN" "AGENTS.md" 2>/dev/null | head -n1 | cut -d: -f1)
-            ae_ln=$(grep -nxF "$SYNC_END" "AGENTS.md" 2>/dev/null | head -n1 | cut -d: -f1)
-          fi
-          if [ "${ab_cnt:-0}" = "1" ] && [ "${ae_cnt:-0}" = "1" ] \
-             && [ "${ab_ln:-0}" -gt 0 ] && [ "${ae_ln:-0}" -gt "${ab_ln:-0}" ]; then
-            # 注意：numeric 区间 start>end 时 GNU sed 会把 start 行**单独打印**（不是空输出），
-            # 所以「BEGIN/END 相邻 = 空块」必须先显式判区间长度，否则会把 END 行本身当成块内容。
-            if [ "$((ae_ln - ab_ln))" -ge 2 ]; then
-              abody=$(sed -n "$((ab_ln+1)),$((ae_ln-1))p" "AGENTS.md" 2>/dev/null | tr -d '[:space:]')
-            fi
-            [ -n "$abody" ] && ai_proj=1
-          fi
-          if [ "$ai_proj" = "1" ]; then :; elif [ ! -f "AGENTS.md" ]; then
-            vl_fail "2.6 已声明 ai-surface: on 但根 AGENTS.md 不存在（无 AI 常载命约投影）→ 补救：bash ponygo sync"
-          elif [ "${ab_cnt:-0}" = "0" ] || [ "${ae_cnt:-0}" = "0" ]; then
-            vl_fail "2.6 已声明 ai-surface: on 但根 AGENTS.md 缺投影哨兵块（BEGIN $ab_cnt 个 / END $ae_cnt 个——未投影或哨兵被删）→ 补救：bash ponygo sync"
-          elif [ "${ab_cnt:-0}" != "1" ] || [ "${ae_cnt:-0}" != "1" ]; then
-            vl_fail "2.6 已声明 ai-surface: on 但根 AGENTS.md 哨兵块不成对（BEGIN $ab_cnt 个 / END $ae_cnt 个——须各恰 1 个）→ 补救：bash ponygo sync"
-          elif [ "${ae_ln:-0}" -le "${ab_ln:-0}" ]; then
-            vl_fail "2.6 已声明 ai-surface: on 但根 AGENTS.md 哨兵块顺序颠倒（BEGIN 行 $ab_ln / END 行 $ae_ln）→ 补救：bash ponygo sync"
-          else
-            vl_fail "2.6 已声明 ai-surface: on 但投影区为空（BEGIN…END 之间无内容）→ 补救：bash ponygo sync"
-          fi
+          verify_26_projection
           ;;
         off)
           # 显式 opt-out：不判 FAIL；结论行由 AS_OFF 改写（不得出现「全部 PASS」）

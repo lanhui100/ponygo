@@ -74,7 +74,7 @@ P9 负空间对称原理：**每次添加隐含终身维护税；删除不是添
 ### L2 承诺可验 + 文档分层
 
 - **启用**：出现需要被跨提交守住的硬约束（格式、分类、冻结、空白），且该约束已稳定、频率足够高到值得配命令；或文档量开始需要分层。
-- **退场 / 降级**：**过度治理检测**——当某条门禁连续 N 次提交只拦到"注定在 PR 里也会被 review 抓到"的琐碎项（false-positive 疲劳），或门槛命令本身成为小团队摩擦主因时，**降级回 L1**：把该门禁 disable，保留决策入册与文档有家。降级本身要过同样的判据（记录一条"为何关掉"的 decision + 保留负样本 spec 以便日后复活）。
+- **退场 / 降级**：**过度治理检测**——当某条门禁连续 N 次提交只拦到"注定在 PR 里也会被 review 抓到"的琐碎项（false-positive 疲劳），或门槛命令本身成为小团队摩擦主因时，**降级回 L1**：把该门禁 disable，保留决策入册与文档有家。降级本身同样须留痕并由 review 验收（记录一条"为何关掉"的 decision + 保留负样本 spec 以便日后复活）；`ponygo retire` 只改写声明并提醒，**不机械校验**这两项。
 
 ### L3 流程资产
 
@@ -173,7 +173,7 @@ review 的三件事）」小节**同源同表**：那边是决策记录侧的操
 | 2.3 | 有负样本 spec，且每个实例门带同 Stem、同语言后缀的 spec（构造非法样本证明门会拒绝） | `find .meta/gates -type f -name '*.spec.*'`；`bash ponygo audit --level M` 逐门配对 | 无未配对门 |
 | 2.4 | 本地钩子已挂载**且真接线**（五条 AND）：① `core.hooksPath` 已设 ② 归一化（`~` 展开 + `pwd -P`/`realpath`）后目录内 `pre-commit` **存在** ③ 该文件**可执行**（`-x`；非可执行钩子被 git 静默忽略） ④ 哨兵块（`# >>> ponygo-gate: adr-verify v1 >>>` … `# <<< ponygo-gate: adr-verify v1 <<<` 区间）**逐字节等于**规范块（EOL 归一；块内含 marker 行 `# ponygo-gate: adr-verify v1` 与非注释调用行）**且位置合规**——在 `#!` 首行之后（无 shebang 则文件最前）、**首个顶层 `exit`/`exec` 之前**（位置是硬判据：末尾追加/睡在 `exit 0` 之后的块永不执行，位置不合规即判未接线并要求迁移） ⑤ `<root>/.meta/gates/adr-verify.sh` 存在 | `bash ponygo status`（①–⑤ 由 `verify_ladder` / `gate_hook_wired` 实现；④ 的实现 = 抽块后与内置规范块逐字节 `diff` + 位置检查）；人工代理：`p=$(git config core.hooksPath); d=$(cd "$p" && pwd -P); test -x "$d/pre-commit" && sed -n '/>>> ponygo-gate: adr-verify v1 >>>/,/<<< ponygo-gate: adr-verify v1 <<</p' "$d/pre-commit"` | ①–⑤ 全真 → PASS；任一不真 → FAIL，文案**按因**给补救（非 git → `git init` 后重跑；目录不可达 → `git config core.hooksPath .githooks`；不可执行 → `chmod +x <hook>`；块不合规/位置不合规 → `bash ponygo init`（删旧块 + 前置新块，一次原子替换）） |
 | 2.5 | 文档分层已激活（**条件判据**）：`docs-tier: on` 声明且 `docs-tier/README.md` 非模板态（含"已激活文档家"标记） | `grep -q '已激活' .meta/docs-tier/README.md` | 存在（仅当 `meta.yaml` 含 `docs-tier: on` 时校验；未声明/`off` 时 2.5 SKIPPED 不计入 PASS） |
-| 2.6 | AI 常载命约已投影（**条件判据**）：`ai-surface: on` 声明且根 `AGENTS.md` 含**恰一对**哨兵块 `<!-- BEGIN constitution -->` … `<!-- END constitution -->`（BEGIN 行号 < END、块内非空） | `bash ponygo status`（`verify_ladder` 统一判，status 与 audit 共用；未声明=SKIP+WARN、`off`=显式 opt-out 不判 FAIL、`on` 缺/错块=FAIL 并给 `bash ponygo sync`） | 存在（仅当 `meta.yaml` 含 `ai-surface: on` 时校验；未声明 → 2.6 SKIPPED 不计入 PASS；`off` → 结论行写「2.6 未启用」） |
+| 2.6 | AI 常载命约已投影且**新鲜**（**条件判据**）：`ai-surface: on` 声明，且根 `AGENTS.md` **与** `CLAUDE.md` 各含**恰一对**哨兵块 `<!-- BEGIN constitution -->` … `<!-- END constitution -->`（BEGIN 行号 < END、块内非空），块正文等于 constitution 的 canonical 投影 | `bash ponygo status`（`verify_ladder` 统一判，status 与 audit 共用；未声明=SKIP+WARN、`off`=显式 opt-out 不判 FAIL、`on` 结构错误/正文漂移=FAIL 并按因给修法；重复/倒序标记区只提示手工清理，不声称 sync 可修） | 存在（仅当 `meta.yaml` 含 `ai-surface: on` 时校验；未声明 → 2.6 SKIPPED 不计入 PASS；`off` → 结论行写「2.6 未启用」） |
 
 > L2 判据的关键不在"脚本多"，而在**每条"必须/禁止"承诺都能被一条非零退出命令抓到**（P2）。2.2–2.3 是 L2 能被称为"承诺可验"的最低自证。
 > 2.1 的 README/`.gitkeep` 豁免：占位说明文件不算门禁落地。2.2 的机械化实现以 `bash -n` 语法校验为**代理判据**，真判据仍是 `<gate> --help` / 空样本拒绝非零退出，供人工补验。

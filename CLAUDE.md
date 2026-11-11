@@ -25,7 +25,7 @@
 6. **文档有家**——文档标准与写作规则的家是 `docs/AGENTS.md`（agent 处理 `docs/` 子树时自动加载，故改文档规范就改它，不另立第二份）；每个事实、层级说明与 how-to 必须有唯一可寻址的家，改行为/契约/配置的那次提交同步更新对应文档的家（same-commit），不留"只在聊天里说过"的文档。
    链：P3 载体分工原理、methodology §5.1「文档的家」（AGENTS.md 自动加载 vs README 人读契约的分工）。
 
-7. **临时产物统一下沉**——中间脚本、日志与截图必须进入 `.scratch/<yyyy-mm-dd>-<topic>/`，不得平铺源码旁；完整契约见 `docs/AGENTS.md`「Scratch Hygiene」，由 `bash .meta/gates/scratch-hygiene.sh` 非零拦截。
+7. **临时产物统一下沉**——中间脚本、日志与截图必须进入 `.scratch/<yyyy-mm-dd>-<topic>/`；完整契约见 `docs/AGENTS.md`「Scratch Hygiene」。`bash .meta/gates/scratch-hygiene.sh` 机械拦截可判的三类（已跟踪 `.scratch/` 条目、`.gitignore` 缺声明、发布/安装链引用 `.scratch`）；「平铺源码旁」由 review 判断，门禁不覆盖。
    链：P3 载体分工原理、P2 可验证性原理。
 
 ---

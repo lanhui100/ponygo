@@ -21,7 +21,7 @@ assert_contains "F9-① GO：stderr 的 WARN 通道含「2.6 SKIPPED」" "$R_ERR
 CONC1=$(conclusion_of "$R_OUT")
 assert_contains "F9-① GO：stdout 结论行点明 2.6" "$CONC1" "2.6"
 assert_matches "F9-① GO：结论面标注 SKIPPED/未验证" "$R_OUT" 'SKIPPED|未验证|未声明'
-assert_not_matches "F9-① NOGO：未声明不得判 2.6 FAIL" "$R_OUT$R_ERR" '2\.6[^\n]*(FAIL|未通过)'
+assert_not_matches "F9-① NOGO：未声明不得判 2.6 FAIL" "$R_OUT$R_ERR" '^[[:space:]]*-[[:space:]]*2\.6'
 
 # ================= ② ai-surface: on + 缺哨兵块 =================
 T=$(new_case)
@@ -50,8 +50,8 @@ run_in "$T" audit
 assert_zero "F9-③ ai-surface: on 且已投影 → exit 0（2.6 PASS）" "$R_RC"
 assert_contains "F9-③ GO：结论行为「级自洽验证：通过」" "$R_OUT" "级自洽验证：通过"
 # 2.6 PASS 是「无 FAIL 项」；成功态不要求回显判据编号（与 2.1–2.5 同口径）
-assert_not_matches "F9-③ NOGO：不得把 2.6 判成 FAIL/未投影" "$R_OUT" '2\.6[^\n]*(FAIL|未通过)'
-assert_not_contains "F9-③ NOGO：不得出现缺哨兵块补救文案" "$R_OUT" "缺成对投影哨兵块"
+assert_not_matches "F9-③ NOGO：不得把 2.6 判成 FAIL/未投影" "$R_OUT" '^[[:space:]]*-[[:space:]]*2\.6'
+assert_not_contains "F9-③ NOGO：不得出现正文漂移文案" "$R_OUT" "投影正文漂移"
 
 # ================= ④ ai-surface: off =================
 T=$(new_case)
@@ -68,7 +68,7 @@ T=$(new_case)
 gov_repo "$T" 2
 run_in "$T" status
 assert_zero "F9-⑤ 兼容性：未声明 ai-surface 的 L2 仓 status 仍 exit 0" "$R_RC"
-assert_not_matches "F9-⑤ NOGO：status 不得把 2.6 判成 FAIL" "$R_OUT" '2\.6[^\n]*(FAIL|未通过)'
+assert_not_matches "F9-⑤ NOGO：status 不得把 2.6 判成 FAIL" "$R_OUT" '^[[:space:]]*-[[:space:]]*2\.6'
 run_in "$T" audit
 assert_zero "F9-⑤ 兼容性：未声明 ai-surface 的 L2 仓 audit 仍 exit 0" "$R_RC"
 assert_not_contains "F9-⑤ 兼容性：既有结论行仍保留（未被 2.6 改写为失败）" "$R_OUT" "级自洽验证：未通过"
@@ -126,7 +126,8 @@ AGEOF
 run_in "$T" audit
 assert_rc_is "F9-⑦a 重复 BEGIN（两个 BEGIN + 一个 END）→ exit 1" 1 "$R_RC"
 assert_contains "F9-⑦a GO：判定点是 2.6" "$R_OUT" "2.6"
-assert_contains "F9-⑦a GO：给出补救命令 bash ponygo sync" "$R_OUT" "ponygo sync"
+assert_not_contains "F9-⑦a NOGO：重复块不得声称 sync 可修" "$R_OUT" "ponygo sync"
+assert_contains "F9-⑦a GO：提示手工清理标记区" "$R_OUT" "手工清理"
 
 T=$(new_case)
 gov_repo "$T" 2
@@ -140,10 +141,12 @@ cat > "$T/AGENTS.md" <<'AGEOF'
 真实命约内容（唯一块）
 <!-- END constitution -->
 AGEOF
+run_in "$T" sync
+assert_zero "F9-⑦b 夹具：sync 生成 canonical 正文" "$R_RC"
 run_in "$T" audit
 assert_zero "F9-⑦b 反向对照：正常一对 BEGIN/END → exit 0（2.6 PASS）" "$R_RC"
 assert_contains "F9-⑦b GO：结论行为「级自洽验证：通过」" "$R_OUT" "级自洽验证：通过"
-assert_not_matches "F9-⑦b NOGO：不得把 2.6 判成 FAIL" "$R_OUT" '2\.6[^\n]*(FAIL|未通过)'
+assert_not_matches "F9-⑦b NOGO：不得把 2.6 判成 FAIL" "$R_OUT" '^[[:space:]]*-[[:space:]]*2\.6'
 
 # ================= ⑦c 2.6 重复 END（Wave-11 回归缺口）=================
 # 契约对称性：一个 BEGIN 配**两个** END 同样不是有效投影（块结构不唯一）→ 2.6 FAIL + exit 1；
@@ -164,6 +167,7 @@ AGEOF
 run_in "$T" audit
 assert_rc_is "F9-⑦c 重复 END（一个 BEGIN + 两个 END）→ exit 1" 1 "$R_RC"
 assert_contains "F9-⑦c GO：判定点是 2.6" "$R_OUT" "2.6"
-assert_contains "F9-⑦c GO：给出补救命令 ponygo sync" "$R_OUT" "ponygo sync"
+assert_not_contains "F9-⑦c NOGO：重复块不得声称 sync 可修" "$R_OUT" "ponygo sync"
+assert_contains "F9-⑦c GO：提示手工清理标记区" "$R_OUT" "手工清理"
 
 finish

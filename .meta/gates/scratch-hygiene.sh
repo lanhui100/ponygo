@@ -44,5 +44,5 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-echo "scratch-hygiene: PASS（工作区临时产物卫生合规）"
+echo "scratch-hygiene: PASS（仅 E1–E3 通过：.scratch/ 未被 Git 跟踪 / .gitignore 已声明 / 发布安装链未引用 .scratch；平铺源码旁的临时文件不在本门覆盖范围，未检查）"
 exit 0

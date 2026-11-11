@@ -4454,6 +4454,19 @@ s78_wave13_acceptance
 s79_wave1_contract_c1_c2_c3_c6
 s80_wave2_contract_d1_d2_d4
 s81_carrier_audit_acceptance
+
+# ---- 场景88：2.6 canonical 投影新鲜度（独立验收）----
+s88_projection_freshness() {
+  echo "--- 场景88：2.6 canonical 投影新鲜度（独立验收套件）"
+  ( cd "$ROOT" && bash tests/acceptance/projection-freshness/run.sh )
+  local rc=$?
+  if [ "$rc" -eq 0 ]; then
+    ok "s88 投影新鲜度独立验收全绿（21 场景）"
+  else
+    bad "s88 投影新鲜度独立验收失败（exit $rc）"
+  fi
+}
+s88_projection_freshness
 echo ""
 echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
 [ "$FAIL" -eq 0 ] || exit 1

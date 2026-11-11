@@ -156,6 +156,7 @@ ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|of
 > L0–L2 的判据以 `maturity-ladder.md` §5 的真值表为准，`ponygo status` 已对声明级（L0-L2）的判据逐项机械验证（v1.1 起；v2.0 起文档判据 0.5/1.9/2.5 并入），判据不符时非零退出。L3/L5 仍是"目标画像"，靠 review 校准；L4 的**归档封印**已随框架交付（A6 `archive-verify.sh` + A7 负样本自检），只有 supersession 审计仍靠 review。
 >
 > **判据覆盖的诚实边界**：`status` / `audit` 只机械验证 1.1–1.9，1.10（必含 `## Alternatives considered`）由 A1/A4 门判定——两者都不执行仓库脚本，故结论行显式标注「1.10 未由本命令验证」，`--json` 里给出固定词表 `coverage{verified,unverified,reason}`。未验证不计为 PASS。
+> 判据 2.6 还校验 `AGENTS.md` 与 `CLAUDE.md` 的投影块正文是否等于 constitution 的 canonical 投影：正文漂移 exit 1；重复/倒序标记区只提示手工清理，不承诺 `ponygo sync` 可修。
 
 ### 4.3 自适应审计（首版两档）
 

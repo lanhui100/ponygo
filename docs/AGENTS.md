@@ -37,6 +37,7 @@ standing orders→根 AGENTS.md + 理由链；交付过程证据→工程过程�
 - **单一临时边界**：中间脚本、调试日志、验证截图等必须统一下沉至 `.scratch/<yyyy-mm-dd>-<topic>/`，严禁平铺在代码根目录或源码旁。
 - **证据蒸馏原则**：中间产物销毁前必须提炼为物理收据（命令 + Exit Code + 核心断言输出 ≤ 20 行）写入交付说明，无法文本化的视觉截图 ≤ 3 张只留最终态；过程性副产物关单即删。
 - **构建物理隔离**：构建与发布仅白名单消费版本化文件，严禁依赖或打包 `.scratch/` 下文件。
+- **门禁的观测边界**：`scratch-hygiene.sh` 只机械拦截上述可判三类——已跟踪 `.scratch/` 条目、`.gitignore` 缺声明、`release.yml`/`install.sh` 引用 `.scratch`；「平铺在代码根目录或源码旁」由 review 判断，`status`/`audit` 现有 WARN 不覆盖任意临时文件。
 
 ## Slop checklist（审计清单）
 
