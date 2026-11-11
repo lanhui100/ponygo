@@ -70,4 +70,8 @@ ponygo 的测试规模与 CI 反馈已经失真，继续按现状扩展会把维
 - **看门狗默认关闭**：`PONYGO_SCN_TIMEOUT` 未设 = 禁用，故「超时点名」是**可配置护栏**而非默认护栏；默认兜底仍依赖 CI 的 job 级 `timeout-minutes`。
 - **`scn_end` 为 best-effort**：场景体内早退（`return`）会缺结束行，测试只断言「已开始者成对」。
 - **nightly 冗余**：`windows-core`(27) ⊂ `windows-full`(94)，nightly 下同一 commit 会在 Windows 上跑两遍（估算 ≈28min 冗余）。本波不优化：core 是 PR 必跑语义、full 是覆盖语义，合并会破坏 PR 时延目标。
+- **Windows 缺口（wave-15 待办，已登记）**：修复后 `windows-core` 仍红，仅剩 2 项且均已定位到最小面：
+  1. **产品侧**：`verify-p0` 的 A/B 两条（`ponygo sync` 在 Windows 下「`ai-surface` 未声明仍投影常载命约」与「`off` + 残留 `AGENTS.md` 不告警」）。Linux 全绿、本机 CRLF 仿真也绿 → 属 Windows 专属行为差异，**早于本波存在**（历史 Windows 从未有绿证），非计数/分层改动引入。
+  2. **测试口径**：`gh6/A16` 折叠行不变量在 Windows 得 0（诊断口径问题，非产品缺陷）。
+  处理决定：本轮**不发 Windows 绿证**，按「Linux + governance 绿、Windows core 红」诚实交付，并把上述 2 项登记为 wave-15 backlog（主责=产品侧 `sync` 行为，验收=windows-core 实跑绿 + 保留同一组断言不放宽）。
 - **94 场景守恒的自指风险**：`verify-p0.sh:121-122` 的 SCN 是现算后与 README 文本比对，两处同改即可洗白；独立锚是 `gh6` 内的字面 94 断言，三锚同改仍需 review 发现。
