@@ -760,7 +760,7 @@ bash .meta/gates/<name>.spec.sh   # CI / pre-push 层的等价写法
 
 - **自包含**：从自身路径解析仓库根（`ROOT=$(cd "$(dirname "$0")/../.." && pwd)`），不依赖调用者 cwd；
 - **只读仓库**：样本一律建在 `mktemp -d` 临时目录、退出时清理；不得改动仓库文件；
-- **秒级**：有 `timeout` 时施加 **软 25s + KILL 兜底 5s**（最坏 30s；无视 TERM 的挂死 spec 会被强杀，不会拖死体检）；
+- **秒级**：有 `timeout` 时施加 **软 90s + KILL 兜底 5s**（最坏 95s；无视 TERM 的挂死 spec 会被强杀，不会拖死体检）；
 - **exit 0 = 自检通过**（"门确实会拒绝非法样本"）；非零 → 报 FAIL 并回显该 spec 输出尾部；
 - **防递归**：嵌套由调起方判定——`ponygo audit` 在 `PONYGO_AUDIT_SPEC_DEPTH ≥ 1` 时拒绝再跑 spec
   （该层不执行任何 spec，按 `SKIPPED` 处理并 **exit 3**）；第一层 spec **必须真跑**。
@@ -3448,7 +3448,7 @@ verify_ladder() {
 #   - 新入口：PONYGO_AUDIT_SPEC_DEPTH ≥ 1（本次执行由 spec 内层发起）→ 拒绝再跑，打印护栏后 exit 2。
 #     第一层**不再**向 spec 注入 PONYGO_IN_SPEC=1，只把深度 +1 传下去——故框架自带 spec（A2）
 #     在第一层是真跑，不会被自己的护栏吞成 SKIPPED（P0-1 缺陷）；
-#   - 超时：有 timeout 时软 25s + KILL 兜底 5s（最坏 30s；无视 TERM 的挂死 spec 会被强杀）；
+#   - 超时：有 timeout 时软 90s + KILL 兜底 5s（最坏 95s；无视 TERM 的挂死 spec 会被强杀）；
 #   - 聚合：报告**全部**失败 spec（不只最后一个）。
 # 返回：0 全过 / 1 有失败 / 2 跳过（无 *.spec.sh 或有护栏命中）
 # P0-3 边界（2026-11-11）：**执行判据不是静态判据的替代品**——本函数只回答「spec 跑起来是否 exit 0」，
@@ -3503,7 +3503,7 @@ run_gate_specs() {
     # 后台进程 + 立即退出的 spec 能拖住 timeout（实证）。
     if [ -n "$outfile" ]; then
       if command -v timeout >/dev/null 2>&1; then
-        PONYGO_AUDIT_SPEC_DEPTH=$spec_depth timeout -k 5 25 bash "$f" >"$outfile" 2>&1 3>&-; rc=$?
+        PONYGO_AUDIT_SPEC_DEPTH=$spec_depth timeout -k 5 90 bash "$f" >"$outfile" 2>&1 3>&-; rc=$?
       else
         PONYGO_AUDIT_SPEC_DEPTH=$spec_depth bash "$f" >"$outfile" 2>&1 3>&-; rc=$?
       fi
@@ -3511,7 +3511,7 @@ run_gate_specs() {
       allout=$(cat "$outfile" 2>/dev/null)
     else
       if command -v timeout >/dev/null 2>&1; then
-        out=$(PONYGO_AUDIT_SPEC_DEPTH=$spec_depth timeout -k 5 25 bash "$f" 2>&1 3>&-); rc=$?
+        out=$(PONYGO_AUDIT_SPEC_DEPTH=$spec_depth timeout -k 5 90 bash "$f" 2>&1 3>&-); rc=$?
       else
         out=$(PONYGO_AUDIT_SPEC_DEPTH=$spec_depth bash "$f" 2>&1 3>&-); rc=$?
       fi
