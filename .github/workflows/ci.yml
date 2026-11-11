@@ -1,5 +1,7 @@
-# ponygo 自测门禁：tests/run.sh 是唯一回归入口，双平台看守
-# （ubuntu = GNU 用户态；windows = Git Bash，覆盖 README §6.2 承诺的两个平台）
+# ponygo 自测门禁：tests/run.sh 是唯一回归入口，按平台 × 分层看守
+#   - ubuntu：全量（full 层，94 场景）
+#   - windows-latest：Git Bash，PR 只跑 core 层（27 场景）；夜间/手动才跑全量
+# 聚合门 all-checks-passed 是分支保护唯一依赖（名字不可改）。
 name: ci
 
 permissions:
@@ -9,10 +11,16 @@ on:
   push:
     branches: [main]
   pull_request:
+  # 夜间全量（GitHub Actions 的 cron 一律按 UTC 解释；18:00 UTC = 北京时间次日 02:00，
+  # 避开 PR 高峰时段；只有此事件会让 windows-full 真正执行）
+  schedule:
+    - cron: '0 18 * * *'
+  workflow_dispatch:
 
 jobs:
   selftest-linux:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -24,8 +32,13 @@ jobs:
       - name: bash tests/run.sh
         run: bash tests/run.sh
 
-  selftest-windows:
+  # PR 必跑：Windows 只跑 core 层（PONYGO_TEST_LAYER=core → 27 场景）。
+  # 预算依据：CORE-27 在 Linux 实测 155s × Windows 慢 10.3x + 装机 ≈ 28min → 60min 留余量。
+  windows-core:
     runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      PONYGO_TEST_LAYER: core
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -36,7 +49,27 @@ jobs:
       - name: 安装测试 YAML 依赖（PyYAML）
         shell: bash
         run: python3 -m pip install --disable-pip-version-check pyyaml
-      - name: bash tests/run.sh (Git Bash)
+      - name: bash tests/run.sh（core 层，Git Bash）
+        shell: bash
+        run: bash tests/run.sh
+
+  # 夜间/手动全量：不设 PONYGO_TEST_LAYER（未设 = full，94 场景）。
+  # 只在 schedule 与 workflow_dispatch 触发；预算依据：历史观测 ≈91.7min（曾 167min 才被人工取消）。
+  windows-full:
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: 配置本地治理钩子路径（git config 不入库）
+        shell: bash
+        run: git config core.hooksPath .githooks
+      - name: 安装测试 YAML 依赖（PyYAML）
+        shell: bash
+        run: python3 -m pip install --disable-pip-version-check pyyaml
+      - name: bash tests/run.sh（full 层，Git Bash）
         shell: bash
         run: bash tests/run.sh
 
@@ -54,15 +87,36 @@ jobs:
           git config core.hooksPath .githooks
           bash ponygo audit --run-specs
 
-  # 聚合门：分支保护只依赖这一个检查，防 skipped 被计为通过
+  # 聚合门：分支保护只依赖这一个检查（名字不变）。
+  #   required 三元组 = selftest-linux + windows-core + governance，必须**恰为** success success success
+  #     （skipped/failure/cancelled 一律判失败——skipped 不得冒充通过）；
+  #   windows-full 只在 schedule/workflow_dispatch 跑 → 其他事件允许 skipped；
+  #     **事件感知**：schedule（夜间全量）下 skipped 必须失败，failure/cancelled 任何事件都失败。
   all-checks-passed:
     if: always()
-    needs: [selftest-linux, selftest-windows, governance]
+    needs: [selftest-linux, windows-core, windows-full, governance]
     runs-on: ubuntu-latest
     steps:
       - name: aggregate
         run: |
           set -e
-          result="${{ needs.selftest-linux.result }} ${{ needs.selftest-windows.result }} ${{ needs.governance.result }}"
-          echo "job results: $result"
+          result="${{ needs.selftest-linux.result }} ${{ needs.windows-core.result }} ${{ needs.governance.result }}"
+          full="${{ needs.windows-full.result }}"
+          event="${{ github.event_name }}"
+          echo "event: $event"
+          echo "job results: $result（windows-full: $full）"
           [ "$result" = "success success success" ]
+          case "$full" in
+            success) ;;
+            skipped)
+              if [ "$event" = "schedule" ]; then
+                echo "FAIL windows-full 在 schedule（夜间全量）下不得 skipped——聚合门判失败" >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "FAIL windows-full 结果非 success/skipped（实得 $full）——failure/cancelled 一律判失败" >&2
+              exit 1
+              ;;
+          esac
+          echo "all required checks passed"

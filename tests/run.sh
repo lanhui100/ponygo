@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # ============================================================
 # ponygo 自测（纯 bash、零依赖；mktemp 场景化，不污染仓库）
-# 用法：bash tests/run.sh   （任何失败 → 结尾 exit 1）
+# 用法：bash tests/run.sh                                  （full 层 = 全部 94 场景）
+#       PONYGO_TEST_LAYER=core bash tests/run.sh           （core 层 = 27 场景，其余跳过）
+#       PONYGO_SCN_TIMEOUT=600 bash tests/run.sh           （可选：单场景看门狗，1..86400 秒）
+# 退出码：断言失败 / 任一子套件 rc≠0 → 1；配置类错误（非法 env 值）→ 2。
 # 场景一律在临时目录跑（cwd 隔离），以 bash "$ROOT/ponygo" 调用，
 # 规避 clone 后 exec bit / shebang 问题（spec rev3 P0-2）。
 # ============================================================
@@ -10,9 +13,318 @@ set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 CLI() { bash "$ROOT/ponygo" "$@"; }
 
+# ============================================================
+# 配置前置校验（契约 A14/B1）：非法值 → exit 2，且不执行任何场景（汇总行不出现）。
+# 放在所有场景之前是刻意的：配置错必须在「零副作用」处失败，不能等跑到第 94 个场景才发现。
+# ============================================================
+PONYGO_TEST_LAYER="${PONYGO_TEST_LAYER:-full}"
+case "$PONYGO_TEST_LAYER" in
+  full|core) : ;;
+  *)
+    printf 'ponygo-tests: FAIL 非法 PONYGO_TEST_LAYER=%s（合法：full|core）\n' "$PONYGO_TEST_LAYER" >&2
+    exit 2 ;;
+esac
+# 单场景看门狗（1..86400 正整数秒；未设/空串 = 禁用 = 行为零变化）
+# 为什么有 24h 上界：GNU sleep/timeout 对超大秒数实际不设可观测上限，而输出仍自称「看门狗」，
+# 那就是假护栏——宁可配置期 fail-closed，也不留一个永远不会触发的计时器。
+SCN_TIMEOUT="${PONYGO_SCN_TIMEOUT:-}"
+if [ -n "$SCN_TIMEOUT" ]; then
+  case "$SCN_TIMEOUT" in
+    *[!0-9]*|0*) scn_timeout_ok=0 ;;   # 非数字 / 负号 / 小数点 / 空格 / 0 与前导零
+    *) scn_timeout_ok=1 ;;
+  esac
+  if [ "$scn_timeout_ok" -eq 1 ]; then
+    # 先按位数挡大数：算术展开对大整数会卷绕，不能只靠 -gt 比较
+    if [ "${#SCN_TIMEOUT}" -gt 5 ] || [ "$((10#$SCN_TIMEOUT))" -gt 86400 ]; then
+      scn_timeout_ok=0
+    fi
+  fi
+  if [ "$scn_timeout_ok" -ne 1 ]; then
+    printf 'ponygo-tests: FAIL 非法 PONYGO_SCN_TIMEOUT=%s（须为 1..86400 的正整数秒）\n' "$SCN_TIMEOUT" >&2
+    exit 2
+  fi
+fi
+
+# ============================================================
+# 计数模型（契约 A4/A5/A6/A7/A8）
+#   PASS/FAIL 只由叶子 ok()/bad() 增加；嵌套（s78/s81）与折叠（s88–s94）各自记账。
+#   checks 是三类之和的恒等式（见文末汇总），不设独立自增累加器——否则等式即漂移。
+# ============================================================
 PASS=0; FAIL=0
+NESTED_PASS=0; NESTED_FAIL=0
+FOLDED_PASS=0; FOLDED_FAIL=0
+SKIPPED=0
+SCN_RUN=0
 ok()  { PASS=$((PASS+1)); printf '  ok   %s\n' "$1"; }
 bad() { FAIL=$((FAIL+1)); printf '  FAIL %s\n' "$1"; }
+
+# ============================================================
+# 场景头/尾守卫 + 分层 + 子套件解析（契约 §1.2/§1.3/§2、A12a、A15、A16、A18）
+#
+# 为什么这样写：
+#   - 子进程 rc≠0 必计失败（A12a）：既有代码在 rc≠0 时只 printf RED 而不记账，
+#     解析出 fail=0 就能以 exit 0 收场——这是 pre-existing false-green 入口，本波修掉。
+#   - 子套件输出必须先缓冲再解析（s88 原为裸跑，解析无从工作）；红相只回显尾部 ≤25 行。
+#   - 分层用 head/tail 双守卫，不用 RETURN trap（rev3 裁决）。场景体首行
+#     `scn_begin || return 0`、末行 `scn_end`；场景 id 由 FUNCNAME[1] 派生，不手填。
+#     进度行与 SKIP 行不进入任何计数（skipped 单列）。
+#   - 早退路径（场景体内 return）的结束行缺失属已知局限（契约 §12 U-3，best-effort）。
+# ============================================================
+SCN_CUR=""
+SCN_CUR_FILE=""
+SCN_T0=0
+SCN_WD_PID=""
+
+layer_set_names() { # <脚本路径> <CORE-SET|NONCORE-SET> → 逐行打印块内场景名
+  # 注：awk 变量名不可用 `close`/`open` 等 gawk 内建名（fatal: cannot use builtin as variable name）
+  awk -v bstart="# >>> ponygo-test-layer: $2 >>>" -v bend="# <<< ponygo-test-layer: $2 <<<" '
+    $0 == bstart { inblk = 1; next }
+    $0 == bend   { inblk = 0; next }
+    inblk && ($1 == "CORE" || $1 == "NONCORE") { print $2 }' "$1"
+}
+LAYER_SELF="${BASH_SOURCE[0]:-$0}"
+CORE_SET=$(layer_set_names "$LAYER_SELF" "CORE-SET")
+NONCORE_SET=$(layer_set_names "$LAYER_SELF" "NONCORE-SET")
+
+in_layer_set() { # <换行分隔的集合> <名字>
+  case $'\n'"$1"$'\n' in
+    *$'\n'"$2"$'\n'*) return 0 ;;
+  esac
+  return 1
+}
+
+scn_begin() { # head 守卫：分层过滤（B8）+ 进度开始行（A16）+ 可选看门狗
+  local id="${FUNCNAME[1]}"
+  local rest num
+  # B5 fail-closed：两集合都没登记 = 分层表已漂移，立即停（不得静默把场景当 full 跑）
+  if ! in_layer_set "$CORE_SET" "$id" && ! in_layer_set "$NONCORE_SET" "$id"; then
+    printf 'ponygo-tests: FAIL 场景 %s 未登记进 CORE-SET/NONCORE-SET（契约 B5：两集合必须是场景的分区）\n' "$id" >&2
+    exit 1
+  fi
+  if [ "$PONYGO_TEST_LAYER" = "core" ] && in_layer_set "$NONCORE_SET" "$id"; then
+    rest="${id#s}"
+    num="${rest%%_*}"
+    printf '  SKIP s%s %s（layer=core）\n' "$num" "${rest#*_}"
+    SKIPPED=$((SKIPPED + 1))
+    return 1
+  fi
+  SCN_CUR="$id"
+  SCN_RUN=$((SCN_RUN + 1))
+  SCN_T0=$SECONDS
+  # 「当前场景」必须落盘共享：看门狗跑在后台子进程里，读不到父进程后续的变量赋值
+  # （子进程持有 fork 时刻的副本），只靠变量二次校验是无效的，实测会误杀下一场景。
+  [ -n "$SCN_CUR_FILE" ] || SCN_CUR_FILE="$SBASE/scn-current"
+  printf '%s\n' "$id" > "$SCN_CUR_FILE"
+  printf '  >> %s %s\n' "$id" "$(date +%Y-%m-%dT%H:%M:%S)"
+  # 看门狗（默认禁用）：超时点名场景后终止整轮——静默挂死比失败更难诊断。
+  # 上一场景若早退（未走 scn_end），其看门狗先清掉，避免堆积成陈旧进程。
+  scn_watchdog_stop
+  if [ -n "$SCN_TIMEOUT" ]; then
+    # 三件必须同时做对，否则「看门狗」会变成新的挂死源（实测过两次）：
+    #   1) sleep 一律后台起，pid 落盘：scn_end 才能先杀孙进程，否则 sleep 变孤儿并继续持有调用方 stdout
+    #   2) 子 shell stdout 重定向 /dev/null（stderr 保留，TIMEOUT 行照打）：
+    #      即使有残留进程也占不住 `... | tail -1` / `out=$(...)` 的管道
+    #   3) 作业表 disown：场景里的裸 `wait`（s59 的 10 并行 init）会等待所有子进程
+    ( sleep "$SCN_TIMEOUT" & printf '%s\n' "$!" > "$SBASE/wd-sleep.pid"
+      wait
+      [ "$(cat "$SCN_CUR_FILE" 2>/dev/null)" = "$id" ] || exit 0
+      printf '  TIMEOUT %s（超 %ss）\n' "$id" "$SCN_TIMEOUT" >&2
+      kill -TERM $$ ) >/dev/null &
+    SCN_WD_PID=$!
+    disown "$SCN_WD_PID" 2>/dev/null || true
+  fi
+  return 0
+}
+
+scn_watchdog_stop() { # 杀看门狗：先 sleep 孙进程、再子 shell（顺序反了就把 sleep 变孤儿）
+  local sp
+  [ -n "$SCN_WD_PID" ] || [ -f "$SBASE/wd-sleep.pid" ] || return 0
+  sp=$(cat "$SBASE/wd-sleep.pid" 2>/dev/null || true)
+  [ -n "$sp" ] && kill "$sp" 2>/dev/null
+  if [ -n "$SCN_WD_PID" ]; then kill "$SCN_WD_PID" 2>/dev/null || true; fi
+  sp=$(cat "$SBASE/wd-sleep.pid" 2>/dev/null || true)   # 覆盖「已 fork 但刚写入」的窄窗
+  [ -n "$sp" ] && kill "$sp" 2>/dev/null
+  rm -f "$SBASE/wd-sleep.pid"
+  SCN_WD_PID=""
+  return 0
+}
+
+scn_end() { # tail 守卫：先清「当前场景」再杀看门狗，避免竞态误杀
+  local id="${FUNCNAME[1]}"
+  SCN_CUR=""
+  [ -n "$SCN_CUR_FILE" ] && : > "$SCN_CUR_FILE"
+  scn_watchdog_stop
+  printf '  << %s %ss\n' "$id" "$((SECONDS - SCN_T0))"
+}
+
+parse_suite_counts() { # <标签> <子进程输出> <rc> → 填充 PC_PASS / PC_FAIL / PC_SRC
+  local id="$1" out="$2" rc="$3" p n cases failed
+  PC_PASS=0; PC_FAIL=0; PC_SRC=""
+  # 优先级 1：^##CASE … pass=N fail=N$（全部命中行求和；单文件输出恰好 1 行时等价旧 tail -n1）
+  p=$(printf '%s\n' "$out" | sed -n 's/^##CASE .* pass=\([0-9][0-9]*\) fail=\([0-9][0-9]*\)$/\1/p')
+  if [ -n "$p" ]; then
+    PC_PASS=$(printf '%s\n' "$p" | awk '{s += $1} END {print s + 0}')
+    PC_FAIL=$(printf '%s\n' "$out" | sed -n 's/^##CASE .* pass=\([0-9][0-9]*\) fail=\([0-9][0-9]*\)$/\2/p' | awk '{s += $1} END {print s + 0}')
+    PC_SRC="##CASE"
+    return 0
+  fi
+  # 优先级 2：^断言：pass=N fail=N$（取最后一行）
+  p=$(printf '%s\n' "$out" | sed -n 's/^断言：pass=\([0-9][0-9]*\) fail=\([0-9][0-9]*\)$/\1/p' | tail -n 1)
+  if [ -n "$p" ]; then
+    n=$(printf '%s\n' "$out" | sed -n 's/^断言：pass=\([0-9][0-9]*\) fail=\([0-9][0-9]*\)$/\2/p' | tail -n 1)
+    PC_PASS="$p"; PC_FAIL="${n:-0}"; PC_SRC="断言："
+    return 0
+  fi
+  # 优先级 3：^PASS=N FAIL=N$（取最后一行）
+  p=$(printf '%s\n' "$out" | sed -n 's/^PASS=\([0-9][0-9]*\) FAIL=\([0-9][0-9]*\)$/\1/p' | tail -n 1)
+  if [ -n "$p" ]; then
+    n=$(printf '%s\n' "$out" | sed -n 's/^PASS=\([0-9][0-9]*\) FAIL=\([0-9][0-9]*\)$/\2/p' | tail -n 1)
+    PC_PASS="$p"; PC_FAIL="${n:-0}"; PC_SRC="PASS="
+    return 0
+  fi
+  # 优先级 4：^##SUMMARY ….cases=N failed=N$ → pass = max(cases - failed, 0)
+  p=$(printf '%s\n' "$out" | sed -n 's/^##SUMMARY .* cases=\([0-9][0-9]*\) failed=\([0-9][0-9]*\)$/\1 \2/p' | tail -n 1)
+  if [ -n "$p" ]; then
+    cases="${p%% *}"; failed="${p##* }"
+    PC_PASS=$(( 10#$cases - 10#$failed ))
+    [ "$PC_PASS" -lt 0 ] && PC_PASS=0
+    PC_FAIL="$failed"; PC_SRC="##SUMMARY"
+    return 0
+  fi
+  # 优先级 5：不可解析 → 回退条。只进 checks 且判失败，永不进 pass（未验证 ≠ 通过）
+  PC_PASS=0; PC_FAIL=1; PC_SRC="UNPARSED"
+  printf '  UNPARSED %s (rc=%s) → 回退条：只进 checks + 判失败\n' "$id" "$rc"
+  return 0
+}
+
+fold_account() { # <场景 id> <输出> <rc>：折叠套件统一记账（假定 parse_suite_counts 已填 PC_*）
+  local id="$1" out="$2" rc="$3"
+  FOLDED_PASS=$((FOLDED_PASS + PC_PASS))
+  FOLDED_FAIL=$((FOLDED_FAIL + PC_FAIL))
+  if [ "$rc" -ne 0 ]; then
+    # A12a：rc≠0 即使解析出 fail=0 也判失败，绝不因「汇总行自称全绿」放行
+    FOLDED_FAIL=$((FOLDED_FAIL + 1))
+    printf '  RED  %s（rc=%s pass=%s fail=%s｜来源 %s）\n' "$id" "$rc" "$PC_PASS" "$PC_FAIL" "$PC_SRC"
+  elif [ "$PC_FAIL" -ne 0 ]; then
+    printf '  RED  %s（rc=%s pass=%s fail=%s｜来源 %s）\n' "$id" "$rc" "$PC_PASS" "$PC_FAIL" "$PC_SRC"
+  else
+    # 前缀刻意不是 `  ok   `：折叠计数不进叶子 pass（A4），若与 ok() 同形，
+    # 任何按 `^  ok   ` 计数的消费者都会多算（含 gh6 的叶子代理），实测 370 ≠ 368。
+    printf '  fold %s（pass=%s｜来源 %s）\n' "$id" "$PC_PASS" "$PC_SRC"
+    return 0
+  fi
+  # 红相才回显（A15/§1.2）：关键行 grep 后 tail ≤25 行；绿相整卷不回显，避免刷屏
+  printf '%s\n' "$out" | grep -E '^(FAIL |  FAIL |== |##CASE |##EXIT |##SUMMARY |  RED |断言：|PASS=|结果：)' | tail -n 25 || true
+  return 0
+}
+
+# ============================================================
+# 分层数据块（契约 §2.1 / §2.2；B5：两集合是 94 场景的分区）
+# 块内每行必须带 `CORE `/`NONCORE ` 前缀——写成裸 `sNN_name` 行会让顶层裸调用计数
+# 从 94 翻倍到 188，直接打断 verify-p0 的硬数字断言（B6/B7）。
+# 整块包在 here-doc 里：块内是数据而非命令（否则每行会被 shell 当命令执行）；
+# 运行期由 layer_set_names 从本文件自身读出，故改集合只改这里，不碰任何场景代码。
+# ============================================================
+: <<'PONYGO_LAYER_SETS'
+# >>> ponygo-test-layer: CORE-SET >>>
+CORE s02_init
+CORE s11_l1_criteria
+CORE s13_meta_violations
+CORE s24_gate_layers
+CORE s27_run_specs
+CORE s30_release_chain
+CORE s31_upgrade_drift
+CORE s46_init_gate_wiring
+CORE s47_adr_verify_semantics
+CORE s52_init_idempotent
+CORE s56_dual_write_parity
+CORE s57_ci_conditional_generation
+CORE s58_f1_block_before_exit
+CORE s59_f2_concurrent_atomicity
+CORE s60_f3_canonical_block
+CORE s61_f4_write_failure_loud
+CORE s62_f5_remedy_by_cause
+CORE s64_f8_f11_dry_run_provider
+CORE s65_f9_f10_symlink_and_selfheal
+CORE s66_f1_bare_exit_position
+CORE s67_f2_foreign_lines_not_truncated
+CORE s68_f_hookspath_escape
+CORE s69_f_trailing_sentinel_no_user_loss
+CORE s70_f_function_body_exit_not_early_exit
+CORE s79_wave1_contract_c1_c2_c3_c6
+CORE s90_gate_hardening_acceptance
+CORE s92_p0_fixes_acceptance
+# <<< ponygo-test-layer: CORE-SET <<<
+# >>> ponygo-test-layer: NONCORE-SET >>>
+NONCORE s01_help
+NONCORE s03_status
+NONCORE s04_bootstrap_projection
+NONCORE s05_sync_idempotent
+NONCORE s06_ai_surface_off
+NONCORE s07_retire
+NONCORE s08_level_normalize
+NONCORE s09_audit_counts
+NONCORE s10_audit_level_arg
+NONCORE s12_l2_criteria
+NONCORE s14_decisions_readme
+NONCORE s15_upgrade
+NONCORE s16_status_no_meta
+NONCORE s17_dry_run
+NONCORE s18_repo_consistency
+NONCORE s19_boundary_regress
+NONCORE s20_installer
+NONCORE s21_external001_regress
+NONCORE s22_hygiene_warn
+NONCORE s23_verify_note
+NONCORE s25_doc_home_audit
+NONCORE s26_warn_tier
+NONCORE s28_l2_reachability
+NONCORE s29_doc_level_parity
+NONCORE s32_task004_static
+NONCORE s33_observe_stub
+NONCORE s34_observe_init
+NONCORE s35_observe_audit
+NONCORE s36_observe_json
+NONCORE s37_observe_regress
+NONCORE s38_observe_frontend_and_pipeline
+NONCORE s39_observe_feedback_upgrades
+NONCORE s40_observe_audit_clarity
+NONCORE s41_observe_smart_inheritance_and_examples
+NONCORE s42_observe_monorepo_subcomponents
+NONCORE s43_observe_pipeline_awareness
+NONCORE s44_observe_subcomponent_blocking
+NONCORE s45_observe_diff_timeout_budget
+NONCORE s48_adr_verify_toctou
+NONCORE s49_adr_verify_rename
+NONCORE s50_preexisting_hook_preserved
+NONCORE s51_husky_foreign_hookspath
+NONCORE s53_init_dry_run
+NONCORE s54_init_non_tty_no_confirmation
+NONCORE s55_ladder_24_strong
+NONCORE s63_f6_tilde_expansion
+NONCORE s71_yes_flag_rejected
+NONCORE s72_adaptation_book
+NONCORE s73_docs_tier_hint_silent
+NONCORE s74_retire_no_confirmation
+NONCORE s75_alternatives_110_reject
+NONCORE s76_alternatives_exemptions
+NONCORE s77_gate_chain_alternatives
+NONCORE s78_wave13_acceptance
+NONCORE s80_wave2_contract_d1_d2_d4
+NONCORE s81_carrier_audit_acceptance
+NONCORE s82_skill_library_install_closure
+NONCORE s83_skill_library_modified_detected
+NONCORE s84_skill_library_optional_gap_status
+NONCORE s85_skill_baseline_missing_audit_repair
+NONCORE s86_skill_shape_incomplete
+NONCORE s87_skill_advisory_catalog
+NONCORE s88_projection_freshness
+NONCORE s89_auditfix_acceptance
+NONCORE s91_deferred_acceptance
+NONCORE s93_negspace_acceptance
+NONCORE s94_p1_fixes_acceptance
+# <<< ponygo-test-layer: NONCORE-SET <<<
+PONYGO_LAYER_SETS
 
 assert_eq() { # <描述> <期望> <实得>
   if [ "$2" = "$3" ]; then ok "$1"; else bad "$1（期望 [$2] 实得 [$3]）"; fi
@@ -259,6 +571,7 @@ EOF
 
 # ============================================================
 s01_help() {
+  scn_begin || return 0
   echo "--- 场景1：help 六命令 + 未知子命令"
   local c
   run_cli "$ROOT" --help
@@ -269,9 +582,11 @@ s01_help() {
   run_cli "$(new_case)" frobnicate
   assert_eq "未知子命令 die exit 1" 1 "$R_RC"
   assert_contains "未知子命令报错" "$R_OUT" "未知参数或子命令"
+  scn_end
 }
 
 s02_init() {
+  scn_begin || return 0
   echo "--- 场景2：init 骨架 + 不投影 + 重复 init"
   local T d; T=$(new_case)
   run_cli "$T" init
@@ -306,9 +621,11 @@ s02_init() {
   assert_eq "重复 init exit 0（不覆盖）" 0 "$R_RC"
   assert_contains "重复 init 提示已存在" "$R_OUT" "已存在"
   grep -q '^level: 0' "$T/.meta/meta.yaml" && ok "重复 init 未改 level" || bad "重复 init 改了 level"
+  scn_end
 }
 
 s03_status() {
+  scn_begin || return 0
   echo "--- 场景3：status 完整（exit 0）"
   local T; T=$(new_case)
   run_cli "$T" init
@@ -316,9 +633,11 @@ s03_status() {
   assert_eq "新 init 后 status exit 0" 0 "$R_RC"
   assert_contains "骨架完整" "$R_OUT" "骨架完整"
   assert_contains "级自洽验证通过" "$R_OUT" "级自洽验证：通过"
+  scn_end
 }
 
 s04_bootstrap_projection() {
+  scn_begin || return 0
   echo "--- 场景4：TODO 模板 → bootstrap 引导投影；填槽后自动替换为常载命约"
   local T; T=$(new_case)
   run_cli "$T" init
@@ -334,9 +653,11 @@ s04_bootstrap_projection() {
   assert_eq "填槽后 sync exit 0" 0 "$R_RC"
   assert_not_contains "引导已被替换" "$(cat "$T/AGENTS.md")" "初始引导"
   assert_contains "替换为常载命约" "$(cat "$T/AGENTS.md")" "常载命约"
+  scn_end
 }
 
 s05_sync_idempotent() {
+  scn_begin || return 0
   echo "--- 场景5：填槽后 sync 投影 + 幂等"
   local T h1 h2; T=$(new_case)
   run_cli "$T" init
@@ -350,9 +671,11 @@ s05_sync_idempotent() {
   run_cli "$T" sync
   h2=$(md5sum "$T/AGENTS.md" | awk '{print $1}')
   assert_eq "sync 幂等（二次投影内容不变）" "$h1" "$h2"
+  scn_end
 }
 
 s06_ai_surface_off() {
+  scn_begin || return 0
   echo "--- 场景6：ai-surface off 跳投影（含 Off 大小写，F8）"
   # 注意次序：init 会投影（模板态投 bootstrap），故先清掉投影文件再置 off 验 sync 拦截
   local T T2; T=$(new_case); T2=$(new_case)
@@ -369,9 +692,11 @@ s06_ai_surface_off() {
   run_cli "$T2" sync
   assert_eq "ai-surface: Off → sync exit 0" 0 "$R_RC"
   [ ! -f "$T2/AGENTS.md" ] && [ ! -f "$T2/CLAUDE.md" ] && ok "Off（大小写不敏感）不投影" || bad "Off 仍投影（F8 未修）"
+  scn_end
 }
 
 s07_retire() {
+  scn_begin || return 0
   echo "--- 场景7：retire off / N / 非法值 / 无 meta（用法不死）"
   local E T; E=$(new_case); T=$(new_case)
   run_cli "$E" retire
@@ -391,9 +716,11 @@ s07_retire() {
   run_cli "$T" retire --level 9
   assert_eq "非法值 die exit 1" 1 "$R_RC"
   assert_contains "非法值报错" "$R_OUT" "目标非法"
+  scn_end
 }
 
 s08_level_normalize() {
+  scn_begin || return 0
   echo "--- 场景8：level L 前缀归一 + level: 12 拒绝"
   local T; T=$(new_case)
   run_cli "$T" init
@@ -405,9 +732,11 @@ s08_level_normalize() {
   run_cli "$T" status
   assert_eq "level: 12 → exit 1" 1 "$R_RC"
   assert_contains "报 0.4" "$R_OUT" "0.4"
+  scn_end
 }
 
 s09_audit_counts() {
+  scn_begin || return 0
   echo "--- 场景9：audit 确定性命中（非 git temp + GIT_CONFIG 消毒，spec rev3 P0-2）"
   local G T; G=$(mktemp "$SBASE/gitconf.XXXXXX"); : > "$G"
   T=$(new_case)
@@ -433,9 +762,11 @@ s09_audit_counts() {
   # 契约变更（负空间批次 C1）：M 档删掉与问② has_ci 跨平台探测重复的「[ -d .github/workflows ]」
   # 独立计分项（重复计分 = GitHub 仓库白送一分）→ M 档总项数 17 → 16；本夹具无 .github/ 故命中数不变。
   assert_contains "M 档命中 4 / 16（去冗余后：+2 项、净 +1 分）" "$R_OUT" "命中 4 / 16"
+  scn_end
 }
 
 s10_audit_level_arg() {
+  scn_begin || return 0
   echo "--- 场景10：audit --level 缺值 / 非法值"
   local T; T=$(new_case)
   run_cli "$T" init
@@ -445,9 +776,11 @@ s10_audit_level_arg() {
   run_cli "$T" audit --level X
   assert_eq "--level 非法 die exit 1" 1 "$R_RC"
   assert_contains "非法档报错" "$R_OUT" "仅支持 S|M"
+  scn_end
 }
 
 s11_l1_criteria() {
+  scn_begin || return 0
   echo "--- 场景11：L1 判据（合法/缺 class 轴/坏文件名/Status 不符/archived/非法日期/depth-4/空格文件名/CRLF）"
   local T
   T=$(new_case); run_cli "$T" init
@@ -583,9 +916,11 @@ s11_l1_criteria() {
   printf '# mod-b\n' > "$T/packages/mod-b/AGENTS.md"
   run_cli "$T" status
   assert_eq "包文档齐全 → exit 0" 0 "$R_RC"
+  scn_end
 }
 
 s12_l2_criteria() {
+  scn_begin || return 0
   echo "--- 场景12：L2 判据（齐 → 过；缺钩子 → FAIL；2.5 条件判据四分支）"
   local T
   T=$(new_case); run_cli "$T" init
@@ -728,9 +1063,11 @@ s12_l2_criteria() {
   assert_eq "引号值不兑现 off → exit 0（未声明 SKIP）" 0 "$R_RC"
   assert_contains "引号值报非法键 WARN" "$R_OUT" "非法键"
   assert_not_contains "引号值不进入 off 分支（不写 off 结论）" "$R_OUT" "2.5 未启用"
+  scn_end
 }
 
 s13_meta_violations() {
+  scn_begin || return 0
   echo "--- 场景13：meta.yaml 违例键告警（双挂 WARN，exit 0）+ CRLF 不假 WARN"
   local T
   T=$(new_case); run_cli "$T" init
@@ -771,6 +1108,7 @@ s13_meta_violations() {
   printf 'level: 0\ndocs-tier: ON\n' > "$T/.meta/meta.yaml"
   run_cli "$T" status
   assert_contains "docs-tier 非法值告警" "$R_OUT" "非法键"
+  scn_end
 }
 
 # wave-7：模板仓自身可切到「已激活」态（docs-tier 激活）。`ponygo init` 的生成物**恒为模板态**，
@@ -786,6 +1124,7 @@ docs_tier_generated_is_template() { # <生成物路径>：模板态 ⇔ 无激�
 }
 
 s14_decisions_readme() {
+  scn_begin || return 0
   echo "--- 场景14：生成 decisions/ skills/ README 与模板 eol 归一逐字节一致（F3 + skills 契约）"
   local T MUT; T=$(new_case)
   run_cli "$T" init
@@ -872,9 +1211,11 @@ s14_decisions_readme() {
   else
     bad "生成 archived/AGENTS.md 与模板不一致"
   fi
+  scn_end
 }
 
 s15_upgrade() {
+  scn_begin || return 0
   echo "--- 场景15：upgrade exit 0（默认契约：报告 exit 0；空项目温和跳过）"
   # 空项目（无 .meta、无代码迹象）→ upgrade 温和跳过 exit 0（含升级纪律输出行）
   run_cli "$(new_case)" upgrade
@@ -887,16 +1228,20 @@ s15_upgrade() {
   assert_eq "健康实例 upgrade exit 0" 0 "$R_RC"
   assert_contains "含漂移报告头" "$R_OUT" "漂移报告"
   assert_contains "零漂移" "$R_OUT" "零漂移"
+  scn_end
 }
 
 s16_status_no_meta() {
+  scn_begin || return 0
   echo "--- 场景16：status 无 .meta（exit 1 不崩）"
   run_cli "$(new_case)" status
   assert_eq "无 .meta status exit 1" 1 "$R_RC"
   assert_not_contains "不崩（无 unbound 报错）" "$R_OUT" "unbound variable"
+  scn_end
 }
 
 s17_dry_run() {
+  scn_begin || return 0
   echo "--- 场景17：--dry-run 零落盘（init / retire）"
   local T; T=$(new_case)
   run_cli "$T" init --dry-run
@@ -908,9 +1253,11 @@ s17_dry_run() {
   run_cli "$T" retire --level 1 --dry-run
   assert_eq "retire --dry-run exit 0" 0 "$R_RC"
   grep -q '^level: 2' "$T/.meta/meta.yaml" && ok "retire --dry-run 未改 level" || bad "retire --dry-run 改了 level"
+  scn_end
 }
 
 s18_repo_consistency() {
+  scn_begin || return 0
   echo "--- 场景18：F1 口径 grep（checklist.md 骨架9/机制19 + depth-selector 精微7）+ .gitattributes"
   # 计数随条目增删而变（负空间批次：机制层 −1 项去冗余、表条目数 18 → 19）——断言的是
   # 「文档自报的层数可被 grep 到且与当前真值一致」，不是把某一年的数字焊死。
@@ -935,9 +1282,11 @@ s18_repo_consistency() {
   else
     bad ".gitattributes 缺失或无 eol=lf"
   fi
+  scn_end
 }
 
 s19_boundary_regress() {
+  scn_begin || return 0
   echo "--- 场景19：双审补盲（封闭集执法、缺 Status 行、sync 三分支）"
   local T
   # 1.3 lifecycle 顶层杂项目录
@@ -982,9 +1331,11 @@ s19_boundary_regress() {
   assert_eq "无标记区追加 exit 0" 0 "$R_RC"
   grep -q 'handwritten rules' "$T/AGENTS.md" && ok "原文保留" || bad "原文丢失"
   grep -q 'BEGIN constitution' "$T/AGENTS.md" && ok "块已追加" || bad "块未追加"
+  scn_end
 }
 
 s20_installer() {
+  scn_begin || return 0
   echo "--- 场景20：install.sh 一键安装与环境探测"
   local T target_bin out rc=0
   T=$(new_case)
@@ -1020,6 +1371,7 @@ s20_installer() {
   else
     ok "无 sha256sum，跳过校验和场景（CI 双平台均有）"
   fi
+  scn_end
 }
 
 # ============================================================
@@ -1043,6 +1395,7 @@ s17_dry_run
 s18_repo_consistency
 s19_boundary_regress
 s21_external001_regress() {
+  scn_begin || return 0
   echo "--- 场景21：EXTERNAL-001 回归（空 level 0.4 / classes.local / sync 锚点 / audit 内嵌验级 / 深度信号4）"
   local T G
   # P1-4：空 level 不假 L0 PASS
@@ -1088,9 +1441,11 @@ EOF
   # shellcheck disable=SC2046
   run_cli_env "$T" $G audit
   assert_contains "仅 .meta 仍 S 档" "$R_OUT" "审计深度：S 档"
+  scn_end
 }
 
 s22_hygiene_warn() {
+  scn_begin || return 0
   echo "--- 场景22：治理卫生 WARN（非 git / 游离计划 / 缺 .gitignore；exit 不变）"
   local T
   # 非 git 仓库 WARN + bootstrap 第 0 步与自证线
@@ -1118,9 +1473,11 @@ s22_hygiene_warn() {
   ( cd "$T" && git init -q ) >/dev/null 2>&1
   run_cli "$T" status
   assert_not_contains "干净场景无卫生 WARN" "$R_OUT" "WARN"
+  scn_end
 }
 
 s23_verify_note() {
+  scn_begin || return 0
   echo "--- 场景23：write-adr/verify-note.sh 机械校验器正反例"
   local T; T=$(new_case)
   run_cli "$T" init
@@ -1137,9 +1494,11 @@ s23_verify_note() {
   assert_eq "implemented 含提案标题 exit 1" 1 "$?"
   ( cd "$T" && bash .agents/skills/write-adr/verify-note.sh .agents/notes/implemented/feature/2026-01-03-z.md >/dev/null 2>&1 )
   assert_eq "指定单文件也能抓违例 exit 1" 1 "$?"
+  scn_end
 }
 
 s24_gate_layers() {
+  scn_begin || return 0
   echo "--- 场景24：门禁分层报告（P7 时间经济性：pre-commit/pre-push/CI）"
   local T G; G=$(sanitize_git)
   # 零门禁：audit 应报三层全无 + 缺层引导
@@ -1168,9 +1527,11 @@ s24_gate_layers() {
   assert_contains "中继层 pre-push 有" "$R_OUT" "中继层 pre-push（10秒级）：有"
   assert_contains "远端层 CI 有" "$R_OUT" "远端层 CI（分钟级）：有"
   assert_not_contains "三层齐备无缺层引导" "$R_OUT" "缺本地层"
+  scn_end
 }
 
 s25_doc_home_audit() {
+  scn_begin || return 0
   echo "--- 场景25：v2.0 文档有家——audit 对既有项目（旧项目接入）检测文档家缺失（0.5/1.9/2.5 双保证）"
   local T G; G=$(sanitize_git)
   # 旧项目接入：init 后声明 L1 但删掉 docs/AGENTS.md → audit exit 1 并报 0.5/1.9
@@ -1193,9 +1554,11 @@ s25_doc_home_audit() {
   # shellcheck disable=SC2046
   run_cli_env "$T" $G audit --level S
   assert_eq "文档家齐全 audit exit 0" 0 "$R_RC"
+  scn_end
 }
 
 s26_warn_tier() {
+  scn_begin || return 0
   echo "--- 场景26：v2.1 提醒档——gates 模板 WARN 片段 + 卫生 WARN（新鲜度/未来日期，exit 不变）"
   local T G; G=$(sanitize_git)
   # gates/README 模板含 doc-freshness WARN 片段（排除 notes 计数）
@@ -1221,9 +1584,11 @@ s26_warn_tier() {
   run_cli_env "$T" $G status
   assert_eq "未来日期 WARN 不改 exit（level 0 只验 L0）" 0 "$R_RC"
   assert_contains "WARN 未来日期" "$R_OUT" "晚于今天"
+  scn_end
 }
 
 s27_run_specs() {
+  scn_begin || return 0
   echo "--- 场景27：判据 2.3 执行侧 opt-in（--run-specs）+ 只读默认 + 护栏（递归/dry-run）"
   local T
   # ① 只读不变量：默认 status/audit 不执行仓库脚本（spec 会落一个 WITNESS 见证文件）
@@ -1328,9 +1693,11 @@ s27_run_specs() {
   run_cli "$T" status --run-specs
   assert_eq "status --run-specs → exit 1（显式拒绝）" 1 "$R_RC"
   assert_contains "报仅适用于 audit" "$R_OUT" "仅适用于"
+  scn_end
 }
 
 s28_l2_reachability() {
+  scn_begin || return 0
   echo "--- 场景28：L1→L2 可达性（骨架 + 手工挂载步骤可复跑；证明判据可被满足，非声称框架自身为 L2）"
   local T; T=$(new_case); run_cli "$T" init
   printf 'level: 1\n' > "$T/.meta/meta.yaml"
@@ -1363,9 +1730,11 @@ s28_l2_reachability() {
   run_cli "$T" status
   assert_eq "L1 + docs-tier: on → exit 0（忽略 2.x）" 0 "$R_RC"
   assert_not_contains "L1 不验 2.5（静默）" "$R_OUT" "2.5"
+  scn_end
 }
 
 s29_doc_level_parity() {
+  scn_begin || return 0
   echo "--- 场景29：口径防复发——当前态文档不得复述旧档位区间（L6 / 0-6）"
   local f drift=0
   for f in README.md maturity-ladder.md .meta/meta.yaml .meta/constitution/constitution.md .meta/gates/README.md; do
@@ -1395,9 +1764,11 @@ s29_doc_level_parity() {
   else
     ok "仓库无 tag 或 README 未钉 release tag——版本一致性断言跳过（首次发布前无基线）"
   fi
+  scn_end
 }
 
 s31_upgrade_drift() {
+  scn_begin || return 0
   echo "--- 场景31：upgrade 漂移报告（宇宙=s14 十文件；--check 漂移非零；donot 三场景）"
   local T
   # ① 健康实例（已填 constitution + 模板态 docs-tier）upgrade exit 0 且无"drift:"行
@@ -1455,6 +1826,7 @@ s31_upgrade_drift() {
   assert_contains "声明不支持比对" "$R_OUT" "不参与漂移比对"
   run_cli "$T" upgrade --check
   assert_eq "已激活实例 --check exit 0（不假红）" 0 "$R_RC"
+  scn_end
 }
 
 s20_installer
@@ -1466,6 +1838,7 @@ s25_doc_home_audit
 s26_warn_tier
 s27_run_specs
 s30_release_chain() {
+  scn_begin || return 0
   echo "--- 场景30：发布校验和链（fail-closed / 同钉 tag / workflow 形状 / 裸哈希口径 / CRLF）"
   local T vreadme
   # ① fail-closed 双入口：README 主命令块守卫（静态）+ install.sh 显式空 SHA 拒绝（动态，不 mock curl）
@@ -1504,8 +1877,10 @@ s30_release_chain() {
   # ⑤ README 维护者口径：裸哈希 awk 剥列 + 64 hex 附件语义（发布后以真实附件值为准）
   grep -qF '{print $1}' "$ROOT/README.md" && ok "README 维护者口径 awk 剥列" || bad "README 缺 awk 剥列口径"
   grep -qF 'sha256sum ponygo | awk' "$ROOT/README.md" && ok "README 裸哈希管线" || bad "README 缺裸哈希管线"
+  scn_end
 }
 s32_task004_static() {
+  scn_begin || return 0
   echo "--- 场景32：TASK-004 静态存在性（G/I/S/D 四段，全称锚定；失败报 file:line）"
   g() { # $1=描述 $2=文件 $3=靶串（固定串）
     if grep -Hn -F -- "$3" "$ROOT/$2" >/dev/null 2>&1; then
@@ -1539,6 +1914,7 @@ s32_task004_static() {
   g "scorecard 9-10 分句存在" "audit/scorecard.md" '分类表可指到'
   g "depth-selector 已同步 19" "audit/depth-selector.md" '机制 19'
   g "README 已同步 19" "README.md" '机制 19'
+  scn_end
 }
 
 # ============================================================
@@ -1696,6 +2072,7 @@ MAPEOF
 }
 
 s33_observe_stub() {
+  scn_begin || return 0
   echo "--- 场景33：observe 命令面 + fixture 自查 + 零写 + A1 劫持 + A2 旗标位置 + A7/A10"
   local T SK SNAP0 SNAP1 OUT RC BIN
   BIN="$OBS_STUB/scripts"
@@ -1782,9 +2159,11 @@ s33_observe_stub() {
   assert_contains "status --skill-dir 报仅适用于 observe" "$R_OUT" "仅适用于 'ponygo observe'"
   run_cli "$T" audit --level S --mapping "$T/x"
   assert_eq "audit --mapping → exit 1" 1 "$R_RC"
+  scn_end
 }
 
 s34_observe_init() {
+  scn_begin || return 0
   echo "--- 场景34：observe init（dry-run/落盘/四维/占位/参数校验/版本门/A5 注释占位）"
   local T SK SKL DECL TXT SNAP0 CMT
 
@@ -1886,9 +2265,11 @@ s34_observe_init() {
   SNAP0=$(snap "$T")
   run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 observe audit --skill-dir "$SK"
   assert_same_tree "observe audit 零写（文件树快照不变）" "$T" "$SNAP0"
+  scn_end
 }
 
 s35_observe_audit() {
+  scn_begin || return 0
   echo "--- 场景35：observe audit（ob0/ob1/ob2 判据 + rc 白名单 + A3 audit-diff rc 映射 + 路由隔离）"
   local T SK SNAP0
 
@@ -1968,9 +2349,11 @@ s35_observe_audit() {
   assert_same_tree "observe audit 只读：零写（文件树快照不变）" "$T" "$SNAP0"
   run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 observe upgrade --check --skill-dir "$SK"
   assert_same_tree "observe upgrade --check 只读：零写" "$T" "$SNAP0"
+  scn_end
 }
 
 s36_observe_json() {
+  scn_begin || return 0
   echo "--- 场景36：observe --json 逐字契约（A6）+ upgrade --check 版本门 + --mapping fail-closed"
   local T SK EXP JSON1 MAP SNAP0
 
@@ -2113,10 +2496,12 @@ s36_observe_json() {
   run_cli_env "$T" HOME="$T/emptyhome" observe audit
   assert_eq "observe[A8] 空 HOME 无 skill → exit 2（缺 skill，非「未达标」）" 2 "$R_RC"
   assert_contains "observe[A8] 空 HOME 给安装提示" "$R_OUT" "安装"
+  scn_end
 }
 
 
 s37_observe_regress() {
+  scn_begin || return 0
   echo "--- 场景37：第三轮审核回归钉（F1 YAML 注入 / F2 TMPDIR 哨兵 / F3 SIGTERM 残留 / F5 --level 只属 audit / F6 顶层路由 / F7 版本净化）"
   local T SK SNAP0 BG N FIRST RC
 
@@ -2200,9 +2585,11 @@ s37_observe_regress() {
   run_cli "$T" observe status --strict
   assert_eq "observe[strict] status --strict 报错拒收" 1 "$R_RC"
   assert_contains "observe[strict] status --strict 文案提示仅适用于 audit" "$R_OUT" "仅适用于 'ponygo observe audit'"
+  scn_end
 }
 
 s38_observe_frontend_and_pipeline() {
+  scn_begin || return 0
   echo "--- 场景38：frontend 与 pipeline 新形态（init/status/audit 闭环）"
   local T SK TXT
 
@@ -2223,9 +2610,11 @@ s38_observe_frontend_and_pipeline() {
   # 3. status 与 audit --json 正确解析 declared_kind
   run_cli_stdout_env "$T" STUB_RC_CHECK_DECL=2 observe audit --skill-dir "$SK" --json
   assert_contains "audit --json declared_kind 为 pipeline" "$STD_OUT" '"declared_kind":"pipeline"'
+  scn_end
 }
 
 s39_observe_feedback_upgrades() {
+  scn_begin || return 0
   echo "--- 场景39：真实反馈4项升级（dry-run 覆盖放行/status 形态建议/收口点状态透出）"
   local T SK TXT
 
@@ -2256,9 +2645,11 @@ s39_observe_feedback_upgrades() {
   run_cli "$T" observe init --kind cli --skill-dir "$SK"
   run_cli "$T" observe status --skill-dir "$SK"
   assert_contains "status 提示收口点未配置" "$R_OUT" "收口点"
+  scn_end
 }
 
 s40_observe_audit_clarity() {
+  scn_begin || return 0
   echo "--- 场景40：audit 输出明晰度（结论行提示/待办区分/收口点推荐指引）"
   local T SK
 
@@ -2276,9 +2667,11 @@ s40_observe_audit_clarity() {
   assert_contains "audit 达成打印明确结论行 PASS" "$R_OUT" "结论: PASS"
   assert_contains "audit 打印明确已达目标级提示" "$R_OUT" "已达目标级"
   assert_contains "audit 将后续缺口标记为下一级待办" "$R_OUT" "下一级待办"
+  scn_end
 }
 
 s41_observe_smart_inheritance_and_examples() {
+  scn_begin || return 0
   echo "--- 场景41：智能继承、收口点明细与帮助示例（force 继承/status 回显/examples）"
   local T SK TXT
 
@@ -2313,9 +2706,11 @@ EOF
   run_cli "$T" observe status --skill-dir "$SK"
   assert_contains "status 回显收口点 error_boundary 规则名" "$R_OUT" "error_boundary"
   assert_contains "status 回显收口点目标路径 src/main.ts" "$R_OUT" "src/main.ts"
+  scn_end
 }
 
 s42_observe_monorepo_subcomponents() {
+  scn_begin || return 0
   echo "--- 场景42：Monorepo 多组件感知（子目录独立前端/未纳管感知）"
   local T SK
 
@@ -2345,9 +2740,11 @@ s42_observe_monorepo_subcomponents() {
   run_cli "$T" observe status --skill-dir "$SK"
   assert_not_contains "子目录已纳管后根目录不再报警" "$R_OUT" "front_end"
   assert_not_contains "子目录已纳管后不再输出 WARN" "$R_OUT" "[WARN]"
+  scn_end
 }
 
 s43_observe_pipeline_awareness() {
+  scn_begin || return 0
   echo "--- 场景43：CI/CD 流水线工程资产感知（pipeline 探测与指引）"
   local T SK
 
@@ -2365,6 +2762,7 @@ s43_observe_pipeline_awareness() {
   assert_contains "status 提示 CI/CD 流水线工程资产" "$R_OUT" "CI/CD 流水线工程资产"
   assert_contains "status 列出 workflows 数量或路径" "$R_OUT" ".github/workflows"
   assert_contains "status 给出 pipeline 治理命令建议" "$R_OUT" "kind pipeline"
+  scn_end
 }
 s28_l2_reachability
 s29_doc_level_parity
@@ -2381,6 +2779,7 @@ s39_observe_feedback_upgrades
 s40_observe_audit_clarity
 s41_observe_smart_inheritance_and_examples
 s44_observe_subcomponent_blocking() {
+  scn_begin || return 0
   echo "--- 场景44：子组件不一致的阻断语义（默认 backlog / --strict 阻断 / 结论行说实话）"
   local T SK
   T=$(new_case)
@@ -2423,6 +2822,7 @@ SH
   run_cli "$T" observe audit --level ob0 --strict --skill-dir "$SK"
   assert_eq "子组件一致 + --strict：不误阻断（exit 0）" 0 "$R_RC"
   assert_not_contains "子组件一致：无 subcomponent 缺口" "$R_OUT" "subcomponent_inconsistent"
+  scn_end
 }
 
 # 场景45（R4 可观测性审查 P0-1 红相）：ob2 的 audit-diff 超时预算。
@@ -2436,6 +2836,7 @@ SH
 #   CT-4 rc=2 真违规语义不变（enforcement_violation），不得被超时路径吞掉；
 #   CT-5 快路径（rc=0 + 载体）零回归。
 s45_observe_diff_timeout_budget() {
+  scn_begin || return 0
   echo "--- 场景45：ob2 audit-diff 超时预算（慢仓不再被 3s 杀掉 / 超时与违规可辨）"
   local T SK
 
@@ -2533,6 +2934,7 @@ s45_observe_diff_timeout_budget() {
   T=$(new_case); SK=$(stage_skill "$T"); make_audit_case "$T" 3; add_mount_carrier "$T"
   run_cli_env "$T" STUB_RC_CHECK_DECL=0 STUB_RC_AUDIT_DIFF=0 observe audit --skill-dir "$SK"
   assert_eq "observe[45] 快路径 rc=0 + 载体 → 全达 exit 0" 0 "$R_RC"
+  scn_end
 }
 
 # ============================================================
@@ -2556,6 +2958,7 @@ sentinel_noncomment() { # <hook 文件>
 }
 
 s46_init_gate_wiring() {
+  scn_begin || return 0
   echo "--- 场景46：init 在 git 仓内装配本地层（hooksPath/pre-commit/marker/执行位/A1·A2·A4）"
   local T; T=$(new_case)
   git_seed_repo "$T"
@@ -2578,9 +2981,11 @@ s46_init_gate_wiring() {
   assert_eq "非 git 目录 init 仍 exit 0（R14）" 0 "$R_RC"
   assert_eq "非 git 目录不设 core.hooksPath（R14）" "" "$(hookspath_of "$T")"
   assert_contains "非 git 目录打印 git init 指引（R14 不静默）" "$R_OUT" "git init"
+  scn_end
 }
 
 s47_adr_verify_semantics() {
+  scn_begin || return 0
   echo "--- 场景47：A1 语义（合法放行 / 1.6·1.7·1.8 违例拒绝 / 无 ADR 变更放行）+ A2 自检"
   local T; T=$(new_case)
   git_seed_repo "$T"
@@ -2691,9 +3096,11 @@ EOF
   # ⑦ A2 负样本自检 exit 0 = 「门确实会拒绝非法样本，且会放行合法样本」
   run_script "$T" .meta/gates/adr-verify.spec.sh
   assert_eq "A2 adr-verify.spec.sh 自检 exit 0" 0 "$S_RC"
+  scn_end
 }
 
 s48_adr_verify_toctou() {
+  scn_begin || return 0
   echo "--- 场景48：A1 TOCTOU（index 内非法、工作区已改回合法 → 必须非零，R6）"
   local T P; T=$(new_case); P=".agents/notes/implemented/feature/2026-01-05-toctou.md"
   git_seed_repo "$T"; run_cli "$T" init
@@ -2737,9 +3144,11 @@ EOF
   git_local "$T" add "$P" >/dev/null 2>&1
   run_script "$T" .meta/gates/adr-verify.sh
   assert_eq "A1 补齐暂存（index=合法）→ exit 0" 0 "$S_RC"
+  scn_end
 }
 
 s49_adr_verify_rename() {
+  scn_begin || return 0
   echo "--- 场景49：rename 逃逸（git mv 非法 ADR 进 notes → 非零；合法 ADR 同路径 → 放行）"
   local T V; T=$(new_case)
   git_seed_repo "$T"; run_cli "$T" init
@@ -2796,9 +3205,11 @@ EOF
     "$(git_local "$V" diff --cached --name-status --diff-filter=R)" "2026-01-07-renamed-valid.md"
   run_script "$V" .meta/gates/adr-verify.sh
   assert_eq "A1 合法 ADR rename 进 notes → exit 0" 0 "$S_RC"
+  scn_end
 }
 
 s50_preexisting_hook_preserved() {
+  scn_begin || return 0
   echo "--- 场景50：既有自定义 pre-commit 不被篡改（§6.1 零改写 + F1 块前置 shebang 之后）"
   local T orig bs es; T=$(new_case)
   git_seed_repo "$T"
@@ -2842,9 +3253,11 @@ s50_preexisting_hook_preserved() {
   run_cli_env "$T" $(sanitize_git) status
   assert_eq "追加块后 level:2 status exit 0（2.4 认块）" 0 "$R_RC"
   assert_contains "追加块后结论行 L0-L2" "$R_OUT" "L0-L2"
+  scn_end
 }
 
 s51_husky_foreign_hookspath() {
+  scn_begin || return 0
   echo "--- 场景51：husky 式外来 hooksPath（§6.1：一律不动 hooksPath，直接对目录内 pre-commit 追加）"
   local T; T=$(new_case)
   git_seed_repo "$T"
@@ -2867,9 +3280,11 @@ s51_husky_foreign_hookspath() {
   run_cli_env "$T" $(sanitize_git) status
   assert_eq "husky 接线后 status exit 0（2.4 PASS）" 0 "$R_RC"
   assert_contains "husky 接线结论行 L0-L2" "$R_OUT" "L0-L2"
+  scn_end
 }
 
 s52_init_idempotent() {
+  scn_begin || return 0
   echo "--- 场景52：已接线幂等（连续两次 init，钩子与 A1 的 md5 不变、哨兵块不重复）"
   local T h1 h2 g1 g2; T=$(new_case)
   git_seed_repo "$T"
@@ -2888,9 +3303,11 @@ s52_init_idempotent() {
   assert_eq "A1 资产 md5 不变" "$g1" "$g2"
   assert_eq "哨兵尾行只出现 1 次（防「每次追加一块」冒充幂等）" 1 \
     "$(grep -cF "$GATE_MARKER_END" "$T/.githooks/pre-commit" 2>/dev/null || printf 0)"
+  scn_end
 }
 
 s53_init_dry_run() {
+  scn_begin || return 0
   echo "--- 场景53：--dry-run 不落盘、不改 core.hooksPath（§4 矩阵）"
   local T; T=$(new_case)
   git_seed_repo "$T"
@@ -2916,9 +3333,11 @@ s53_init_dry_run() {
   run_cli "$T" init
   assert_exists "has_meta 分支真跑 init 补齐钩子（R1）" "$T/.githooks/pre-commit"
   assert_eq "has_meta 分支真跑 init 设 hooksPath（R1）" ".githooks" "$(hookspath_of "$T")"
+  scn_end
 }
 
 s54_init_non_tty_no_confirmation() {
+  scn_begin || return 0
   # wave-5 契约演进：R15（非 TTY 必须显式 --yes）随 --yes 整体删除。
   # 旧断言「非 TTY 不给 --yes → 非零 + 文案指引 --yes」与新契约互斥，故改写为正向控制：
   # 非 TTY（printf '' 关 stdin）下 init 必须一次做成，不得再问确认。
@@ -2933,9 +3352,11 @@ s54_init_non_tty_no_confirmation() {
   # 幂等正向控制：同目录二次 init 仍 exit 0（has_meta 分支）
   run_cli "$T" init
   assert_eq "同目录二次 init → exit 0（幂等）" 0 "$R_RC"
+  scn_end
 }
 
 s55_ladder_24_strong() {
+  scn_begin || return 0
   echo "--- 场景55：2.4 强判据反证（一行注释骗不过；哨兵块内调用被注释也骗不过）"
   local T G; G=$(sanitize_git); T=$(new_case)
   git_seed_repo "$T"; run_cli "$T" init
@@ -2994,9 +3415,11 @@ EOF
   run_cli_env "$T" $G status
   assert_eq "真接线 → status exit 0（正向控制）" 0 "$R_RC"
   assert_contains "真接线结论行 L0-L2" "$R_OUT" "L0-L2"
+  scn_end
 }
 
 s56_dual_write_parity() {
+  scn_begin || return 0
   echo "--- 场景56：双写一致性（init 生成的 A1/A2/A4 与仓库模板 eol 归一后逐字节一致）"
   local T a; T=$(new_case)
   git_seed_repo "$T"
@@ -3007,9 +3430,11 @@ s56_dual_write_parity() {
     assert_same_as_template "生成 $a 与仓库模板 eol 归一后一致" \
       "$T/.meta/gates/$a" "$ROOT/.meta/gates/$a"
   done
+  scn_end
 }
 
 s57_ci_conditional_generation() {
+  scn_begin || return 0
   echo "--- 场景57：CI 条件生成（§6.3：github 证据 → A5；无/他 provider → 不生成 + status 报远端层）"
   local T G; G=$(sanitize_git)
   # ① git remote 含 github → 生成 A5（薄壳），A4 可执行且自检 exit 0
@@ -3043,6 +3468,7 @@ s57_ci_conditional_generation() {
   run_cli_env "$T" $G status
   assert_contains "gitlab 项目 status 报远端层" "$R_OUT" "远端层"
   assert_contains "gitlab 项目 status 给出 ci-verify.sh 可执行指引" "$R_OUT" "ci-verify.sh"
+  scn_end
 }
 
 # ============================================================
@@ -3151,6 +3577,7 @@ run_git_commit() { # <dir> <message>：真跑 git commit（钩子会执行），
 }
 
 s58_f1_block_before_exit() {
+  scn_begin || return 0
   echo "--- 场景58：F1 哨兵块必须前置到 shebang 之后（exit 0 / exec 钩子下末尾追加=永不执行）"
   local T H bs es CANON
   T=$(new_case); git_seed_repo "$T"; run_cli "$T" init
@@ -3201,9 +3628,11 @@ s58_f1_block_before_exit() {
   stage_status_violation "$T" "2026-01-09-ok.md" >/dev/null
   run_git_commit "$T" "must be rejected"
   assert_nonzero "正向控制：F1 合规位置下非法 ADR 提交被拒（rc≠0）" "$C_RC"
+  scn_end
 }
 
 s59_f2_concurrent_atomicity() {
+  scn_begin || return 0
   echo "--- 场景59：F2 原子性（10 并行 init × 10 轮 → 哨兵尾行恒为 1）+ 半截块自愈"
   local T i r cnt maxc=0
   T=$(new_case); git_seed_repo "$T"
@@ -3254,9 +3683,11 @@ EOF
   assert_eq "半截块自愈后 bash -n rc=0（不得留下未闭合 if）" 0 "$?"
   assert_eq "半截块自愈后哨兵尾行恰好 1" 1 \
     "$(grep -cF "$GATE_MARKER_END" "$T/.githooks/pre-commit" 2>/dev/null || printf 0)"
+  scn_end
 }
 
 s60_f3_canonical_block() {
+  scn_begin || return 0
   echo "--- 场景60：F3 哨兵块逐字节等于规范块（echo / || true / if false 三变体均判未接线）"
   local T V CANON TPL
   CANON=$(make_canonical_block)
@@ -3301,9 +3732,11 @@ fi
     run_cli_env "$T" $(sanitize_git) status
     assert_eq "变体 $V：重写后 status exit 0（正向控制）" 0 "$R_RC"
   done
+  scn_end
 }
 
 s61_f4_write_failure_loud() {
+  scn_begin || return 0
   echo "--- 场景61：F4 写失败必须响亮（.githooks 不可写 → init rc≠0 + WARN + 补救）"
   local T; T=$(new_case)
   git_seed_repo "$T"
@@ -3323,9 +3756,11 @@ s61_f4_write_failure_loud() {
     assert_exists "恢复权限后钩子已生成（正向控制）" "$T/.githooks/pre-commit"
   fi
   chmod 755 "$T/.githooks" 2>/dev/null || true
+  scn_end
 }
 
 s62_f5_remedy_by_cause() {
+  scn_begin || return 0
   echo "--- 场景62：F5 补救按因分支（非 git / hooksPath 不可达 / 钩子不可执行）且不得给统一 init 文案"
   local T G; G=$(sanitize_git)
 
@@ -3364,9 +3799,11 @@ s62_f5_remedy_by_cause() {
     assert_eq "init 不替沉睡钩子 chmod（§6.1）" "no" \
       "$([ -x "$T/.githooks/pre-commit" ] && echo yes || echo no)"
   fi
+  scn_end
 }
 
 s63_f6_tilde_expansion() {
+  scn_begin || return 0
   echo "--- 场景63：F6 hooksPath 的 ~ 展开（~/hk → \$HOME/hk，level:2 status 必须 rc=0）"
   local T G; G=$(sanitize_git); T=$(new_case)
   git_seed_repo "$T"; run_cli "$T" init; set_level2 "$T"
@@ -3379,9 +3816,11 @@ s63_f6_tilde_expansion() {
   assert_eq "F6：hooksPath=~/hk 且 \$HOME/hk 已接线 → status exit 0（不得假 FAIL）" 0 "$R_RC"
   assert_contains "F6：结论行为 L0-L2（2.4 判 PASS）" "$R_OUT" "L0-L2"
   assert_missing "F6：不得在仓内造 ./~/hk 目录" "$T/~/hk"
+  scn_end
 }
 
 s64_f8_f11_dry_run_provider() {
+  scn_begin || return 0
   echo "--- 场景64：F8 dry-run 豁免非 TTY（含装配预览）+ F11 provider 收紧 + A5 timeout-minutes"
   local T G; G=$(sanitize_git)
 
@@ -3417,9 +3856,11 @@ s64_f8_f11_dry_run_provider() {
   assert_exists "F11：.github/workflows/ 存在 → 生成 A5" "$T/.github/workflows/ponygo-governance.yml"
   assert_file_has "F11：A5 含 timeout-minutes: 10（B9）" \
     "$T/.github/workflows/ponygo-governance.yml" "timeout-minutes: 10"
+  scn_end
 }
 
 s65_f9_f10_symlink_and_selfheal() {
+  scn_begin || return 0
   echo "--- 场景65：F9 符号链接 ADR 必须拒绝 + F10 资产自愈（半截 A1 → init 恢复规范内容）"
   local T; T=$(new_case)
   git_seed_repo "$T"; run_cli "$T" init
@@ -3455,6 +3896,7 @@ s65_f9_f10_symlink_and_selfheal() {
   stage_status_violation "$T" "2026-01-10-selfheal.md" >/dev/null
   run_script "$T" .meta/gates/adr-verify.sh
   assert_nonzero "F10 正向控制：自愈后的 A1 拒绝 1.7 违例" "$S_RC"
+  scn_end
 }
 
 # ============================================================
@@ -3478,6 +3920,7 @@ gate_block_lines() { # 打印规范哨兵块（与 prepend_gate_block/ponygo 生
 }
 
 s66_f1_bare_exit_position() {
+  scn_begin || return 0
   echo "--- 场景66：F1 位置判据须识别裸 exit / exit;（块落其后的 legacy 钩子=假接线）"
   local T V EXITLINE bs es G; G=$(sanitize_git)
   for V in bare semi dollar; do
@@ -3520,9 +3963,11 @@ s66_f1_bare_exit_position() {
   stage_status_violation "$T" "2026-01-11-ok.md" >/dev/null
   run_git_commit "$T" "must be rejected"
   assert_nonzero "正向控制：裸 exit 钩子下非法 ADR 被拒（rc≠0）" "$C_RC"
+  scn_end
 }
 
 s67_f2_foreign_lines_not_truncated() {
+  scn_begin || return 0
   echo "--- 场景67：未闭合哨兵块含外来行 → 不得静默截断（须 WARN + 非零）；纯半截块仍自愈"
   local T
   T=$(new_case); git_seed_repo "$T"
@@ -3562,9 +4007,11 @@ EOF
   # shellcheck disable=SC2046
   run_cli_env "$T" $(sanitize_git) status
   assert_eq "正向对照：自愈后 status exit 0（2.4 认接线）" 0 "$R_RC"
+  scn_end
 }
 
 s68_f_hookspath_escape() {
+  scn_begin || return 0
   echo "--- 场景68：hooksPath 越界（core.hooksPath=..）→ init 必须拒绝且不得在仓外落钩子"
   local T parent
   T=$(new_case); git_seed_repo "$T"; parent=$(dirname "$T")
@@ -3582,6 +4029,7 @@ s68_f_hookspath_escape() {
   run_cli "$T" init
   assert_eq "正向控制：hooksPath 未设 → init exit 0" 0 "$R_RC"
   assert_exists "正向控制：生成 .githooks/pre-commit" "$T/.githooks/pre-commit"
+  scn_end
 }
 
 # ============================================================
@@ -3592,6 +4040,7 @@ s68_f_hookspath_escape() {
 # ============================================================
 
 s69_f_trailing_sentinel_no_user_loss() {
+  scn_begin || return 0
   echo "--- 场景69：重复/尾随哨兵块不得删用户行（零字节删除 + 非零 + WARN）"
   local T
   T=$(new_case); git_seed_repo "$T"
@@ -3623,9 +4072,11 @@ s69_f_trailing_sentinel_no_user_loss() {
     "$(grep -cF "$GATE_MARKER_END" "$T/.githooks/pre-commit" 2>/dev/null || printf 0)"
   bash -n "$T/.githooks/pre-commit" 2>/dev/null
   assert_eq "④ 去重后 bash -n rc=0" 0 "$?"
+  scn_end
 }
 
 s70_f_function_body_exit_not_early_exit() {
+  scn_begin || return 0
   echo "--- 场景70：函数体内 exit 不算顶层早退（否则 2.4 假红）；顶层裸 exit 仍必须红"
   local T G; G=$(sanitize_git)
   # ① 正向：cleanup() { exit 1; } 在规范块之前 —— 函数体内 exit 不是顶层早退，块照常执行
@@ -3644,6 +4095,7 @@ s70_f_function_body_exit_not_early_exit() {
   run_cli_env "$T" $G status
   assert_eq "② 顶层裸 exit 之后的块 → status exit 1" 1 "$R_RC"
   assert_contains "② 报 2.4" "$R_OUT" "2.4"
+  scn_end
 }
 
 # ============================================================
@@ -3665,6 +4117,7 @@ adapt_summary_lines() { # <输出文本> → 行数
 }
 
 s71_yes_flag_rejected() {
+  scn_begin || return 0
   echo "--- 场景71：--yes 已彻底移除（传入即未知选项报错；无旗标即可执行）"
   local T SK
   # ① 负相：init --yes 必须被拒（不得静默接受半途落盘）
@@ -3691,9 +4144,11 @@ s71_yes_flag_rejected() {
   run_cli "$T" observe init --kind frontend --dims tracing --skill-dir "$SK"
   assert_eq "③.3 observe init（去掉 --yes）→ rc=0（正向对照）" 0 "$R_RC"
   assert_exists "③.4 observe init 声明已落盘（正向对照）" "$T/docs/observability.yaml"
+  scn_end
 }
 
 s72_adaptation_book() {
+  scn_begin || return 0
   echo "--- 场景72：检出替代治理形态 → 适配任务书（不阻断 init；登记 decision 后 WARN 消失）"
   local T BOOK md1 md2 n
   T=$(new_case); git_seed_repo "$T"
@@ -3744,9 +4199,11 @@ s72_adaptation_book() {
   assert_eq "⑧.1 二次 init exit 0" 0 "$R_RC"
   md2=$(md5_of "$BOOK")
   assert_eq "⑧.2 二次 init 后任务书 md5 不变（幂等）" "$md1" "$md2"
+  scn_end
 }
 
 s73_docs_tier_hint_silent() {
+  scn_begin || return 0
   # 该提示挂在 2.5 判据（L2 才评估），故 fixture 必须 level: 2，否则测的是「根本没走到」。
   echo "--- 场景73：docs-tier: off「建议录一条 decision」假提示（已登记 → 静默）"
   local T DEC
@@ -3772,9 +4229,11 @@ s73_docs_tier_hint_silent() {
   assert_contains "⑥ 删除 decision 后 status 提示重现（反向对照）" "$R_OUT" "建议录一条 decision"
   run_cli "$T" audit
   assert_contains "⑦ 删除 decision 后 audit 提示重现（反向对照）" "$R_OUT" "建议录一条 decision"
+  scn_end
 }
 
 s74_retire_no_confirmation() {
+  scn_begin || return 0
   echo "--- 场景74：retire 非 TTY 无交互确认（rc=0 且 level 真的变）"
   local T lv
   T=$(new_case); run_cli "$T" init
@@ -3798,9 +4257,11 @@ s74_retire_no_confirmation() {
   assert_eq "⑤ 非法目标仍 rc=1（校验未被放宽）" 1 "$R_RC"
   lv=$(grep -m1 '^level' "$T/.meta/meta.yaml" 2>/dev/null)
   assert_eq "⑥ 非法目标后 level 未被改写" "level: 1" "$lv"
+  scn_end
 }
 
 s75_alternatives_110_reject() {
+  scn_begin || return 0
   echo "--- 场景75：判据 1.10——缺 ## Alternatives considered 必拒（带参 + 整树）且补齐即放行"
   local T F
   T=$(new_case); run_cli "$T" init
@@ -3830,9 +4291,11 @@ s75_alternatives_110_reject() {
   assert_no_fail_of "⑥ 补齐后不再报 1.10" "$S_OUT" "1.10"
   run_script "$T" .agents/skills/write-adr/verify-note.sh
   assert_eq "⑦ 补齐后整树同样 exit 0" 0 "$S_RC"
+  scn_end
 }
 
 s76_alternatives_exemptions() {
+  scn_begin || return 0
   echo "--- 场景76：1.10 豁免面（archived/ 冻结、README/AGENTS 非决策记录、深层合规文件整树 rc=0）"
   local T F
   # ① archived/ 冻结豁免：与反例逐字节同构的内容放进 archived/ → 仍通过
@@ -3874,9 +4337,11 @@ s76_alternatives_exemptions() {
   run_script "$T" .agents/skills/write-adr/verify-note.sh
   assert_nonzero "⑩ 深层不合规样本 → 整树非零（扫描未漏判）" "$S_RC"
   assert_contains "⑪ 且点名 1.10" "$S_OUT" "1.10"
+  scn_end
 }
 
 s77_gate_chain_alternatives() {
+  scn_begin || return 0
   echo "--- 场景77：门禁链路联动（A1 非零含 1.10 / pre-commit 拒提交 / 补齐后放行）"
   local T F
   T=$(new_case); git_seed_repo "$T"; run_cli "$T" init
@@ -3900,6 +4365,7 @@ s77_gate_chain_alternatives() {
   assert_eq "⑤ 补齐备选节并重新暂存 → adr-verify.sh exit 0" 0 "$S_RC"
   run_git_commit "$T" "legal adr"
   assert_eq "⑥ 补齐后同一 ADR 提交成功（正向控制）" 0 "$C_RC"
+  scn_end
 }
 
 # ============================================================
@@ -3915,11 +4381,13 @@ s77_gate_chain_alternatives() {
 #       无 ##CASE 行 = 子进程异常退出 = 判红（防「跑挂即跳过」）。
 # ============================================================
 s78_wave13_acceptance() {
+  scn_begin || return 0
   echo "--- 场景78：Wave13 验收套件（归档封印 A6/A7 · coverage · drift · README · 环境行）"
-  local dir f out rc p n base
+  local dir f out rc base
   dir="$ROOT/tests/acceptance/wave13"
   if [ ! -d "$dir" ]; then
     bad "场景78 验收目录缺失（$dir）"
+    scn_end
     return 0
   fi
   for f in "$dir"/f[0-9]*.sh; do
@@ -3928,19 +4396,22 @@ s78_wave13_acceptance() {
     out=$(bash "$f" 2>&1); rc=$?
     # 失败行 + 汇总行回显（绿行不回显，避免 300+ 行噪音）
     printf '%s\n' "$out" | grep -E '^(FAIL |##CASE )' || true
-    p=$(printf '%s\n' "$out" | sed -n 's/^##CASE .* pass=\([0-9][0-9]*\) fail=\([0-9][0-9]*\)$/\1/p' | tail -n1)
-    n=$(printf '%s\n' "$out" | sed -n 's/^##CASE .* pass=\([0-9][0-9]*\) fail=\([0-9][0-9]*\)$/\2/p' | tail -n1)
-    if [ -z "${p:-}" ] || [ -z "${n:-}" ]; then
-      bad "场景78 $base 未产出 ##CASE 汇总行（子进程异常退出 rc=$rc）"
-      continue
-    fi
-    PASS=$((PASS + p)); FAIL=$((FAIL + n))
-    if [ "$rc" -ne 0 ] || [ "$n" -ne 0 ]; then
-      printf '  RED  %s（rc=%s pass=%s fail=%s）\n' "$base" "$rc" "$p" "$n"
+    # 嵌套计数：唯一解析函数（契约 §1.3），不再并入叶子 PASS/FAIL（A4/A5）
+    parse_suite_counts "场景78 $base" "$out" "$rc"
+    NESTED_PASS=$((NESTED_PASS + PC_PASS))
+    NESTED_FAIL=$((NESTED_FAIL + PC_FAIL))
+    if [ "$rc" -ne 0 ]; then
+      # A12a：rc≠0 必计失败——旧实现此处只 printf RED 不递增 FAIL（pre-existing false-green）
+      NESTED_FAIL=$((NESTED_FAIL + 1))
+      printf '  RED  %s（rc=%s pass=%s fail=%s）\n' "$base" "$rc" "$PC_PASS" "$PC_FAIL"
+    elif [ "$PC_FAIL" -ne 0 ]; then
+      printf '  RED  %s（rc=%s pass=%s fail=%s）\n' "$base" "$rc" "$PC_PASS" "$PC_FAIL"
     else
-      printf '  ok   %s（pass=%s）\n' "$base" "$p"
+      # 同理不用 `  ok   ` 前缀：嵌套计数不入叶子 pass（A4），避免按 ok 行计数的消费者多算
+      printf '  nest %s（pass=%s）\n' "$base" "$PC_PASS"
     fi
   done
+  scn_end
 }
 
 # ============================================================
@@ -3972,6 +4443,7 @@ audit_hit_n() {
 }
 
 s79_wave1_contract_c1_c2_c3_c6() {
+  scn_begin || return 0
   echo "--- 场景79：Wave-1 契约 C1/C2/C3/C6（rejected 理由 · implemented ## Decision · 1.9b fail-closed · audit 问④ 封印）"
   local T F G H_base H_noarch H_unsealed H_sealed
 
@@ -4262,6 +4734,7 @@ EOF
   run_script "$T" .meta/gates/adr-verify.sh "$F"
   assert_eq "R3③ 同一夹具补理由 → adr-verify exit 0（拒绝不是一刀切）" 0 "$S_RC"
   assert_not_contains "R3④ 放行后不再报「缺一行理由」" "$S_OUT" "缺一行理由"
+  scn_end
 }
 
 # ============================================================
@@ -4286,6 +4759,7 @@ EOF
 # 且要求「改坏 → 修好 → 再查零漂移 → 再跑零变更」的完整闭环（只跑一次无法证明幂等）。
 # ============================================================
 s80_wave2_contract_d1_d2_d4() {
+  scn_begin || return 0
   echo "--- 场景80：Wave-2 契约 D1/D2/D4（中文标点不充理由 · 围栏标题不计入 · upgrade apply）"
   local T F
 
@@ -4441,15 +4915,18 @@ EOF
   run_cli "$T" upgrade
   assert_eq "D4⑮ upgrade（无参）行为不变 → exit 0（只报告）" 0 "$R_RC"
   assert_contains "D4⑯ 且仍报零漂移" "$R_OUT" "零漂移"
+  scn_end
 }
 
 # carrier-audit 冻结验收：独立进程隔离，解析真实断言计数；缺汇总行同样判红。
 s81_carrier_audit_acceptance() {
+  scn_begin || return 0
   echo "--- 场景81：carrier-audit 验收（空 notes · 四态 · hook · JSON · worktree · revisions）"
-  local dir f out rc p n base
+  local dir f out rc base
   dir="$ROOT/tests/acceptance/carrier-audit"
   if [ ! -d "$dir" ]; then
     bad "场景81 验收目录缺失（$dir）"
+    scn_end
     return 0
   fi
   for f in "$dir"/f[0-9]*.sh; do
@@ -4457,19 +4934,22 @@ s81_carrier_audit_acceptance() {
     base=$(basename "$f")
     out=$(bash "$f" 2>&1); rc=$?
     printf '%s\n' "$out" | grep -E '^(FAIL |##CASE )' || true
-    p=$(printf '%s\n' "$out" | sed -n 's/^##CASE .* pass=\([0-9][0-9]*\) fail=\([0-9][0-9]*\)$/\1/p' | tail -n1)
-    n=$(printf '%s\n' "$out" | sed -n 's/^##CASE .* fail=\([0-9][0-9]*\)$/\1/p' | tail -n1)
-    if [ -z "${p:-}" ] || [ -z "${n:-}" ]; then
-      bad "场景81 $base 未产出 ##CASE 汇总行（子进程异常退出 rc=$rc）"
-      continue
-    fi
-    PASS=$((PASS + p)); FAIL=$((FAIL + n))
-    if [ "$rc" -ne 0 ] || [ "$n" -ne 0 ]; then
-      printf '  RED  %s（rc=%s pass=%s fail=%s）\n' "$base" "$rc" "$p" "$n"
+    # 嵌套计数：与 s78 共用唯一解析函数（旧实现各抄一份两条 sed，口径易漂移）
+    parse_suite_counts "场景81 $base" "$out" "$rc"
+    NESTED_PASS=$((NESTED_PASS + PC_PASS))
+    NESTED_FAIL=$((NESTED_FAIL + PC_FAIL))
+    if [ "$rc" -ne 0 ]; then
+      # A12a：rc≠0 必计失败（旧实现同款假绿：只 printf RED 不记账）
+      NESTED_FAIL=$((NESTED_FAIL + 1))
+      printf '  RED  %s（rc=%s pass=%s fail=%s）\n' "$base" "$rc" "$PC_PASS" "$PC_FAIL"
+    elif [ "$PC_FAIL" -ne 0 ]; then
+      printf '  RED  %s（rc=%s pass=%s fail=%s）\n' "$base" "$rc" "$PC_PASS" "$PC_FAIL"
     else
-      printf '  ok   %s（pass=%s）\n' "$base" "$p"
+      # 同理不用 `  ok   ` 前缀：嵌套计数不入叶子 pass（A4），避免按 ok 行计数的消费者多算
+      printf '  nest %s（pass=%s）\n' "$base" "$PC_PASS"
     fi
   done
+  scn_end
 }
 
 s42_observe_monorepo_subcomponents
@@ -4612,6 +5092,7 @@ lib_sh_split() { # <case-dir> <args...>
 # ---- 场景82：A5 安装闭环 ----
 
 s82_skill_library_install_closure() {
+  scn_begin || return 0
   echo "--- 场景82：A5 模板库安装闭环（list → install → check → 二次 install 拒绝 → 不计问③ 3.2）"
   local T G n line base_hits lib_sha inst_sha marker_sha tree_before
   T=$(new_case); run_cli "$T" init
@@ -4710,10 +5191,12 @@ s82_skill_library_install_closure() {
   assert_out_has "A5⑤对照 加一篇实例自有技能 → 实例自有 1" \
     "$R_OUT" "技能：基线 3/3 齐；库 1 安装；实例自有 1" "技能："
   assert_eq "A5⑤对照 加一篇实例自有技能 → 命总数 +1、总项数不变" "$(bump_n "$base_hits")" "$(audit_hit_nm "$R_OUT")"
+  scn_end
 }
 
 # ---- 场景83：A6 modified 且永不覆盖 ----
 s83_skill_library_modified_detected() {
+  scn_begin || return 0
   echo "--- 场景83：A6 手工改已装技能 → check 报 modified 且文件未被覆盖"
   local T line inst_sha
   T=$(new_case); run_cli "$T" init
@@ -4748,10 +5231,12 @@ s83_skill_library_modified_detected() {
     printf '       实得 check 输出（TAB→|）：\n' >&2
     printf '%s\n' "$L_OUT" | sed -n '1,10p' | tr '\t' '|' | sed 's/^/         /' >&2
   fi
+  scn_end
 }
 
 # ---- 场景84：A7 可选资产缺口（status exit 0）----
 s84_skill_library_optional_gap_status() {
+  scn_begin || return 0
   echo "--- 场景84：A7 删库内一 SKILL.md → status 报可选资产缺口但 exit 0"
   local T
   T=$(new_case); run_cli "$T" init
@@ -4769,10 +5254,12 @@ s84_skill_library_optional_gap_status() {
   run_cli "$T" status
   assert_rc_ev "A7⑥ 补齐后 status exit 0" 0 "$R_RC" "$R_OUT"
   assert_out_lacks "A7⑦ 补齐后可选缺口行消失" "$R_OUT" "骨架可选资产缺口" "可选资产|缺口"
+  scn_end
 }
 
 # ---- 场景85：A8 基线缺件 → audit 非零 + repair 恢复 ----
 s85_skill_baseline_missing_audit_repair() {
+  scn_begin || return 0
   echo "--- 场景85：A8 删基线 change-review/SKILL.md → audit 非零 + skill_baseline_missing → repair 恢复"
   local T G
   T=$(new_case); run_cli "$T" init
@@ -4805,10 +5292,12 @@ s85_skill_baseline_missing_audit_repair() {
   assert_eq "A8⑧ 裸目录（无 .meta/）未声明治理根，audit 保持既有退出码 0" 0 "$R_RC"
   assert_out_has "A8⑨ 裸目录 audit 报基线缺失提示" \
     "$R_OUT" "基线缺失" "基线"
+  scn_end
 }
 
 # ---- 场景86：A9 形状审计（3.3 / 3.4 计分面 + skill_shape_incomplete）----
 s86_skill_shape_incomplete() {
+  scn_begin || return 0
   echo "--- 场景86：A9 缺「## 校准样例」/ 坏 frontmatter → skill_shape_incomplete + 非零；补齐转绿"
   local T G base_hits
   T=$(new_case); run_cli "$T" init
@@ -4849,10 +5338,12 @@ s86_skill_shape_incomplete() {
   assert_out_lacks "A9⑧ 补齐后无 skill_shape_incomplete" "$R_OUT" "skill_shape_incomplete" "skill_"
   assert_eq "A9⑨ 补齐后命总数 = 空实例基线 +1（3.2 计分；3.3/3.4 恢复，总项数不变）" \
     "$(bump_n "$base_hits")" "$(audit_hit_nm "$R_OUT")"
+  scn_end
 }
 
 # ---- 场景87：A10 能力缺口建议（advisory，不改退出码）----
 s87_skill_advisory_catalog() {
+  scn_begin || return 0
   echo "--- 场景87：A10 catalog×证据达阈值 → 打印 advisory 与安装命令，且 exit 码不受影响"
   local T G base_out
   T=$(new_case); run_cli "$T" init
@@ -4887,6 +5378,7 @@ s87_skill_advisory_catalog() {
   assert_rc_ev "A10⑥ 证据消失后 audit 仍 exit 0" 0 "$R_RC" "$R_OUT"
   assert_out_has "A10⑦ 已装且证据消失 → 「退场候选：pg-find-simplifications」" \
     "$R_OUT" "退场候选：pg-find-simplifications" "退场候选"
+  scn_end
 }
 
 s82_skill_library_install_closure
@@ -4897,15 +5389,16 @@ s86_skill_shape_incomplete
 s87_skill_advisory_catalog
 
 # ---- 场景88：2.6 canonical 投影新鲜度（独立验收）----
+# 折叠接线（契约 §1.2）：必须先把子套件输出缓冲到变量（原先裸跑 → 解析无从工作），
+# 再交给唯一解析函数记账；rc 与解析 fail 双判据（A12a），旧的「整卷记 1 条 ok」作废。
 s88_projection_freshness() {
+  scn_begin || return 0
   echo "--- 场景88：2.6 canonical 投影新鲜度（独立验收套件）"
-  ( cd "$ROOT" && bash tests/acceptance/projection-freshness/run.sh )
-  local rc=$?
-  if [ "$rc" -eq 0 ]; then
-    ok "s88 投影新鲜度独立验收全绿（21 场景）"
-  else
-    bad "s88 投影新鲜度独立验收失败（exit $rc）"
-  fi
+  local out rc
+  out=$( cd "$ROOT" && bash tests/acceptance/projection-freshness/run.sh 2>&1 ); rc=$?
+  parse_suite_counts "s88_projection_freshness" "$out" "$rc"
+  fold_account "s88_projection_freshness" "$out" "$rc"
+  scn_end
 }
 s88_projection_freshness
 
@@ -4913,43 +5406,37 @@ s88_projection_freshness
 # 与 s78/s88 同款接线：子进程自带隔离 mktemp 仓，本场景只做编排与汇总。
 # 红相定位靠 run-all.sh 的 ##CASE / FAIL 行（原样回显），不把「子进程 exit 0」当全部通过。
 s89_auditfix_acceptance() {
+  scn_begin || return 0
   echo "--- 场景89：auditfix 独立验收套件（run-all.sh）"
   local out rc
   out=$( cd "$ROOT" && bash tests/acceptance/auditfix/run-all.sh 2>&1 ); rc=$?
-  if [ "$rc" -eq 0 ] && ! printf '%s\n' "$out" | grep -qE '^##SUMMARY .*failed=[1-9]'; then
-    ok "s89 auditfix 独立验收全绿"
-  else
-    bad "s89 auditfix 独立验收失败（exit $rc）"
-    printf '%s\n' "$out" | grep -E '^(FAIL |##CASE |##SUMMARY |  RED )' | tail -n 25 || true
-  fi
+  parse_suite_counts "s89_auditfix_acceptance" "$out" "$rc"
+  fold_account "s89_auditfix_acceptance" "$out" "$rc"
+  scn_end
 }
 s89_auditfix_acceptance
 
 # ---- 场景90：gate-hardening 验收套件（门禁收紧：spec 真跑/CI 聚合/配对/发布卫生）----
 s90_gate_hardening_acceptance() {
+  scn_begin || return 0
   echo "--- 场景90：gate-hardening 独立验收套件（run-all.sh）"
   local out rc
   out=$( cd "$ROOT" && bash tests/acceptance/gate-hardening/run-all.sh 2>&1 ); rc=$?
-  if [ "$rc" -eq 0 ] && ! printf '%s\n' "$out" | grep -qE '^##SUMMARY .*failed=[1-9]'; then
-    ok "s90 gate-hardening 独立验收全绿"
-  else
-    bad "s90 gate-hardening 独立验收失败（exit $rc）"
-    printf '%s\n' "$out" | grep -E '^(FAIL |##CASE |##EXIT |##SUMMARY |  RED )' | tail -n 25 || true
-  fi
+  parse_suite_counts "s90_gate_hardening_acceptance" "$out" "$rc"
+  fold_account "s90_gate_hardening_acceptance" "$out" "$rc"
+  scn_end
 }
 s90_gate_hardening_acceptance
 
 # ---- 场景91：deferred 验收套件（audit/status --json 契约 · 2.6 AI 常载 · observe probe）----
 s91_deferred_acceptance() {
+  scn_begin || return 0
   echo "--- 场景91：deferred 独立验收套件（run-all.sh）"
   local out rc
   out=$( cd "$ROOT" && bash tests/acceptance/deferred/run-all.sh 2>&1 ); rc=$?
-  if [ "$rc" -eq 0 ] && ! printf '%s\n' "$out" | grep -qE '^##SUMMARY .*failed=[1-9]'; then
-    ok "s91 deferred 独立验收全绿"
-  else
-    bad "s91 deferred 独立验收失败（exit $rc）"
-    printf '%s\n' "$out" | grep -E '^(FAIL |##CASE |##SUMMARY |  RED )' | tail -n 25 || true
-  fi
+  parse_suite_counts "s91_deferred_acceptance" "$out" "$rc"
+  fold_account "s91_deferred_acceptance" "$out" "$rc"
+  scn_end
 }
 s91_deferred_acceptance
 
@@ -4958,15 +5445,13 @@ s91_deferred_acceptance
 # 本场景只做编排与汇总；红相定位靠原样回显的 FAIL 行，不把「子进程 exit 0」当全部通过。
 # 编号说明：契约书写的 s90 已被 s90 gate-hardening 占用，故本批场景用 s92（不重号、不重排既有场景）。
 s92_p0_fixes_acceptance() {
+  scn_begin || return 0
   echo "--- 场景92：P0 修复批独立验收套件（verify-p0.sh）"
   local out rc
   out=$( cd "$ROOT" && bash tests/acceptance/p0-fixes/verify-p0.sh 2>&1 ); rc=$?
-  if [ "$rc" -eq 0 ] && ! printf '%s\n' "$out" | grep -qE '^PASS=[0-9]+ FAIL=[1-9]'; then
-    ok "s92 P0 修复批验收全绿（$(printf '%s\n' "$out" | sed -n 's/^PASS=\([0-9]*\) FAIL=\([0-9]*\)$/PASS=\1 FAIL=\2/p' | tail -n1)）"
-  else
-    bad "s92 P0 修复批验收失败（exit $rc）"
-    printf '%s\n' "$out" | grep -E '^(  FAIL |== )' | tail -n 25 || true
-  fi
+  parse_suite_counts "s92_p0_fixes_acceptance" "$out" "$rc"
+  fold_account "s92_p0_fixes_acceptance" "$out" "$rc"
+  scn_end
 }
 s92_p0_fixes_acceptance
 
@@ -4974,15 +5459,13 @@ s92_p0_fixes_acceptance
 # 与 s78/s88~s92 同款接线：子进程自带 mktemp 沙箱，本场景只做编排与汇总；
 # 红相定位靠原样回显的 FAIL 行，不把「子进程 exit 0」当全部通过（零断言不得记 ok）。
 s93_negspace_acceptance() {
+  scn_begin || return 0
   echo "--- 场景93：negspace 独立验收套件（run-all.sh）"
   local out rc
   out=$( cd "$ROOT" && bash tests/acceptance/negspace/run-all.sh 2>&1 ); rc=$?
-  if [ "$rc" -eq 0 ] && ! printf '%s\n' "$out" | grep -qE '^##SUMMARY .*failed=[1-9]'; then
-    ok "s93 negspace 独立验收全绿"
-  else
-    bad "s93 negspace 独立验收失败（exit $rc）"
-    printf '%s\n' "$out" | grep -E '^(FAIL |##CASE |##SUMMARY |  RED )' | tail -n 25 || true
-  fi
+  parse_suite_counts "s93_negspace_acceptance" "$out" "$rc"
+  fold_account "s93_negspace_acceptance" "$out" "$rc"
+  scn_end
 }
 s93_negspace_acceptance
 
@@ -4991,19 +5474,24 @@ s93_negspace_acceptance
 # 与 s92/s93 同款接线：子进程自带 mktemp 沙箱，本场景只做编排与汇总；
 # 红相定位靠原样回显的 FAIL 行，不把「子进程 exit 0」当全部通过（零断言不得记 ok）。
 s94_p1_fixes_acceptance() {
+  scn_begin || return 0
   echo "--- 场景94：P1 修复批独立验收套件（verify-p1.sh）"
   local out rc
   out=$( cd "$ROOT" && bash tests/acceptance/p1-fixes/verify-p1.sh 2>&1 ); rc=$?
-  if [ "$rc" -eq 0 ] && ! printf '%s\n' "$out" | grep -qE '^PASS=[0-9]+ FAIL=[1-9]'; then
-    ok "s94 P1 修复批验收全绿（$(printf '%s\n' "$out" | sed -n 's/^PASS=\([0-9]*\) FAIL=\([0-9]*\)$/PASS=\1 FAIL=\2/p' | tail -n1)）"
-  else
-    bad "s94 P1 修复批验收失败（exit $rc）"
-    printf '%s\n' "$out" | grep -E '^(  FAIL |== )' | tail -n 25 || true
-  fi
+  parse_suite_counts "s94_p1_fixes_acceptance" "$out" "$rc"
+  fold_account "s94_p1_fixes_acceptance" "$out" "$rc"
+  scn_end
 }
 s94_p1_fixes_acceptance
 
 echo ""
-echo "==== 测试结果：pass=$PASS fail=$FAIL ===="
-[ "$FAIL" -eq 0 ] || exit 1
+# ---- 汇总（唯一样本，契约 A1/A2/A3）----
+# checks 是「叶子 + 嵌套 + 折叠」三类断言之和的恒等式（A8）；回退条已被计入折叠 fail，
+# 故不得再另设独立自增累加器（那样等式必然漂移，也就无法证明三类都真的记了账）。
+CHECKS=$(( (PASS + FAIL) + (NESTED_PASS + NESTED_FAIL) + (FOLDED_PASS + FOLDED_FAIL) ))
+echo "==== 测试结果：scenarios=$SCN_RUN pass=$PASS fail=$FAIL checks=$CHECKS skipped=$SKIPPED ===="
+# 退出码（A12/A13）：三类 fail 任一非零 → 1；配置类错误在脚本顶部已 exit 2
+if [ "$FAIL" -ne 0 ] || [ "$NESTED_FAIL" -ne 0 ] || [ "$FOLDED_FAIL" -ne 0 ]; then
+  exit 1
+fi
 exit 0

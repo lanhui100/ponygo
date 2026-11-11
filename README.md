@@ -279,8 +279,8 @@ ponygo 的双根"变成可逐项勾掉的清单，而不是一句"先 audit 再�
 | `README.md` | 门面 + 使用总纲：命令面、路径、阶梯、边界 | 所有人；第一入口 |
 | `ponygo` | 单文件 CLI（shell、零依赖），六条核心命令 + `observe` 维度 | 使用者；执行入口 |
 | `install.sh` | 安装 / 升级入口（把 `ponygo` 放到 `$PATH`，并校验随包资产） | 使用者；分发 |
-| `tests/run.sh` | CLI 自测（纯 bash、零依赖）——当前共 **94 场景**（N 由脚本自身枚举派生：`grep -cE '^s[0-9]+_[a-z0-9_]+$' tests/run.sh`，不手抄子计数），`bash tests/run.sh` 全绿为准 | 维护者；回归门禁 |
-| `.github/workflows/ci.yml` | 回归门禁挂载：ubuntu + windows Git Bash 双平台跑 tests/run.sh + 聚合门 | 维护者；分支保护依赖 |
+| `tests/run.sh` | CLI 自测（纯 bash、零依赖）——当前共 **94 场景**（N 由脚本自身枚举派生：`grep -cE '^s[0-9]+_[a-z0-9_]+$' tests/run.sh`，不手抄子计数）；汇总行 `scenarios= / pass= / fail= / checks= / skipped=`：`pass` 只数叶子断言，`checks` = 叶子 + 嵌套（s78/s81）+ 折叠（s88–s94）三类之和；`bash tests/run.sh` 全绿为准。分层 `PONYGO_TEST_LAYER=core` 只跑 27 个平台/门禁核心场景，可选看门狗 `PONYGO_SCN_TIMEOUT=<秒>`（默认关） | 维护者；回归门禁 |
+| `.github/workflows/ci.yml` | 回归门禁挂载：`selftest-linux`（全量）+ `windows-core`（PR，Git Bash，core 层）+ `windows-full`（nightly/手动，全量）+ `governance`；聚合门 `all-checks-passed` 是分支保护唯一依赖（required 三元组须全 success，skipped 不算通过；nightly 下 windows-full 缺失即判失败） | 维护者；分支保护依赖 |
 | `.github/workflows/release.yml` | 发布校验和链：tag-push 触发，生成并发布 ponygo.sha256（裸哈希 + CRLF 断言 + 最小权限） | 维护者；发布动作 |
 | `.githooks/` | 本地层门禁落点（A3）：`ponygo init` 把 ADR 门哨兵块挂到 `pre-commit`，`core.hooksPath` 指向此处 | 使用者；提交时强制 |
 | `docs/` | 文档树：`docs/AGENTS.md`（文档标准）/ `docs/architecture.md`（架构地图）/ `docs/methodology.md`（原理层）/ `docs/dev-team/`（工程过程记录） | 想懂"为什么"与"过程"的人 |

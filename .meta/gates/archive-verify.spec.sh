@@ -6,7 +6,8 @@
 #   - 自包含：以**自身所在目录**为基准寻址 A6（同目录 archive-verify.sh），
 #     不依赖调用者 cwd，也不从 PATH 找同名脚本；
 #   - 只读仓库：样本一律建在 `mktemp -d` 临时目录，退出时清理；不改被检仓库任何文件；
-#   - 秒级：自包裹 `timeout 30`（有 timeout 时）；不调用自身（无递归）；
+#   - 秒级：自包裹上限 = `PONYGO_GATE_SPEC_TIMEOUT`（由 ponygo 派生下传，未设默认 30s），
+#     KILL 兜底 `-k 5`；无 timeout 或 ponygo 报告守卫不可用（`PONYGO_SPEC_NO_GUARD=1`）时不加包裹；不调用自身（无递归）；
 #   - exit 0 = 自检通过（门确实会拒绝五类非法样本，且会放行合法样本）；只允许 0/1。
 #
 # 五类负样本（每类都必须被 A6 拒绝，且配有正向对照，防「一律拒绝」的门混过）：
@@ -30,10 +31,22 @@ GATE_DIR=$(cd "$(dirname "$0")" && pwd) || {
 }
 GATE="$GATE_DIR/archive-verify.sh"
 
-# 秒级上限：自包裹 timeout 30，避免挂死拖死体检（用 PONYGO_SPEC_SELFRUN 防自我重入）
-if [ "${PONYGO_SPEC_SELFRUN:-0}" != "1" ] && command -v timeout >/dev/null 2>&1; then
+# 自包裹上限：PONYGO_GATE_SPEC_TIMEOUT（由 ponygo 派生下传，未设默认 30s）；KILL 兜底恒 5s。
+# spec 内**不做平台判定**（平台真值只留在 ponygo 一处），只读 env + 校验格式。
+GT=${PONYGO_GATE_SPEC_TIMEOUT:-30}
+case "$GT" in
+  *[!0-9]*|0*)
+    printf '[%s] FAIL 非法 PONYGO_GATE_SPEC_TIMEOUT=%s（须为 1..86400 的正整数秒）\n' "$SPEC" "$GT" >&2
+    exit 2 ;;
+esac
+# 值域上界（1..86400）：超长整数会让 GNU timeout 接受并视为「不设上限」，而预算行照打 = 假护栏。
+if [ "${#GT}" -gt 5 ] || { [ "${#GT}" -eq 5 ] && [ "$GT" -gt 86400 ]; }; then
+  printf '[%s] FAIL 非法 PONYGO_GATE_SPEC_TIMEOUT=%s（须为 1..86400 的正整数秒）\n' "$SPEC" "$GT" >&2
+  exit 2
+fi
+if [ "${PONYGO_SPEC_SELFRUN:-0}" != "1" ] && [ "${PONYGO_SPEC_NO_GUARD:-0}" != "1" ] && command -v timeout >/dev/null 2>&1; then
   export PONYGO_SPEC_SELFRUN=1
-  exec timeout 30 bash "$0" "$@"
+  exec timeout -k 5 "$GT" bash "$0" "$@"
 fi
 
 [ -f "$GATE" ] || {

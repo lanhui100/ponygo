@@ -25,11 +25,11 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 改 CI 触发），塞进 `UPGRADE_UNIVERSE` 会让实例永久 drift 红。`scratch-hygiene.sh` 也不进宇宙表——它是
 **本仓实例门**，不由 `init` 播种（见下节）。
 
-### 实例卫生门 scratch-hygiene.sh（init 不播种，CI 单点接线 `ci.yml:47`）
+### 实例卫生门 scratch-hygiene.sh（init 不播种，CI 单点接线见 `ci.yml` 的 governance 步）
 
 常载命约 7「临时产物统一下沉」的机械看守，只拦三类可判违例（`.scratch/` 被 Git 跟踪 / 根 `.gitignore` 缺
 `.scratch/` 声明 / 发布安装链引用 `.scratch`）；「平铺在源码旁」是 review 项，门不覆盖。接线 = **CI 单点**：
-`.github/workflows/ci.yml:47` 的 `governance` job 跑 `bash .meta/gates/scratch-hygiene.sh && bash .meta/gates/scratch-hygiene.spec.sh`；
+`ci.yml` 的 `governance` job 跑 `bash .meta/gates/scratch-hygiene.sh && bash .meta/gates/scratch-hygiene.spec.sh`；
 本地 pre-commit 不跑它，秒级预算留给 A1。
 
 ### 承诺 → 非零退出命令
@@ -271,7 +271,12 @@ bash .meta/gates/<name>.spec.sh   # CI / pre-push 层的等价写法
 
 - **自包含**：从自身路径解析仓库根（`ROOT=$(cd "$(dirname "$0")/../.." && pwd)`），不依赖调用者 cwd；
 - **只读仓库**：样本一律建在 `mktemp -d` 临时目录、退出时清理；不得改动仓库文件；
-- **秒级**：有 `timeout` 时施加 **软 90s + KILL 兜底 5s**（最坏 95s；无视 TERM 的挂死 spec 会被强杀，不会拖死体检）；
+- **秒级**：有 `timeout` 时施加**分档软超时 + KILL 兜底 5s**（KILL 窗口恒 5s，不随预算/平台变）：
+  **平台真值只在 `ponygo` 一处**（`PONYGO_SPEC_TIMEOUT` 优先，未设时 Windows 180 / 其他 90；值域 1..86400），
+  并在结论区打印 `spec 预算=<N>s（来源：…）`；同一派生值经 `PONYGO_GATE_SPEC_TIMEOUT` **下传**给
+  spec 的自包裹上限（`GT=${PONYGO_GATE_SPEC_TIMEOUT:-30}`，**spec 内零平台判定**；非法/越界（1..86400）→ `exit 2`）；
+  调用侧判定护栏不可用时置 `PONYGO_SPEC_NO_GUARD=1`，spec 也不自包裹（端到端如实降级，不假红）；
+  无视 TERM 的挂死 spec 会被强杀，不会拖死体检；
 - **exit 0 = 自检通过**（"门确实会拒绝非法样本"）；非零 → 报 FAIL 并回显该 spec 输出尾部；
 - **防递归**：嵌套由调起方判定——`ponygo audit` 在 `PONYGO_AUDIT_SPEC_DEPTH ≥ 1` 时拒绝再跑 spec
   （该层不执行任何 spec，按 `SKIPPED` 处理并 **exit 3**）；第一层 spec **必须真跑**。

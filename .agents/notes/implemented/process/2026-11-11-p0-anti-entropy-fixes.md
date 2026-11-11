@@ -24,6 +24,8 @@ Status: implemented
 
 验收收据：`bash tests/acceptance/p0-fixes/verify-p0.sh` PASS=16 FAIL=0；`bash tests/run.sh` pass=1816 fail=0；本仓 `status`/`audit`/`upgrade --check` 均 exit 0。
 
+> 收据为当时原文，勿作现状引用：`pass=` 口径已于 2026-11-11 收敛为「仅叶子断言」，当前输出 `scenarios=94 pass=1054 fail=0 checks=2811 skipped=0`（见 `../testing/2026-11-11-test-tiering-and-ci-convergence.md`）。
+
 ## Alternatives considered
 
 - **只做资产 SHA manifest、不改判据**（方案 A）：否决——它只解决"框架门被替换"，解决不了"零实例门即得 L2"与"空壳 spec 恒绿"；且 manifest 需要新写一套比对与存在性语义，成本高于把漂移并入既有 2.1 判定。

@@ -36,6 +36,13 @@ assert_not_matches() { # <描述> <整体> <ERE>
 for f in "$RUN_SH" "$CI_YML" "$CLI_SRC" "$AT2"; do
   assert_file "GH6 契约被测文件存在：${f#"$ROOT"/}" "$f"
 done
+
+# 与 CLI 同源的平台判定（C3/C14：Windows 档 180s，其余 90s）；避免把 Linux 期望值写死到 Windows CI。
+is_windows_platform() {
+  case "${OSTYPE:-}" in msys* | cygwin* | MSYS* | CYGWIN*) return 0 ;; esac
+  case "$(uname -s 2>/dev/null)" in MINGW* | MSYS* | CYGWIN* | mingw* | msys* | cygwin*) return 0 ;; esac
+  return 1
+}
 if ! command -v python3 >/dev/null 2>&1; then
   bad "GH6 需要 python3 做结构化解析（缺失即失败，不跳过契约断言）"
   finish
@@ -124,28 +131,6 @@ try:
         ok("GH6/A6 skipped 计数变量落地（场景级层过滤专用）")
     else:
         fail("GH6/A6 skipped 计数变量落地", "0 处赋值")
-
-    # ---------- B2：SKIP 行**逐字**格式（Lead rev3 裁决，契约 L06 修订） ----------
-    # 目标行：`  SKIP s78 wave13_acceptance（layer=core）`
-    #   = 两空格前缀 + `sNN` + 一个半角空格 + 函数名余部（去掉 sNN_ 前缀）+ 全角括号 + layer
-    # 老形态 `  SKIP s78_wave13_acceptance（layer=core）`（sNN_ 与名连写）必须判负。
-    skip_lines = [l for l in lines if "SKIP" in l and "（layer=core）" in l]
-    new_fmt = re.compile(r'  SKIP (?:s%s|%s) %s（layer=core）')
-    old_fmt = re.compile(r'  SKIP s?%(?:s|d)（layer=core）')
-    if not skip_lines:
-        fail("GH6/B2 SKIP 行逐字格式 `  SKIP sNN <函数名余部>（layer=core）`", "无 SKIP 输出语句")
-    elif any(new_fmt.search(l) for l in skip_lines):
-        ok("GH6/B2 SKIP 行逐字格式 `  SKIP sNN <函数名余部>（layer=core）`"
-           "（两空格前缀 + sNN 与名之间一个半角空格 + 全角括号）")
-    else:
-        fail("GH6/B2 SKIP 行逐字格式 `  SKIP sNN <函数名余部>（layer=core）`",
-             "；".join(l.strip()[:80] for l in skip_lines[:2]))
-    stale = [l for l in skip_lines if old_fmt.search(l)]
-    if stale:
-        fail("GH6/B2 老形态 `  SKIP sNN_name（layer=core）`（连写）必须判负",
-             "；".join(l.strip()[:80] for l in stale[:2]))
-    else:
-        ok("GH6/B2 老形态 `  SKIP sNN_name（layer=core）`（连写）不得再被打印")
 
     # ---------- B3/B8：统一守卫函数（函数体内引用 PONYGO_TEST_LAYER）+ 94 处调用 ----------
     # 函数体抽取必须做花括号配平：`ok()  { PASS=$((PASS+1)); }` 这类单行函数若按「下一个 ^} 收尾」
@@ -384,6 +369,53 @@ try:
     else:
         fail("GH6/A10 不可解析子套件回退计数带 `UNPARSED` 标注", "全树无 UNPARSED")
 
+    # ---------- 契约 A17（rev4）：场景看门狗预算 env + SCN_CUR 陈旧二次校验 ----------
+    scn_env = [l for l in lines if "PONYGO_SCN_TIMEOUT" in l and not l.strip().startswith("#")]
+    if scn_env:
+        ok("GH6/A17 tests/run.sh 读取 PONYGO_SCN_TIMEOUT（场景看门狗预算 env）")
+    else:
+        fail("GH6/A17 tests/run.sh 读取 PONYGO_SCN_TIMEOUT（场景看门狗预算 env）", "0 处引用")
+    if re.search(r'非法 PONYGO_SCN_TIMEOUT', text):
+        ok("GH6/A17 非法 PONYGO_SCN_TIMEOUT 走配置类错误通道（exit 2，与 A14 同源）")
+    else:
+        fail("GH6/A17 非法 PONYGO_SCN_TIMEOUT 走配置类错误通道（exit 2，与 A14 同源）",
+             "无「非法 PONYGO_SCN_TIMEOUT」报错文本")
+    scn_cur = [l for l in lines if "SCN_CUR" in l and not l.strip().startswith("#")]
+    if len(scn_cur) >= 2 and any(re.search(r'SCN_CUR\}?"?[^\n]*?(?:!=|=|-ne|-eq|\+)', l) for l in scn_cur):
+        ok("GH6/A17 SCN_CUR 陈旧看门狗二次校验存在（进度未推进 → 判失败）")
+    else:
+        fail("GH6/A17 SCN_CUR 陈旧看门狗二次校验存在（进度未推进 → 判失败）",
+             "SCN_CUR 代码引用 %d 处" % len(scn_cur))
+
+    # ---------- A16（L3-A ADVISORY）：折叠绿相行不得复用叶子前缀 `  ok   ` ----------
+    # 叶子前缀与折叠前缀都从源码 printf 形态解析（不硬编码），再把折叠前缀交给运行时段落锚定行数。
+    leaf_prefix = None
+    for l in lines:
+        m = re.search(r"printf '([^']*)'", l)
+        if m and m.group(1).startswith("  ok ") and "PASS" in l:
+            leaf_prefix = m.group(1).split('%')[0]
+            break
+    fold_prefix = None
+    for l in lines:
+        if "PC_PASS" in l and "PC_SRC" in l and "printf" in l:
+            m = re.search(r"printf '([^']*)'", l)
+            if m:
+                fold_prefix = m.group(1).split('%')[0]
+    if leaf_prefix is None:
+        fail("GH6/A16 叶子 ok() 前缀可从源码解析（用于比对折叠前缀）", "未找到 ok() 的 printf")
+    if fold_prefix is None:
+        fail("GH6/A16 折叠绿相行有独立前缀（须可解析，不得复用叶子前缀）", "未找到折叠绿相 printf")
+    else:
+        out.append("#FOLD-PREFIX|" + fold_prefix + "|")
+        if fold_prefix.lstrip().startswith("ok"):
+            fail("GH6/A16 折叠绿相行不得复用叶子前缀 `  ok   `", "折叠前缀为 [%s]" % fold_prefix)
+        else:
+            ok("GH6/A16 折叠绿相行前缀独立于叶子前缀（[%s] vs [%s]）" % (fold_prefix, leaf_prefix or "?"))
+        if fold_prefix.startswith("  ") and fold_prefix.strip():
+            ok("GH6/A16 折叠前缀保留两空格缩进且可用 grep 锚定（[%s]）" % fold_prefix)
+        else:
+            fail("GH6/A16 折叠前缀保留两空格缩进且可用 grep 锚定", "实得 [%s]" % fold_prefix)
+
     # ---------- Lead rev3：进度行机制 scn_begin / scn_end（head/tail 双守卫，禁 RETURN trap） ----------
     bdef = body_of("scn_begin")
     edef = body_of("scn_end")
@@ -458,6 +490,7 @@ while IFS= read -r line; do
   case "$line" in
     'CHECK OK '*) ok "${line#CHECK OK }" ;;
     'CHECK FAIL '*) bad "${line#CHECK FAIL }" ;;
+    '#FOLD-PREFIX|'*) FOLD_PREFIX="${line:13}"; FOLD_PREFIX="${FOLD_PREFIX%|}" ;;
     '#PARSE-END') : ;;
     '') : ;;
     *) printf '  [gh6-parse] %s\n' "$line" ;;
@@ -488,6 +521,24 @@ assert_contains "GH6/B1 非法层值在 stderr 指出变量名 PONYGO_TEST_LAYER
 assert_matches "GH6/B1 stderr 列出合法值域 full|core" "$LERR_TXT" 'full.*core|core.*full'
 assert_not_matches "GH6/B1 非法层值不得执行任何场景（stdout 无汇总行）" "$LOUT_TXT" '^==== 测试结果：'
 assert_not_matches "GH6/B1 非法层值不得执行任何场景（stdout 无叶子 ok 行）" "$LOUT_TXT" '^  ok   '
+
+# ============================================================
+# 契约 A17③（rev4）：非法 PONYGO_SCN_TIMEOUT 必须 exit 2，且不得执行任何场景
+# ============================================================
+SCNOUT=$(mktemp "$SBASE/gh6-scn-out.XXXXXX")
+SCNERR=$(mktemp "$SBASE/gh6-scn-err.XXXXXX")
+if command -v timeout >/dev/null 2>&1; then
+  ( cd "$ROOT" && PONYGO_SCN_TIMEOUT=abc timeout "$LAYER_GUARD_SECS" bash tests/run.sh >"$SCNOUT" 2>"$SCNERR" )
+else
+  ( cd "$ROOT" && PONYGO_SCN_TIMEOUT=abc bash tests/run.sh >"$SCNOUT" 2>"$SCNERR" )
+fi
+SCNRC=$?
+SCNOUT_TXT=$(cat "$SCNOUT" 2>/dev/null)
+SCNERR_TXT=$(cat "$SCNERR" 2>/dev/null)
+assert_rc_is "GH6/A17 非法 PONYGO_SCN_TIMEOUT=abc 必须 exit 2（配置类错误，不得执行场景）" 2 "$SCNRC"
+assert_contains "GH6/A17 非法值在 stderr 指出变量名 PONYGO_SCN_TIMEOUT" "$SCNERR_TXT" "PONYGO_SCN_TIMEOUT"
+assert_not_matches "GH6/A17 非法值不得执行任何场景（stdout 无汇总行）" "$SCNOUT_TXT" '^==== 测试结果：'
+assert_not_matches "GH6/A17 非法值不得执行任何场景（stdout 无叶子 ok 行）" "$SCNOUT_TXT" '^  ok   '
 
 # ============================================================
 # 契约 A12 动态小实验（Lead rev2 裁决）：
@@ -567,8 +618,209 @@ if [ "$PROBE_BUILD" -eq 0 ]; then
   assert_nonzero "GH6/A12 动态实验：子套件 rc=1 而解析出 fail=0 → 汇总必须非零退出（rc 不得假绿）" "$PRC"
   assert_matches "GH6/A12 动态实验：探针 core 层计数由集合推导（scenarios=2 skipped=92，非硬编码 27）" \
     "$POUT_TXT" '^==== 测试结果：scenarios=2 pass=[0-9]+ fail=[0-9]+ checks=[0-9]+ skipped=92 ====$'
+  # ---------- 契约 A18（rev4）：SKIP 行必须在**真实运行**上钉死 ----------
+  # 只查 run.sh 里的 printf 形态是可以被绕过的（把 s78_wave13_acceptance 整体塞进第一个 %s 也能绿），
+  # 故这里消费派生复制件 PONYGO_TEST_LAYER=core 的**真实 stdout**。
+  SKIP_TXT=$(printf '%s\n' "$POUT_TXT" | grep '^  SKIP ' || :)
+  SKIP_N=$(printf '%s\n' "$SKIP_TXT" | grep -c '^  SKIP ' || :)
+  SKIP_BAD_N=$(printf '%s\n' "$SKIP_TXT" | grep -Evc '^  SKIP s[0-9][0-9] [a-z0-9_]+（layer=core）$' || :)
+  SKIP_SUM=$(printf '%s\n' "$POUT_TXT" | sed -n 's/^==== 测试结果：scenarios=[0-9]* pass=[0-9]* fail=[0-9]* checks=[0-9]* skipped=\([0-9][0-9]*\) ====$/\1/p' | head -n1)
+  if [ "${SKIP_N:-0}" -gt 0 ] && [ "${SKIP_BAD_N:-1}" -eq 0 ]; then
+    ok "GH6/A18 真实运行 SKIP 行逐行匹配 /^  SKIP s[0-9][0-9] [a-z0-9_]+（layer=core）$/（共 ${SKIP_N} 行）"
+  else
+    bad "GH6/A18 真实运行 SKIP 行逐行匹配 /^  SKIP s[0-9][0-9] [a-z0-9_]+（layer=core）$/（不合规 ${SKIP_BAD_N:-?} 行 / 共 ${SKIP_N:-0} 行）"
+    printf '%s\n' "$SKIP_TXT" | grep -Ev '^  SKIP s[0-9][0-9] [a-z0-9_]+（layer=core）$' | head -3
+  fi
+  assert_eq "GH6/A18 真实运行 SKIP 行数 == 汇总 skipped（派生副本 core 层应为 92）" "${SKIP_SUM:-?}" "${SKIP_N:-0}"
+
+  # ---------- 契约 A17④（rev4）：未设 PONYGO_SCN_TIMEOUT 时零行为差异（同一副本对照）----------
+  POUT2=$(mktemp "$SBASE/gh6-probe-out2.XXXXXX")
+  PERR2=$(mktemp "$SBASE/gh6-probe-err2.XXXXXX")
+  if command -v timeout >/dev/null 2>&1; then
+    ( cd "$PROBE_ROOT" && PONYGO_TEST_LAYER=core PONYGO_SCN_TIMEOUT=999 timeout "$PROBE_GUARD_SECS" bash tests/run.sh >"$POUT2" 2>"$PERR2" )
+  else
+    ( cd "$PROBE_ROOT" && PONYGO_TEST_LAYER=core PONYGO_SCN_TIMEOUT=999 bash tests/run.sh >"$POUT2" 2>"$PERR2" )
+  fi
+  PRC2=$?
+  SUM_A=$(printf '%s\n' "$POUT_TXT" | grep '^==== 测试结果：' | head -n1)
+  SUM_B=$(sed -n '/^==== 测试结果：/p' "$POUT2" 2>/dev/null | head -n1)
+  if [ "$PRC" -eq "$PRC2" ] && [ -n "$SUM_A" ] && [ "$SUM_A" = "$SUM_B" ]; then
+    ok "GH6/A17 未设 PONYGO_SCN_TIMEOUT 与显式合法值等价（同一派生副本：汇总行逐字相同、退出码相同）"
+  else
+    bad "GH6/A17 未设 PONYGO_SCN_TIMEOUT 与显式合法值等价（rc ${PRC}/${PRC2}；汇总 [${SUM_A}] vs [${SUM_B}]）"
+  fi
+
+  # ---------- 契约 C14（rev6）：PONYGO_SCN_TIMEOUT 越界 exit 2；上界 86400 必须可跑 ----------
+  # 两者都在**派生副本**上跑，core 层只含 2 个合成场景：控时且避免 s90→gh6 递归。
+  BIGO=$(mktemp "$SBASE/gh6-scnbig-out.XXXXXX")
+  BIGE=$(mktemp "$SBASE/gh6-scnbig-err.XXXXXX")
+  if command -v timeout >/dev/null 2>&1; then
+    ( cd "$PROBE_ROOT" && PONYGO_SCN_TIMEOUT=99999999999999999999 timeout "$PROBE_GUARD_SECS" bash tests/run.sh >"$BIGO" 2>"$BIGE" )
+  else
+    ( cd "$PROBE_ROOT" && PONYGO_SCN_TIMEOUT=99999999999999999999 bash tests/run.sh >"$BIGO" 2>"$BIGE" )
+  fi
+  BIGRC=$?
+  assert_rc_is "GH6/C14 越界 PONYGO_SCN_TIMEOUT（20 位）必须 exit 2（值域 1..86400）" 2 "$BIGRC"
+  assert_not_matches "GH6/C14 越界 PONYGO_SCN_TIMEOUT 不得执行场景（stdout 无汇总行）" \
+    "$(cat "$BIGO" 2>/dev/null)" '^==== 测试结果：'
+  # 上界可跑：把两个合成子套件换成「fail=0 + exit 0」，86400 必须放行（正对照）
+  cat > "$PROBE_ROOT/tests/acceptance/wave13/f1_liar.sh" <<'OKSTUB'
+#!/usr/bin/env bash
+# 合成嵌套子套件（正对照）：fail=0 且 exit 0
+printf '##CASE f1_ok.sh pass=3 fail=0\n'
+exit 0
+OKSTUB
+  cat > "$PROBE_ROOT/tests/acceptance/gate-hardening/run-all.sh" <<'OKSTUB2'
+#!/usr/bin/env bash
+# 合成折叠子套件（正对照）：fail=0 且 exit 0
+printf '##CASE stub_case.sh pass=3 fail=0\n'
+printf '##SUMMARY gate-hardening cases=1 failed=0\n'
+exit 0
+OKSTUB2
+  CAPO=$(mktemp "$SBASE/gh6-scncap-out.XXXXXX")
+  CAPE=$(mktemp "$SBASE/gh6-scncap-err.XXXXXX")
+  if command -v timeout >/dev/null 2>&1; then
+    ( cd "$PROBE_ROOT" && PONYGO_SCN_TIMEOUT=86400 PONYGO_TEST_LAYER=core timeout "$PROBE_GUARD_SECS" bash tests/run.sh >"$CAPO" 2>"$CAPE" )
+  else
+    ( cd "$PROBE_ROOT" && PONYGO_SCN_TIMEOUT=86400 PONYGO_TEST_LAYER=core bash tests/run.sh >"$CAPO" 2>"$CAPE" )
+  fi
+  CAPRC=$?
+  assert_rc_is "GH6/C14 上界 PONYGO_SCN_TIMEOUT=86400 必须可跑（派生副本 core 层 → exit 0）" 0 "$CAPRC"
+  assert_matches "GH6/C14 上界运行确实执行场景（汇总行 scenarios=2）" \
+    "$(cat "$CAPO" 2>/dev/null)" '^==== 测试结果：scenarios=2 '
+
 else
   bad "GH6/A12 动态实验：无法构造探针（tests/run.sh 缺成对的 CORE/NONCORE 数据块或场景名不符 → 契约 B6 未实现，构造 rc=$PROBE_BUILD）"
+fi
+
+# ============================================================
+# 契约 A16（L3-A ADVISORY）：折叠绿相行**不得**复用叶子前缀 `  ok   `；
+#   pass= 只来自叶子，折叠绿相行必须走独立前缀（逐字前缀由源码 fold 打印行推导，不硬编码）。
+# ------------------------------------------------------------
+# 做法：沙箱派生复制件（core 只含 7 个折叠场景）+ 7 个子套件正对照存根。
+# 于是：汇总 pass= 必为 0、`^  ok   ` 行必为 0，而折叠前缀行必为 7。
+gh6_derive_copy() { # <dst_root> <core-scenario> [<core-scenario> ...]
+  local dst="$1"
+  shift
+  mkdir -p "$dst/tests/acceptance"
+  for f in ponygo README.md; do
+    ln -sfn "$ROOT/$f" "$dst/$f" 2>/dev/null || true
+  done
+  python3 - "$RUN_SH" "$dst/tests/run.sh" "$@" <<'PYDERIVE'
+import re
+import sys
+
+src, dst, core = sys.argv[1], sys.argv[2], sys.argv[3:]
+lines = open(src, encoding="utf-8").read().splitlines(keepends=True)
+
+
+def span(tag):
+    s = [i for i, l in enumerate(lines) if l.strip() == "# >>> ponygo-test-layer: %s >>>" % tag]
+    e = [i for i, l in enumerate(lines) if l.strip() == "# <<< ponygo-test-layer: %s <<<" % tag]
+    if not s or not e or e[0] < s[0]:
+        return None
+    return s[0], e[0]
+
+
+c, n = span("CORE-SET"), span("NONCORE-SET")
+if not c or not n:
+    raise SystemExit(3)  # 契约 B6 未实现
+names = [l.strip() for l in lines if re.fullmatch(r's[0-9]+_[a-z0-9_]+', l.strip())]
+if any(x not in names for x in core):
+    raise SystemExit(4)
+rest = [x for x in names if x not in core]
+# 只改两个分层数据块的块内行；其余行逐字节保持 → 探针跑的是真实聚合/记账逻辑。
+for tag, sp, items in sorted((("CORE", c, core), ("NONCORE", n, rest)), key=lambda t: -t[1][0]):
+    s, e = sp
+    lines[s + 1:e] = ["%s %s\n" % (tag, x) for x in items]
+open(dst, "w", encoding="utf-8").write("".join(lines))
+raise SystemExit(0)
+PYDERIVE
+}
+
+gh6_stub_suite() { # <path>：合成折叠子套件（正对照 fail=0 / exit 0）
+  mkdir -p "$(dirname "$1")"
+  cat > "$1" <<'FOLDSTUB'
+#!/usr/bin/env bash
+# 合成折叠子套件（正对照）：汇总自称 fail=0，进程也 exit 0
+printf '##CASE stub_case.sh pass=3 fail=0\n'
+exit 0
+FOLDSTUB
+}
+
+FOLD_ROOT=$(mktemp -d "$SBASE/gh6-fold.XXXXXX")
+FOLD_CORE="s88_projection_freshness s89_auditfix_acceptance s90_gate_hardening_acceptance s91_deferred_acceptance s92_p0_fixes_acceptance s93_negspace_acceptance s94_p1_fixes_acceptance"
+FOLD_BUILD=1
+# shellcheck disable=SC2086
+gh6_derive_copy "$FOLD_ROOT" $FOLD_CORE
+FOLD_BUILD=$?
+if [ "$FOLD_BUILD" -eq 0 ]; then
+  gh6_stub_suite "$FOLD_ROOT/tests/acceptance/projection-freshness/run.sh"
+  gh6_stub_suite "$FOLD_ROOT/tests/acceptance/auditfix/run-all.sh"
+  gh6_stub_suite "$FOLD_ROOT/tests/acceptance/gate-hardening/run-all.sh"
+  gh6_stub_suite "$FOLD_ROOT/tests/acceptance/deferred/run-all.sh"
+  gh6_stub_suite "$FOLD_ROOT/tests/acceptance/p0-fixes/verify-p0.sh"
+  gh6_stub_suite "$FOLD_ROOT/tests/acceptance/negspace/run-all.sh"
+  gh6_stub_suite "$FOLD_ROOT/tests/acceptance/p1-fixes/verify-p1.sh"
+  FOUTF=$(mktemp "$SBASE/gh6-fold-out.XXXXXX")
+  FERRF=$(mktemp "$SBASE/gh6-fold-err.XXXXXX")
+  if command -v timeout >/dev/null 2>&1; then
+    ( cd "$FOLD_ROOT" && PONYGO_TEST_LAYER=core timeout "$PROBE_GUARD_SECS" bash tests/run.sh >"$FOUTF" 2>"$FERRF" )
+  else
+    ( cd "$FOLD_ROOT" && PONYGO_TEST_LAYER=core bash tests/run.sh >"$FOUTF" 2>"$FERRF" )
+  fi
+  FOLDRC=$?
+  FOLD_TXT=$(cat "$FOUTF" 2>/dev/null)
+  FOLD_SUM=$(printf '%s\n' "$FOLD_TXT" | grep '^==== 测试结果：' | head -n1)
+  FOLD_PASS_N=$(printf '%s\n' "$FOLD_SUM" | sed -n 's/.* pass=\([0-9][0-9]*\) .*/\1/p')
+  LEAF_OK_N=$(printf '%s\n' "$FOLD_TXT" | grep -c '^  ok   ' || :)
+  if [ -n "${FOLD_PREFIX:-}" ]; then
+    FOLD_LINE_N=$(printf '%s\n' "$FOLD_TXT" | awk -v p="$FOLD_PREFIX" 'index($0, p) == 1 { n++ } END { print n + 0 }')
+  else
+    FOLD_LINE_N="no-prefix"
+  fi
+  assert_rc_is "GH6/A16 折叠正对照（core 只含 7 个折叠场景）必须 exit 0" 0 "$FOLDRC"
+  assert_eq "GH6/A16 折叠绿相行不得复用叶子前缀（grep -c '^  ok   ' == 汇总 pass=）" \
+    "${FOLD_PASS_N:-?}" "${LEAF_OK_N:-?}"
+  assert_eq "GH6/A16 折叠绿相行使用独立前缀且 7 个折叠场景各一行" 7 "${FOLD_LINE_N:-?}"
+else
+  bad "GH6/A16 无法构造折叠派生存根（tests/run.sh 缺 CORE/NONCORE 数据块或折叠场景名不符，构造 rc=$FOLD_BUILD）"
+fi
+
+# ============================================================
+# 契约 A17（L3-A ADVISORY）：看门狗不得占住 stdout、不得留孤儿
+# ------------------------------------------------------------
+# 沙箱派生复制件 core 只留 1 个场景 + PONYGO_SCN_TIMEOUT=10：
+#   - 若 watcher 持有调用方管道，`| tail -1` 会被拖到 ~10s（断言 ≤5s）；
+#   - 若 watcher 的 sleep 孙进程未被回收，事后 ps 仍有 `sleep 10` 残留（断言零残留）。
+ORPH_ROOT=$(mktemp -d "$SBASE/gh6-orphan.XXXXXX")
+ORPH_BUILD=1
+gh6_derive_copy "$ORPH_ROOT" s78_wave13_acceptance
+ORPH_BUILD=$?
+if [ "$ORPH_BUILD" -eq 0 ]; then
+  mkdir -p "$ORPH_ROOT/tests/acceptance/wave13"
+  cat > "$ORPH_ROOT/tests/acceptance/wave13/f1_ok.sh" <<'ORPHSTUB'
+#!/usr/bin/env bash
+# 合成嵌套子套件（正对照）：fail=0 且 exit 0
+printf '##CASE f1_ok.sh pass=3 fail=0\n'
+exit 0
+ORPHSTUB
+  ORPH_BEFORE=$(ps -ef 2>/dev/null | grep -c '[s]leep 10' || :)
+  T0=$(date +%s)
+  ORPH_LAST=$( ( cd "$ORPH_ROOT" && PONYGO_TEST_LAYER=core PONYGO_SCN_TIMEOUT=10 bash tests/run.sh 2>/dev/null ) | tail -1 )
+  ORPH_ELAPSED=$(( $(date +%s) - T0 ))
+  if [ "$ORPH_ELAPSED" -le 5 ]; then
+    ok "GH6/A17 看门狗不占 stdout（管道 tail 用时 ${ORPH_ELAPSED}s ≤ 5s，SCN_TIMEOUT=10 未拖住）"
+  else
+    bad "GH6/A17 看门狗不占 stdout（管道 tail 用时 ${ORPH_ELAPSED}s > 5s，疑似被当轮看门狗拖住）"
+  fi
+  assert_matches "GH6/A17 管道末行仍是汇总行（进度/看门狗均未污染 stdout 尾部）" \
+    "$ORPH_LAST" '^==== 测试结果：'
+  ORPH_AFTER=$(ps -ef 2>/dev/null | grep -c '[s]leep 10' || :)
+  assert_eq "GH6/A17 看门狗不留孤儿进程（事后 ps 的 sleep 10 计数不增加）" \
+    "${ORPH_BEFORE:-0}" "${ORPH_AFTER:-0}"
+else
+  bad "GH6/A17 无法构造看门狗派生存根（tests/run.sh 缺 CORE/NONCORE 数据块，构造 rc=$ORPH_BUILD）"
 fi
 
 # ============================================================
@@ -629,6 +881,7 @@ try:
     # ---------- C11（rev3）：timeout 护栏必须经**语义探针**启用，仅存在性判定判 FAIL ----------
     guard_idx = [i for i, l in enumerate(lines) if "command -v timeout" in l]
     probe_re = re.compile(r'timeout\s+[0-9]+\s+bash\s+-c')
+    near = []
     if not guard_idx:
         fail("GH6/C11 存在 `command -v timeout` 判定点（可挂语义探针）", "0 处")
     else:
@@ -639,6 +892,31 @@ try:
         else:
             fail("GH6/C11 `command -v timeout` 之后必须有语义探针才启用护栏（仅存在性判定不算）",
                  "%d 处判定点均无探针" % len(guard_idx))
+    # 探针失败必须留可机械断言的固定原因行（E2 口径），不得静默降级。
+    warn_fix = "ponygo: WARN spec 守卫不可用：timeout 语义探针失败"
+    if warn_fix in text:
+        ok("GH6/C11 探针失败打固定 WARN 原因行（`ponygo: WARN spec 守卫不可用：timeout 语义探针失败（rc=<rc>）`）")
+        if re.search(r'timeout 语义探针失败[^\n]*rc=', text):
+            ok("GH6/C11 原因行含探针真实 rc（可定位失败原因）")
+        else:
+            fail("GH6/C11 原因行含探针真实 rc（可定位失败原因）", "无 rc= 片段")
+    else:
+        fail("GH6/C11 探针失败打固定 WARN 原因行（`ponygo: WARN spec 守卫不可用：timeout 语义探针失败（rc=<rc>）`）",
+             "未找到固定形态")
+    # 位置：探针必须在 `command -v timeout` 之后、预算解析（PONYGO_SPEC_TIMEOUT）之前。
+    budget_ln = [i for i, l in enumerate(lines) if "PONYGO_SPEC_TIMEOUT" in l]
+    probe_idx = [i for i, l in enumerate(lines) if probe_re.search(l)]
+    if guard_idx and probe_idx and budget_ln:
+        g, pr = min(guard_idx), min(probe_idx)
+        later = [b for b in budget_ln if b > pr]
+        if g <= pr and later:
+            ok("GH6/C11 探针位置正确：`command -v timeout` 之后 → 预算解析（PONYGO_SPEC_TIMEOUT）之前")
+        else:
+            fail("GH6/C11 探针位置正确：`command -v timeout` 之后 → 预算解析之前",
+                 "guard=%d probe=%d 探针之后无预算行" % (g, pr))
+    else:
+        fail("GH6/C11 探针位置正确：`command -v timeout` 之后 → 预算解析之前",
+             "缺 guard/probe/budget 之一（%d/%d/%d）" % (len(guard_idx), len(probe_idx), len(budget_ln)))
 
     # ---------- C12（rev3）：结论区必须打印可 grep 的预算行 ----------
     budget_idx = [i for i, l in enumerate(lines) if "spec 预算=" in l]
@@ -698,26 +976,82 @@ assert_file_matches "GH6/C9 AT2 保留「rc=124 即护栏失效」判据" "$AT2"
 assert_file_matches "GH6/C9 AT2 保留「耗时落在外层窗口内」判据" "$AT2" 'ELAPSED'
 
 # ============================================================
-# 契约 C13（rev3）：3 个出厂 spec 自包裹改为 PONYGO_GATE_SPEC_TIMEOUT 分档
-#   （Windows 90 / 其他 30，KILL 5 恒定；repo 副本与 ponygo heredoc 逐字节一致；非法值 exit 2）
+# 契约 C14（rev6）：三个超时 env 的值域 1..86400，越界 → exit 2；空串 = 未设（不得静默 2）
+# ============================================================
+C14O=$(mktemp "$SBASE/gh6-c14-out.XXXXXX")
+C14E=$(mktemp "$SBASE/gh6-c14-err.XXXXXX")
+if command -v timeout >/dev/null 2>&1; then
+  ( cd "$ROOT" && PONYGO_SPEC_TIMEOUT=99999999999999999999 timeout "$SPEC_GUARD_SECS" bash ponygo audit --run-specs >"$C14O" 2>"$C14E" )
+else
+  ( cd "$ROOT" && PONYGO_SPEC_TIMEOUT=99999999999999999999 bash ponygo audit --run-specs >"$C14O" 2>"$C14E" )
+fi
+C14RC=$?
+C14E_TXT=$(cat "$C14E" 2>/dev/null)
+assert_rc_is "GH6/C14 越界 PONYGO_SPEC_TIMEOUT（20 位）必须 exit 2（值域 1..86400，越界不得静默回落）" 2 "$C14RC"
+assert_contains "GH6/C14 越界 PONYGO_SPEC_TIMEOUT 在 stderr 点名变量" "$C14E_TXT" "PONYGO_SPEC_TIMEOUT"
+
+# 空串 = 未设：必须走平台默认预算并 exit 0（不得因空串静默 exit 2）
+C14O2=$(mktemp "$SBASE/gh6-c14-out2.XXXXXX")
+C14E2=$(mktemp "$SBASE/gh6-c14-err2.XXXXXX")
+if command -v timeout >/dev/null 2>&1; then
+  ( cd "$ROOT" && PONYGO_SPEC_TIMEOUT= timeout "$SPEC_GUARD_SECS" bash ponygo audit --run-specs >"$C14O2" 2>"$C14E2" )
+else
+  ( cd "$ROOT" && PONYGO_SPEC_TIMEOUT= bash ponygo audit --run-specs >"$C14O2" 2>"$C14E2" )
+fi
+C14RC2=$?
+C14O2_TXT=$(cat "$C14O2" 2>/dev/null)
+if is_windows_platform; then C14_DEFAULT=180; else C14_DEFAULT=90; fi
+assert_rc_is "GH6/C14 空串 PONYGO_SPEC_TIMEOUT 视作未设 → exit 0（不得静默 exit 2）" 0 "$C14RC2"
+assert_matches "GH6/C14 空串时预算行取平台默认（Windows 180s / 其他 90s，来源标注=平台默认）" \
+  "$C14O2_TXT" "spec 预算=${C14_DEFAULT}s（来源：平台默认）"
+
+# 出厂 spec 侧：PONYGO_GATE_SPEC_TIMEOUT 越界同样 exit 2
+GSPO=$(mktemp "$SBASE/gh6-gsp-out.XXXXXX")
+GSPE=$(mktemp "$SBASE/gh6-gsp-err.XXXXXX")
+if command -v timeout >/dev/null 2>&1; then
+  ( cd "$ROOT" && PONYGO_GATE_SPEC_TIMEOUT=99999999999999999999 timeout "$SPEC_GUARD_SECS" bash .meta/gates/adr-verify.spec.sh >"$GSPO" 2>"$GSPE" )
+else
+  ( cd "$ROOT" && PONYGO_GATE_SPEC_TIMEOUT=99999999999999999999 bash .meta/gates/adr-verify.spec.sh >"$GSPO" 2>"$GSPE" )
+fi
+GSPRC=$?
+GSPE_TXT=$(cat "$GSPE" 2>/dev/null)
+assert_rc_is "GH6/C14 越界 PONYGO_GATE_SPEC_TIMEOUT（20 位）必须 exit 2（spec 自包裹同口径）" 2 "$GSPRC"
+assert_contains "GH6/C14 spec 侧越界值在 stderr 点名变量" "$GSPE_TXT" "PONYGO_GATE_SPEC_TIMEOUT"
+
+# ============================================================
+# 契约 C13（rev4 收窄闭包）：3 个出厂 spec 自包裹**只读** PONYGO_GATE_SPEC_TIMEOUT
+#   —— 平台判定只允许存在于 ponygo 一处（spec 内不得再做 OSTYPE/uname 探测）；
+#      未设默认 30s、KILL 兜底恒 5s（timeout -k 5）、非法值 exit 2；repo↔heredoc 逐字节一致。
 # ============================================================
 for spec in adr-verify scratch-hygiene archive-verify; do
   SPEC_F="$ROOT/.meta/gates/$spec.spec.sh"
   assert_file "GH6/C13 出厂 spec 存在：$spec.spec.sh" "$SPEC_F"
-  assert_file_matches "GH6/C13($spec) 自包裹改为 PONYGO_GATE_SPEC_TIMEOUT 分档" "$SPEC_F" 'PONYGO_GATE_SPEC_TIMEOUT'
-  assert_file_matches "GH6/C13($spec) Windows 档 90s" "$SPEC_F" '(=|\{)[[:space:]]*90([^0-9]|$)'
-  assert_file_matches "GH6/C13($spec) 非 Windows 档 30s" "$SPEC_F" '(=|\{)[[:space:]]*30([^0-9]|$)'
-  assert_file_matches "GH6/C13($spec) 平台判定与 CLI 同源（OSTYPE/uname）" "$SPEC_F" 'msys|cygwin|MINGW|MSYS|CYGWIN|uname'
+  assert_file_matches "GH6/C13($spec) 自包裹只读 PONYGO_GATE_SPEC_TIMEOUT（env 单一来源）" "$SPEC_F" 'PONYGO_GATE_SPEC_TIMEOUT'
+  assert_file_matches "GH6/C13($spec) 未设时默认 30s" "$SPEC_F" '(PONYGO_GATE_SPEC_TIMEOUT:?-?[[:space:]]*30|=30([^0-9]|$))'
   assert_file_matches "GH6/C13($spec) KILL 兜底仍为字面 5s（timeout -k 5）" "$SPEC_F" 'timeout -k 5'
+  assert_file_matches "GH6/C13($spec) 非法值报错含变量名" "$SPEC_F" '非法 PONYGO_GATE_SPEC_TIMEOUT'
+  assert_file_matches "GH6/C13($spec) 非法值 exit 2（不静默回落默认）" "$SPEC_F" 'exit 2'
+  assert_file_not_matches "GH6/C13($spec) spec 内不得再做平台判定（OSTYPE/uname 收敛到 ponygo 一处）" "$SPEC_F" 'OSTYPE|uname'
   assert_file_not_matches "GH6/C13($spec) 不得保留字面量 exec timeout 30" "$SPEC_F" 'exec timeout 30'
-  assert_file_matches "GH6/C13($spec) 非法 PONYGO_GATE_SPEC_TIMEOUT 报错（含变量名可定位）" "$SPEC_F" '非法 PONYGO_GATE_SPEC_TIMEOUT'
 done
 assert_file_matches "GH6/C13 ponygo 的 spec heredoc 副本同步分档（同 env 名）" "$CLI_SRC" 'PONYGO_GATE_SPEC_TIMEOUT'
 assert_file_not_matches "GH6/C13 ponygo heredoc 内不得残留字面量 exec timeout 30" "$CLI_SRC" 'exec timeout 30'
+assert_file_matches "GH6/C13 平台判定只在 ponygo 一处（spec 侧零平台分支）" "$CLI_SRC" 'msys|cygwin|MINGW|MSYS|CYGWIN'
+assert_file_matches "GH6/C13 ponygo 调用 spec 时下传 PONYGO_GATE_SPEC_TIMEOUT（派生一处）" "$CLI_SRC" '(^|[^A-Za-z_])PONYGO_GATE_SPEC_TIMEOUT=|export PONYGO_GATE_SPEC_TIMEOUT'
 # 逐字节一致由 CLI 宇宙表门禁承担（契约 R4：模板 ↔ 仓库文件零漂移），比逐文件抽 heredoc 更权威且更便宜。
 UC_TXT=$( cd "$ROOT" && ./ponygo upgrade --check 2>&1 )
 UC_RC=$?
 assert_rc_is "GH6/C13 repo 副本与 ponygo heredoc 逐字节一致（upgrade --check 零漂移）" 0 "$UC_RC"
+
+# ============================================================
+# 契约 C15（L3-A）：PONYGO_SPEC_NO_GUARD —— 环境不具备护栏时的显式信号
+#   ponygo 必须识别该 env（≥1 处），3 个出厂 spec 必须都引用它（standalone 时如实披露无护栏）。
+# ============================================================
+assert_file_matches "GH6/C15 ponygo 识别 PONYGO_SPEC_NO_GUARD 信号" "$CLI_SRC" 'PONYGO_SPEC_NO_GUARD'
+for spec in adr-verify scratch-hygiene archive-verify; do
+  assert_file_matches "GH6/C15($spec) 出厂 spec 引用 PONYGO_SPEC_NO_GUARD 信号" \
+    "$ROOT/.meta/gates/$spec.spec.sh" 'PONYGO_SPEC_NO_GUARD'
+done
 
 # ============================================================
 # Lead rev3：文档指针不得写死 CI 行号（拓扑一变就漂移；现为漂移状态）
