@@ -1,10 +1,10 @@
 # gates/ —— 门禁（把承诺转成非零退出命令）
 
-**框架交付资产 A1/A2/A4/A6/A7 常驻；实例自有门禁从 L2 起按需添加。**
+**框架交付资产 A1/A2/A4/A6/A7/A8/A9 常驻；实例自有门禁从 L2 起按需添加。**
 升到 L2 时放你的第一个实例门禁，并同步 meta.yaml 的 level 改为 2——框架资产不需要你手动放，
 `ponygo init` 已经落盘（见下表）。
 
-## 本仓已接线的门禁（ADR 门 + 归档封印门，A1–A7）
+## 本仓已接线的门禁（ADR 门 + 归档封印门 + 零残留门，A1–A9）
 
 「交付即接线」：`ponygo init` 幂等装配下列资产（`.meta` 已存在也装配，见 plan-freeze §6.2）；
 repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致。
@@ -14,13 +14,23 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 | A1 | `.meta/gates/adr-verify.sh` | 暂存区 ADR 格式门（无参=暂存 ADR；带参=指定路径）；A6 `check` 在**任何跳过分支之前**早期 probe（见下「A6 的时序」） | 0 放行 / 非零拒绝 |
 | A2 | `.meta/gates/adr-verify.spec.sh` | A1 的负样本执行判据（非法→拒、合法→放行、TOCTOU→拒） | 0 = 自检通过 |
 | A3 | `.githooks/pre-commit`（或既有钩子内追加块） | 本地层挂载点 | 转发 A1 的退出码 |
-| A4 | `.meta/gates/ci-verify.sh` | forge 无关全树门（verify-note 整树 + A2 + A6/A7，三段） | 0 放行 / 非零拒绝 |
+| A4 | `.meta/gates/ci-verify.sh` | forge 无关全树门（verify-note 整树 + A2 + A6/A7 + A8/A9，四段） | 0 放行 / 非零拒绝 |
 | A5 | `.github/workflows/ponygo-governance.yml` | GitHub 薄适配器（checkout + A4）；等价形态是主 `ci.yml` 内 `governance` job 直接跑 A4——只有同 workflow 的 job 才能被聚合门 `needs` 消费 | 同 A4 |
 | A6 | `.meta/gates/archive-verify.sh` | 归档 SHA-256 封印门：`check`（默认，只读）/ `seal`（追加封印，互斥 + 原子替换），零旗标 | 0 通过 / 1 拒绝 |
 | A7 | `.meta/gates/archive-verify.spec.sh` | A6 的负样本执行判据（篡改/缺条目/孤儿/重复/非追加 → 必须拒；合法样本 → 放行） | 0 = 自检通过 |
+| A8 | `.meta/gates/no-residue.sh` | 零残留门（删除/收窄后的符号检索验收）：读清单 `.meta/gates/no-residue.manifest`（每行 `<pattern><TAB><scope>`），`rg --fixed-strings` 按字面检索（无 `rg` 退化 `grep -rIlF`）；缺清单/空清单 → 放行并打印跳过 | 0 放行（无命中 / 跳过）/ 1 命中、清单格式非法、未知参数 |
+| A9 | `.meta/gates/no-residue.spec.sh` | A8 的负样本执行判据（命中→拒 / 无命中→放行 / 空清单→放行 / 未知参数→拒 / 特殊字符按字面） | 0 = 自检通过 |
 
-**宇宙表只登记 A1/A2/A4/A6/A7**（不可变资产）：A3/A5 是实例可编辑文件（有人会追加自己的钩子逻辑、
-改 CI 触发），塞进 `UPGRADE_UNIVERSE` 会让实例永久 drift 红。
+**宇宙表只登记 A1/A2/A4/A6/A7/A8/A9**（不可变资产）：A3/A5 是实例可编辑文件（有人会追加自己的钩子逻辑、
+改 CI 触发），塞进 `UPGRADE_UNIVERSE` 会让实例永久 drift 红。`scratch-hygiene.sh` 也不进宇宙表——它是
+**本仓实例门**，不由 `init` 播种（见下节）。
+
+### 实例卫生门 scratch-hygiene.sh（init 不播种，CI 单点接线 `ci.yml:47`）
+
+常载命约 7「临时产物统一下沉」的机械看守，只拦三类可判违例（`.scratch/` 被 Git 跟踪 / 根 `.gitignore` 缺
+`.scratch/` 声明 / 发布安装链引用 `.scratch`）；「平铺在源码旁」是 review 项，门不覆盖。接线 = **CI 单点**：
+`.github/workflows/ci.yml:47` 的 `governance` job 跑 `bash .meta/gates/scratch-hygiene.sh && bash .meta/gates/scratch-hygiene.spec.sh`；
+本地 pre-commit 不跑它，秒级预算留给 A1。
 
 ### 承诺 → 非零退出命令
 
@@ -34,7 +44,9 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 | 归档件冻结（改一字节即拒） | `bash .meta/gates/archive-verify.sh check`（无参等价） | A6（manifest ↔ `archived/**/*.md` 双向一致） |
 | 归档必须显式封印 | `bash .meta/gates/archive-verify.sh seal` | A6（append-only 追加；新条目要求 `Status:` 首词 ∈ {`implemented`, `archived`}） |
 | 封印门自己会拒绝非法样本 | `bash .meta/gates/archive-verify.spec.sh` | A7（篡改/缺条目/孤儿/重复/非追加） |
-| 远端层全树兜底 | `bash .meta/gates/ci-verify.sh` | A4（= `verify-note.sh` 整树 + A2 + A6/A7，三段） |
+| 删除/收窄后无残留符号 | `bash .meta/gates/no-residue.sh` | A8（清单 pattern 零命中；缺/空清单放行） |
+| 零残留门自己会拒绝非法样本 | `bash .meta/gates/no-residue.spec.sh` | A9（命中→拒 / 无命中→放行 / 空清单→放行 / 未知参数→拒） |
+| 远端层全树兜底 | `bash .meta/gates/ci-verify.sh` | A4（= `verify-note.sh` 整树 + A2 + A6/A7 + A8/A9，四段） |
 
 ### 归档时先 seal（A6 的写路径）
 
@@ -178,9 +190,31 @@ A1/A2/A4，spec 用「围栏内 Decision / 围栏内 Alternatives / 未闭合围
 
 运行时机：`bash .meta/gates/ci-verify.sh`（CI/本地全树）、`ponygo audit --run-specs`（opt-in，
 本 spec 会被**真跑**并断言 exit 0）、pre-commit 不跑它（秒级预算）。
+
 若 `audit --run-specs` 存在**未被真正执行**的 spec（0 个 / 自报 SKIPPED（含部分）/ 递归护栏拦截），
 `audit` 以 **exit 3（证据不足）** 结束，且结论行不得出现「机械判据全部 PASS」。
 无有效内容（去掉空白行与 `#` 注释行后为空）的 spec 判 **FAIL**（exit 1，优先于 3）。
+
+### A8/A9 的负样本怎么读
+
+`no-residue.sh`（A8）是**零残留门**：读清单 `.meta/gates/no-residue.manifest`（每行 `<pattern><TAB><scope>`；
+`#` 起注释、空行忽略；非空且无 TAB = 格式非法 → exit 1），用 `rg --fixed-strings --no-messages -l` 在 scope
+内按**字面**（不解释正则）检索——任一 pattern 命中 → 列出命中并 exit 1。缺清单 / 清单为空（去掉空白与注释行
+后为空）→ exit 0 并打印「跳过」：没有删除面就没有残留面，不制造一道永远空转的门。参数只认 `--help` 与一个
+可选清单路径，其余（未知 / 多余参数）→ exit 1。**运行时不承诺 `rg` 存在**（本框架只承诺 bash）：无 `rg` 时
+退化为 `grep -rIlF`（同样字面匹配）并在 stderr 声明退化，不假装有 `rg` 的精确度。它服务的承诺是常载命约 3
+「删代码前先搜消费者」的**收尾验收**：删除那次提交把被删符号写进清单，门证明"同一组检索词在生产树里零残留"。
+
+`no-residue.spec.sh`（A9）在 `mktemp -d` 临时目录造夹具仓，逐类断言：命中 → 拒（并列命中）；
+无命中 → 放行；空清单 / 缺清单 → 放行；未知参数 → 拒；pattern 含 `.` / `*` 等特殊字符 → **按字面**匹配
+（当正则解释就会误报或漏报）。与 A2/A7 同规格：**执行判据**，由 A4 第 4 段与 `ponygo audit --run-specs` 真跑。
+
+**A4 的四段**：① `verify-note.sh` 整树（1.1–1.11）→ ② A2 负样本 → ③ A6 `check` + A7 负样本 →
+④ A8 零残留 + A9 负样本。第 ④ 段在文件缺失时打印提示但不失败（尚未分发 A8/A9 的旧实例不因此恒红），
+存在即执行并按退出码判；未知参数一律 exit 1（fail-closed，不猜意图）。
+
+> 诚实标注（P6）：门只能证明"清单里登记的那些 pattern 不再命中"，证明不了"清单本身完整"——
+> 该把哪些删除面写进清单是 review/评审时的判断，不是门能替的部分。
 
 ## 门禁分层的三个时间经济层（P7，dsh 实证）
 

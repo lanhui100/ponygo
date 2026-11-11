@@ -7,7 +7,7 @@
 #   带路径   = 只校验给定文件（如 .agents/notes/proposed/architecture/xxx.md）
 #
 # 退出码：全部通过 exit 0；任一违例 exit 1（逐项打印 FAIL）。
-# 对应判据：maturity-ladder §5 的 L1 判据 1.1–1.10，
+# 对应判据：maturity-ladder §5 的 L1 判据 1.1–1.10，外加 1.11（负空间形状，见下），
 # 影子来自 DSH verify-agent-note-format / verify-agent-note-classification。
 # 1.1–1.8 与 ponygo verify_ladder 逐项对齐；1.9 只对齐 1.9a（详见下文「对齐契约」）；
 # 1.10（必含 ## Alternatives considered）于 2026-10-29 新增为硬判据，**只由本脚本判定**——
@@ -15,6 +15,10 @@
 # 「判据 1.1–1.9」（1.9b 条件未判定时收窄为 1.1–1.8）并明文声明该范围；
 # 1.10 的看守面由 A1 暂存区门与 A4 全树门承担（两者都经本脚本）。
 # 见 revisions/accepted/2026-10-29-alternatives-criterion-1-10.md。
+# 1.11（负空间形状，2026-11-11 新增）同样只由本脚本判定：`implemented/simplification/` 的简化记录
+# 必须写清「什么条件下把删掉的东西装回来」（围栏外 `## Reintroduction conditions`），
+# 且一旦写了 `## Removed surface`，就必须给出一行**检索收据**（`rg` / `grep` / `git grep`）——
+# 「删代码前先搜消费者」不能只在散文里宣称（常载命约 3）。看守面同样由 A1/A4 承担。
 #
 # 设计快照（为何是 bash、为何一个脚本）：
 # - 语言：bash 与 ponygo CLI 同源（单文件、零依赖铁律，见 notes/
@@ -41,6 +45,7 @@
 #         它们要读 meta.yaml 开关 + 扫描包目录，属实例状态而非单条 ADR 的格式。
 #         故 `A1/A4 绿 ≠ 1.9b PASS`——本地/远端门只证明 ADR 格式与归档封印，不证明 AI 常载入口完好。
 #   1.10：只在本脚本实现（CLI 不复刻，P9 一份判据一份实现）。
+#   1.11：只在本脚本实现（同上；负空间形状是**单条记录的形状**判据，不是实例状态）。
 # 若发现 1.1–1.8 行为不一致，以 maturity-ladder §5 判据真源为准并回改两者。
 # ============================================================
 set -u
@@ -219,6 +224,29 @@ check_one() { # $1 = 决策文件路径
       fi
       ;;
   esac
+  # 1.11 负空间形状（简化记录专用）：只锁 implemented/simplification/，不外溢到其它 class。
+  # 为什么是硬判据：删除是**不可逆**的治理动作。只写「删了什么」而不写「什么条件下装回来」，
+  # 下一个人面对同一需求时只能靠考古重建；只写「已全树清理」而不留检索收据，
+  # 「零残留」就是一句无法复核的宣称（常载命约 3：搜索零残留才是验收）。
+  # 豁免口径与 1.8/1.10 完全一致：archived/ 冻结豁免、README/AGENTS 入口早退、*.zh.md 双语配对不独立判。
+  # 围栏口径：`## Reintroduction conditions` 与 1.8/1.10 同样**围栏内不算在场**（fail-closed）；
+  #   检索收据行则**围栏内外都算**——命令本来就常写在代码块里，收据的载体是人写的命令行。
+  # 判据号不出现在成功横幅里（见文件末尾注释），失败时以 `FAIL  1.11 …` 前缀出现。
+  case "$b" in
+    *.zh.md) ;;
+    *)
+      case "$rel" in
+        implemented/simplification/*)
+          heading_outside_fence "$f" '## Reintroduction conditions([[:space:]]|$)' \
+            || fail "1.11 $f：implemented/simplification 缺 ## Reintroduction conditions（写清什么条件下把删掉的东西装回来，别留「以后可能用得上」）"
+          if heading_outside_fence "$f" '## Removed surface([[:space:]]|$)' \
+             && ! grep -Eq '(^|[^[:alnum:]_])(rg|grep)([^[:alnum:]_]|$)' "$f" 2>/dev/null; then
+            fail "1.11 $f：含 ## Removed surface 但缺检索收据行（须有一行 rg / grep / git grep 检索命令，证明「搜索零残留」）"
+          fi
+          ;;
+      esac
+      ;;
+  esac
   return 0
 }
 
@@ -233,7 +261,9 @@ else
 fi
 
 if [ "$FAIL" = "0" ]; then
-  echo "verify-note: 全部通过（机械影子 1.1–1.10；真实性/分类/备选质量靠 review）"
+  # 成功横幅刻意**不写**「1.11」编号串：验收契约要求正例输出不得含该串（否则「本次没报 1.11 违例」
+  # 与「横幅里出现 1.11」无法机械区分）。判据名写在括号里，失败时按 `FAIL  1.11 …` 前缀出现。
+  echo "verify-note: 全部通过（机械影子 1.1–1.10 + 负空间形状判据；真实性/分类/备选质量靠 review）"
   exit 0
 fi
 echo "verify-note: 未通过（见上方 FAIL 项；逐项修复后重跑）" >&2

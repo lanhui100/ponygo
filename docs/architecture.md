@@ -26,7 +26,8 @@ JSON 只序列化实际判定结果；未运行、证据不足与不适用不得
 ## 4. 治理载体接缝
 
 - `.meta/`：机器态与治理真源（状态、constitution、gates、docs-tier）。
-- `.agents/notes/`：活动与冻结决策；`.agents/skills/`：可复用流程及判定真源脚本。
+- `.meta/skills-library/`：技能模板库（模板所有，`init` 播种不安装；`install.sh` 位置子命令负责装进 `.agents/skills/`）。
+- `.agents/notes/`：活动与冻结决策；`.agents/skills/`：可复用流程及判定真源脚本（基线 + 库安装副本 + 实例自有三层）。
 - `docs/AGENTS.md`：通用文档标准；`.meta/docs-tier/README.md`：本仓实例路径。
 - `.githooks/` 与 forge CI：门禁执行接缝；本地窄、远端全。
 
@@ -34,4 +35,5 @@ JSON 只序列化实际判定结果；未运行、证据不足与不适用不得
 
 新增判据先登记到 `maturity-ladder.md`，再在唯一判定层实现并让 `status` / `audit` 复用。
 新增实例门禁放 `.meta/gates/` 并配负样本 spec；新增流程只有达到复用阈值才进入 `.agents/skills/`。
+通用流程技能入 `.meta/skills-library/`（模板所有），由项目显式安装；`audit` 只做形状审计与安装建议，从不自动写入技能。
 新增文档事实先按 `docs/AGENTS.md` 选 tier，再只在 `.meta/docs-tier/README.md` 登记本仓路径。

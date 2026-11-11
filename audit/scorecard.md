@@ -46,7 +46,7 @@
 
 1. **非零退出命令的密度**：约定数与"能 `exit 1` 拦截违例的门禁数"之比。凡机械可查的承诺没配命令 = 0 分点。
 2. **单点还是分层**：是只在本地一个 hook（pre-commit），还是本地 + CI 分层（P7 分层强制原理：本地窄、CI 全）。
-3. **门有没有负样本证明**：每个实例门有没有同 Stem、同语言后缀的 negative sample spec（`foo.sh ↔ foo.spec.sh`、`foo.ps1 ↔ foo.spec.ps1`），还是"写了门但没人证明它能抓"；`ci-verify.sh` 是编排器而非实例门，框架内置 A1/A2/A6/A7 与实例门分开计分。
+3. **门有没有负样本证明**：每个实例门有没有同 Stem、同语言后缀的 negative sample spec（`foo.sh ↔ foo.spec.sh`、`foo.ps1 ↔ foo.spec.ps1`），还是"写了门但没人证明它能抓"；`ci-verify.sh` 是编排器而非实例门，框架内置 A1/A2/A6/A7/A8/A9 与实例门分开计分。
 4. **门本身有没有被管**：CI workflow 的形状是否被断言的（门也是代码，配置变更像任何变更一样要评审）。
 
 **对照标杆**（dsh 实例，§4）：lefthook（L1 pre-commit 6 项）+ GitHub Actions（L3 CI 9 个聚合 job）+ `scripts/` 机械验证脚本家族，**每个门通常配一个负样本 spec**（§4.5），`ci-workflow.spec.ts` 把整个 CI 形状钉死（§4.6）。
@@ -68,7 +68,7 @@
 
 **看哪几个面**：
 
-1. **有没有 skill 资产**：是否存在专门目录放可复用流程（skills），而非每次现写 / 靠老员工口传。
+1. **有没有 skill 资产**：是否存在专门目录放可复用流程（skills），而非每次现写 / 靠老员工口传。**判定须排除框架交付物**：基线三名（`write-adr`/`change-review`/`governance-review`）与 `.meta/skills-library/` 的安装副本都不算"项目长出的流程资产"。
 2. **触发式 description 吗**：每个 skill 的 description 是否写"何时用"（路由条件内联），还是在正文里藏着触发条件（懒加载时看不到）。
 3. **校准样例吗**：skill 是否带正反例成对的校准样例（把语义判断锚定到具体事实），还是没有样例的散文步骤。
 4. **调用权限分层吗**：重型 / 危险流程是否 `disable-model-invocation`（只许用户点名），还是任何流程都可被任意路由。
