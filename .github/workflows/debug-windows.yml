@@ -8,18 +8,11 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Diagnose gates
+      - name: Diagnose exact scenario27
         shell: bash
         run: |
           set -x
-          git config core.hooksPath .githooks
-          for s in .meta/gates/*.spec.sh; do
-            echo "===== $s ====="
-            bash "$s"; echo "SPEC_EXIT=$?"
-          done
-          command -v python3 || true
-          python3 --version || true
-          python3 -c 'import yaml; print("PYYAML_OK")' || true
+          python3 -m pip install --disable-pip-version-check pyyaml || true
           T=$(mktemp -d)
           cd "$T"
           git init -q
@@ -43,7 +36,10 @@ jobs:
 
           - none.
           ADREOF
-          printf '#!/usr/bin/env bash\nexit 0\n' > .meta/gates/x.spec.sh
-          echo "===== audit --run-specs ====="
-          bash "$GITHUB_WORKSPACE/ponygo" audit --level M --run-specs 2>&1
-          echo "AUDIT_EXIT=$?"
+          printf '#!/usr/bin/env bash\ntouch "$(cd "$(dirname "$0")" && pwd)/WITNESS.txt"\necho "[x.spec] 合规样本：断言已跑"\nexit 0\n' > .meta/gates/x.spec.sh
+          echo "===== generated A2 ====="
+          bash .meta/gates/adr-verify.spec.sh; echo "A2_RC=$?"
+          echo "===== x.spec ====="
+          bash .meta/gates/x.spec.sh; echo "X_RC=$?"
+          echo "===== audit ====="
+          bash "$GITHUB_WORKSPACE/ponygo" audit --level M --run-specs 2>&1; echo "AUDIT_RC=$?"
