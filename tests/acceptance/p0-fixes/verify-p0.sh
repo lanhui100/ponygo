@@ -20,9 +20,19 @@ SB=$(mktemp -d); trap 'rm -rf "$SB"' EXIT
 # 反例（曾发生）：d=$(mk) 在子 shell 里 cd，父进程 cwd 不变 → 相对路径写盘落到仓库根，
 # 把 .meta/meta.yaml 覆盖成桩、往 .meta/gates 塞 my-gate.sh、往 adr-verify.sh 追加篡改行。
 require_sandbox() {
-  case "$PWD" in
-    "$SB"/*) ;;
-    *) printf 'FAIL 沙箱逃逸：cwd=%s 不在 %s 下（拒绝写盘）\n' "$PWD" "$SB" >&2; exit 1 ;;
+  # Windows/MSYS 语义差异（CI run 43031069740 排查项）：`mktemp -d` 返回 /tmp/... 而 cd 之后
+  # `$PWD` 可能是 C:/Users/... 形态，字符串前缀比对会误报「沙箱逃逸」。改为比对**物理路径**
+  # （cd -P / pwd -P），判据仍是「cwd 必须落在沙箱下」，未放宽为任何形式的放行。
+  local sb_real pwd_real
+  sb_real=$(cd "$SB" 2>/dev/null && pwd -P) || sb_real="$SB"
+  pwd_real=$(pwd -P 2>/dev/null) || pwd_real="$PWD"
+  case "$pwd_real" in
+    "$sb_real"/*) ;;
+    *)
+      printf 'FAIL 沙箱逃逸：cwd=%s（real=%s）不在沙箱 %s（real=%s）下（拒绝写盘）\n' \
+        "$PWD" "$pwd_real" "$SB" "$sb_real" >&2
+      exit 1
+      ;;
   esac
 }
 mk() { # 新实例：mkdir + git init + init。在当前 shell 内 cd（调用方直接 `mk` 而非 `$(mk)`）
@@ -118,12 +128,14 @@ chk "H 门资产被改：status 拒绝（exit 1）" 1 "$rc"
 case "$out" in *漂移*|*替换*|*drift*) ok "H 门资产被改：报文提及漂移" ;; *) bad "H 门资产被改：报文未提及漂移" ;; esac
 
 echo "== P0-5 硬数字 =="
-SCN=$(grep -cE '^s[0-9]+_[a-z0-9_]+$' "$ROOT/tests/run.sh")
-chk_contains "I-1 README 场景数与 run.sh 枚举一致（$SCN）" "$(sed -n '270,300p' "$ROOT/README.md")" "$SCN 场景" 
-chk_contains "I-2 depth-selector 骨架 9" "$(grep -o '骨架 9' "$ROOT/audit/depth-selector.md" | head -1)" '骨架 9'
-chk_contains "I-3a depth-selector S total=12" "$(cat "$ROOT/audit/depth-selector.md")" 'total=12'
-chk_contains "I-3b depth-selector M total=16" "$(cat "$ROOT/audit/depth-selector.md")" 'total=16'
-chk_contains "I-4 maturity-ladder doc-sync 43 叶" "$(grep -o '43 叶' "$ROOT/maturity-ladder.md" | head -1)" '43 叶'
+# CRLF 容错：Windows 检出（core.autocrlf）会把行尾改成 CRLF，`^s…$` 会因行尾 \r 全部不匹配
+# 而把计数算成 0（CI run 43031069740 的 s92 红项之一）；先剥 \r 再计数，语义不变。
+SCN=$(tr -d '\r' < "$ROOT/tests/run.sh" | grep -cE '^s[0-9]+_[a-z0-9_]+$')
+chk_contains "I-1 README 场景数与 run.sh 枚举一致（$SCN）" "$(tr -d '\r' < "$ROOT/README.md" | sed -n '270,300p')" "$SCN 场景" 
+chk_contains "I-2 depth-selector 骨架 9" "$(tr -d '\r' < "$ROOT/audit/depth-selector.md" | grep -o '骨架 9' | head -1)" '骨架 9'
+chk_contains "I-3a depth-selector S total=12" "$(tr -d '\r' < "$ROOT/audit/depth-selector.md")" 'total=12'
+chk_contains "I-3b depth-selector M total=16" "$(tr -d '\r' < "$ROOT/audit/depth-selector.md")" 'total=16'
+chk_contains "I-4 maturity-ladder doc-sync 43 叶" "$(tr -d '\r' < "$ROOT/maturity-ladder.md" | grep -o '43 叶' | head -1)" '43 叶'
 
 echo "== 回归：干净实例（不依赖本仓工作区状态） =="
 mk; bash "$CLI" status >/dev/null 2>&1; chk "J 干净新实例 status exit 0" 0 "$?"

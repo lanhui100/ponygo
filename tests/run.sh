@@ -5,6 +5,11 @@
 #       PONYGO_TEST_LAYER=core bash tests/run.sh           （core 层 = 27 场景，其余跳过）
 #       PONYGO_SCN_TIMEOUT=600 bash tests/run.sh           （可选：单场景看门狗，1..86400 秒）
 # 退出码：断言失败 / 任一子套件 rc≠0 → 1；配置类错误（非法 env 值）→ 2。
+# 可诊断性口径（Windows CI 实跑教训）：汇总行的 fail= 只数叶子（契约 A4/A5），所以嵌套
+#   （s78/s81）/折叠（s88–s94）失败时会出现「fail=0 但 exit 1」。此时在汇总行**之后**追加一行
+#   `==== 结果：FAIL（嵌套失败 N / 折叠失败 M）====` 解释退出码来源（全绿时逐字不出现）。
+#   红相回显也不再整段 tail：先给全部 FAIL/RED/UNPARSED 行（去重），再补关键行尾部，总 ≤45 行——
+#   否则真正的失败断言被尾部截断，CI 日志只能靠人工重跑定位（run 43031069740 的教训）。
 # 场景一律在临时目录跑（cwd 隔离），以 bash "$ROOT/ponygo" 调用，
 # 规避 clone 后 exec bit / shebang 问题（spec rev3 P0-2）。
 # ============================================================
@@ -197,6 +202,24 @@ parse_suite_counts() { # <标签> <子进程输出> <rc> → 填充 PC_PASS / PC
   return 0
 }
 
+red_echo() { # <子套件输出>：红相回显——失败行绝不截断，其余关键行用剩余额度补尾（总 ≤45 行）
+  local out="$1" fails nf rest
+  # 1) 失败行全量（去重）：FAIL / RED / UNPARSED。这一层是「可诊断性」的底线——
+  #    tail 掉它们等于让 CI 日志只剩 `== ...` 明暗不辨的摘要，必须重跑才能定位。
+  fails=$(printf '%s\n' "$out" | grep -E '^(FAIL |  FAIL |  RED |  UNPARSED )' | awk '!seen[$0]++')
+  nf=0
+  [ -n "$fails" ] && nf=$(printf '%s\n' "$fails" | wc -l | tr -d ' ')
+  [ -n "$fails" ] && printf '%s\n' "$fails"
+  # 2) 其它关键行：CASE/EXIT/SUMMARY/断言小结/结果行，按剩余额度取尾部（≤45 行总预算）
+  rest=$((45 - nf))
+  if [ "$rest" -gt 0 ]; then
+    printf '%s\n' "$out" \
+      | grep -E '^(== |##CASE |##EXIT |##SUMMARY |断言：|PASS=|结果：)' \
+      | awk '!seen[$0]++' | tail -n "$rest" || true
+  fi
+  return 0
+}
+
 fold_account() { # <场景 id> <输出> <rc>：折叠套件统一记账（假定 parse_suite_counts 已填 PC_*）
   local id="$1" out="$2" rc="$3"
   FOLDED_PASS=$((FOLDED_PASS + PC_PASS))
@@ -213,8 +236,8 @@ fold_account() { # <场景 id> <输出> <rc>：折叠套件统一记账（假定
     printf '  fold %s（pass=%s｜来源 %s）\n' "$id" "$PC_PASS" "$PC_SRC"
     return 0
   fi
-  # 红相才回显（A15/§1.2）：关键行 grep 后 tail ≤25 行；绿相整卷不回显，避免刷屏
-  printf '%s\n' "$out" | grep -E '^(FAIL |  FAIL |== |##CASE |##EXIT |##SUMMARY |  RED |断言：|PASS=|结果：)' | tail -n 25 || true
+  # 红相才回显（A15/§1.2）：失败行全量优先、其余关键行补尾；绿相整卷不回显，避免刷屏
+  red_echo "$out"
   return 0
 }
 
@@ -4394,8 +4417,6 @@ s78_wave13_acceptance() {
     [ -f "$f" ] || continue
     base=$(basename "$f")
     out=$(bash "$f" 2>&1); rc=$?
-    # 失败行 + 汇总行回显（绿行不回显，避免 300+ 行噪音）
-    printf '%s\n' "$out" | grep -E '^(FAIL |##CASE )' || true
     # 嵌套计数：唯一解析函数（契约 §1.3），不再并入叶子 PASS/FAIL（A4/A5）
     parse_suite_counts "场景78 $base" "$out" "$rc"
     NESTED_PASS=$((NESTED_PASS + PC_PASS))
@@ -4404,9 +4425,12 @@ s78_wave13_acceptance() {
       # A12a：rc≠0 必计失败——旧实现此处只 printf RED 不递增 FAIL（pre-existing false-green）
       NESTED_FAIL=$((NESTED_FAIL + 1))
       printf '  RED  %s（rc=%s pass=%s fail=%s）\n' "$base" "$rc" "$PC_PASS" "$PC_FAIL"
+      red_echo "$out"
     elif [ "$PC_FAIL" -ne 0 ]; then
       printf '  RED  %s（rc=%s pass=%s fail=%s）\n' "$base" "$rc" "$PC_PASS" "$PC_FAIL"
+      red_echo "$out"
     else
+      printf '%s\n' "$out" | grep -E '^##CASE ' || true
       # 同理不用 `  ok   ` 前缀：嵌套计数不入叶子 pass（A4），避免按 ok 行计数的消费者多算
       printf '  nest %s（pass=%s）\n' "$base" "$PC_PASS"
     fi
@@ -4933,7 +4957,6 @@ s81_carrier_audit_acceptance() {
     [ -f "$f" ] || continue
     base=$(basename "$f")
     out=$(bash "$f" 2>&1); rc=$?
-    printf '%s\n' "$out" | grep -E '^(FAIL |##CASE )' || true
     # 嵌套计数：与 s78 共用唯一解析函数（旧实现各抄一份两条 sed，口径易漂移）
     parse_suite_counts "场景81 $base" "$out" "$rc"
     NESTED_PASS=$((NESTED_PASS + PC_PASS))
@@ -4942,9 +4965,12 @@ s81_carrier_audit_acceptance() {
       # A12a：rc≠0 必计失败（旧实现同款假绿：只 printf RED 不记账）
       NESTED_FAIL=$((NESTED_FAIL + 1))
       printf '  RED  %s（rc=%s pass=%s fail=%s）\n' "$base" "$rc" "$PC_PASS" "$PC_FAIL"
+      red_echo "$out"
     elif [ "$PC_FAIL" -ne 0 ]; then
       printf '  RED  %s（rc=%s pass=%s fail=%s）\n' "$base" "$rc" "$PC_PASS" "$PC_FAIL"
+      red_echo "$out"
     else
+      printf '%s\n' "$out" | grep -E '^##CASE ' || true
       # 同理不用 `  ok   ` 前缀：嵌套计数不入叶子 pass（A4），避免按 ok 行计数的消费者多算
       printf '  nest %s（pass=%s）\n' "$base" "$PC_PASS"
     fi
@@ -5490,6 +5516,11 @@ echo ""
 # 故不得再另设独立自增累加器（那样等式必然漂移，也就无法证明三类都真的记了账）。
 CHECKS=$(( (PASS + FAIL) + (NESTED_PASS + NESTED_FAIL) + (FOLDED_PASS + FOLDED_FAIL) ))
 echo "==== 测试结果：scenarios=$SCN_RUN pass=$PASS fail=$FAIL checks=$CHECKS skipped=$SKIPPED ===="
+# 诊断行（additive，不匹配上面的汇总正则）：fail= 只数叶子，嵌套/折叠失败时必须解释退出码，
+# 否则 CI 日志读起来是「全绿但红」——run 43031069740 的 windows-core 就是这样被误读的。
+if [ $((NESTED_FAIL + FOLDED_FAIL)) -gt 0 ]; then
+  echo "==== 结果：FAIL（嵌套失败 $NESTED_FAIL / 折叠失败 $FOLDED_FAIL）===="
+fi
 # 退出码（A12/A13）：三类 fail 任一非零 → 1；配置类错误在脚本顶部已 exit 2
 if [ "$FAIL" -ne 0 ] || [ "$NESTED_FAIL" -ne 0 ] || [ "$FOLDED_FAIL" -ne 0 ]; then
   exit 1

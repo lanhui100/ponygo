@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Windows 编码硬化（CI 实跑 run 43031069740）：cp1252 控制台下 python3 打印中文会抛
+# UnicodeEncodeError → rc=1 且无 stdout（gh2 3/1、gh3 9/1、gh6 83/8 均为其连锁反应）。
+# 在调用任何 python3 之前强制 UTF-8；standalone 执行时由本文件/lib.sh 顶部覆盖生效。
+export PYTHONUTF8=1 PYTHONIOENCODING=utf-8
 # ============================================================
 # tests/acceptance/auditfix/lib.sh
 # auditfix 验收套件（F1–F7 + L2-AT 对抗）的公共夹具与断言。

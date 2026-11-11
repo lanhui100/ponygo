@@ -22,6 +22,15 @@ import tempfile
 
 import yaml
 
+# Windows 编码自保（CI 实跑 run 43031069740）：cp1252 控制台下打印中文会抛 UnicodeEncodeError
+# → rc=1 且 stdout 为空（上层的 /tmp 断言与折叠计数随之连锁失败）。这里显式把流切到 UTF-8，
+# 即使调用方设置了 PYTHONIOENCODING=cp1252 也能自保。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # required 三元组：三项必须全部 success（skipped 一律判失败，D7）。
 REQUIRED = ("selftest-linux", "windows-core", "governance")
 # 第四项：允许 skipped（夜间全量，PR 事件不跑），但 failure/cancelled 必须失败（D6/D7）。
@@ -221,7 +230,8 @@ def main() -> int:
         tmp_path = pathlib.Path(tmp)
         for label, doc in mutations.items():
             candidate = tmp_path / (re.sub(r"[^a-zA-Z0-9]+", "-", label) + ".yml")
-            candidate.write_text(yaml.dump(doc, Dumper=GitHubDumper, allow_unicode=True, sort_keys=False))
+            candidate.write_text(yaml.dump(doc, Dumper=GitHubDumper, allow_unicode=True, sort_keys=False),
+                                 encoding="utf-8")
             if actionlint:
                 proc = subprocess.run([actionlint, "-no-color", str(candidate)], capture_output=True, text=True)
                 if proc.returncode != 0:

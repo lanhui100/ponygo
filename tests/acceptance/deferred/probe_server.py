@@ -16,6 +16,15 @@ import sys
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+# Windows 编码自保（CI 实跑 run 43031069740）：cp1252 控制台下打印中文会抛 UnicodeEncodeError
+# → rc=1 且 stdout 为空（上层的 /tmp 断言与折叠计数随之连锁失败）。这里显式把流切到 UTF-8，
+# 即使调用方设置了 PYTHONIOENCODING=cp1252 也能自保。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 port_fifo = sys.argv[1]
 capture = sys.argv[2]
 notify_fifo = sys.argv[3] if len(sys.argv) > 3 else ""

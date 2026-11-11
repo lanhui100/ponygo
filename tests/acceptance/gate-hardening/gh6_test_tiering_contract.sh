@@ -17,10 +17,26 @@ CI_YML="$ROOT/.github/workflows/ci.yml"
 CLI_SRC="$ROOT/ponygo"
 AT2="$ROOT/tests/acceptance/adversarial/auditfix/a2_hung_spec_timeout.sh"
 
-# 分层探针外层守卫：正确实现下 `bash tests/run.sh` 在 0.1s 内 exit 2；此值只在实现缺失时兜底。
-LAYER_GUARD_SECS=8
-# 非法 PONYGO_SPEC_TIMEOUT 探针外层守卫：正确实现下立即 exit 2。
-SPEC_GUARD_SECS=20
+# 与 CLI 同源的平台判定（C3/C14：Windows 档 180s，其余 90s）；避免把 Linux 期望值写死到 Windows CI。
+is_windows_platform() {
+  case "${OSTYPE:-}" in msys* | cygwin* | MSYS* | CYGWIN*) return 0 ;; esac
+  case "$(uname -s 2>/dev/null)" in MINGW* | MSYS* | CYGWIN* | mingw* | msys* | cygwin*) return 0 ;; esac
+  return 1
+}
+
+# 外层守卫必须**平台感知**（依据：CI run 43031069740，windows-core rc=1）。
+# Windows 上 `audit --run-specs` 真跑全部 spec（软超时 90 + KILL 5），`bash tests/run.sh` 冷启动与
+# git/NTFS 开销也远高于 Linux；沿用 Linux 的小 guard 会把「慢」误判成「护栏失效」——实测 GH6/C14 的
+# 空串探针在 Windows 得 124，是被 `$SPEC_GUARD_SECS` 杀掉而非被测对象挂死。
+if is_windows_platform; then
+  LAYER_GUARD_SECS=60    # 仅用于「非法 env 应立即 exit 2」探针的兜底
+  SPEC_GUARD_SECS=300    # 真跑 CLI（audit --run-specs / 出厂 spec）的兜底
+  PROBE_GUARD_SECS=300   # 派生副本跑 core 场景（含 git 操作）的兜底
+else
+  LAYER_GUARD_SECS=8
+  SPEC_GUARD_SECS=20
+  PROBE_GUARD_SECS=90
+fi
 
 assert_file_matches() { # <描述> <文件> <ERE>
   if grep -Eq -- "$3" "$2" 2>/dev/null; then ok "$1"; else bad "$1（$2 内无匹配 /$3/）"; fi
@@ -37,12 +53,6 @@ for f in "$RUN_SH" "$CI_YML" "$CLI_SRC" "$AT2"; do
   assert_file "GH6 契约被测文件存在：${f#"$ROOT"/}" "$f"
 done
 
-# 与 CLI 同源的平台判定（C3/C14：Windows 档 180s，其余 90s）；避免把 Linux 期望值写死到 Windows CI。
-is_windows_platform() {
-  case "${OSTYPE:-}" in msys* | cygwin* | MSYS* | CYGWIN*) return 0 ;; esac
-  case "$(uname -s 2>/dev/null)" in MINGW* | MSYS* | CYGWIN* | mingw* | msys* | cygwin*) return 0 ;; esac
-  return 1
-}
 if ! command -v python3 >/dev/null 2>&1; then
   bad "GH6 需要 python3 做结构化解析（缺失即失败，不跳过契约断言）"
   finish
@@ -51,7 +61,7 @@ fi
 # ============================================================
 # 契约 A（§1.1–§1.4）+ 契约 B 静态面（§2）：结构化解析 tests/run.sh
 # ============================================================
-RUN_PY=$(python3 - "$RUN_SH" <<'PY'
+RUN_PY=$(python3 -X utf8 - "$RUN_SH" <<'PY'
 import re
 import sys
 
@@ -500,7 +510,9 @@ done <<< "$RUN_PY"
 # 独立锚（Lead rev2 裁决）：94 必须在**本用例内以字面量**核对，不把守恒寄托在
 # tests/acceptance/p0-fixes/verify-p0.sh:121-122 的「SCN 现算 vs README」自证式比对上
 # （那种比对改两处即可洗白）。这里是唯一真源 tests/run.sh 的机械读数。
-SCN_LITERAL=$(grep -cE '^s[0-9]+_[a-z0-9_]+$' "$RUN_SH" 2>/dev/null || echo "grep-failed")
+# CRLF 容错：Windows 检出（autocrlf）会把行尾变 CRLF，`^s…$` 会因 \r 全部不匹配而算成 0；
+# 先剥 \r 再计数（语义不变），避免把「检出行为差异」误判成「场景被删」。
+SCN_LITERAL=$(tr -d '\r' < "$RUN_SH" 2>/dev/null | grep -cE '^s[0-9]+_[a-z0-9_]+$' || echo "grep-failed")
 assert_eq "GH6/R1 独立锚：场景顶层裸调用行字面恒为 94（不依赖 verify-p0 自证式比对）" 94 "$SCN_LITERAL"
 
 # ============================================================
@@ -548,7 +560,7 @@ assert_not_matches "GH6/A17 非法值不得执行任何场景（stdout 无叶子
 # 做法：把真实 tests/run.sh 复制进沙箱，**只改分层集合数据块**（让 core 层仅跑 s78/s90），
 # 并把这两个子套件目录换成合成夹具；真实仓一个字节都不动。
 PROBE_ROOT=$(mktemp -d "$SBASE/gh6-probe.XXXXXX")
-PROBE_GUARD_SECS=90
+PROBE_GUARD_SECS=${PROBE_GUARD_SECS:-90}
 mkdir -p "$PROBE_ROOT/tests/acceptance/wave13" "$PROBE_ROOT/tests/acceptance/gate-hardening"
 for f in ponygo README.md; do
   ln -s "$ROOT/$f" "$PROBE_ROOT/$f" 2>/dev/null || true
@@ -568,7 +580,7 @@ printf '##CASE stub_case.sh pass=3 fail=0\n'
 printf '##SUMMARY gate-hardening cases=1 failed=0\n'
 exit 1
 LIAR2
-if python3 - "$RUN_SH" "$PROBE_ROOT/tests/run.sh" <<'PYPROBE'
+if python3 -X utf8 - "$RUN_SH" "$PROBE_ROOT/tests/run.sh" <<'PYPROBE'
 import re
 import sys
 
@@ -706,7 +718,7 @@ gh6_derive_copy() { # <dst_root> <core-scenario> [<core-scenario> ...]
   for f in ponygo README.md; do
     ln -sfn "$ROOT/$f" "$dst/$f" 2>/dev/null || true
   done
-  python3 - "$RUN_SH" "$dst/tests/run.sh" "$@" <<'PYDERIVE'
+  python3 -X utf8 - "$RUN_SH" "$dst/tests/run.sh" "$@" <<'PYDERIVE'
 import re
 import sys
 
@@ -835,7 +847,7 @@ assert_file_matches "GH6/C4 Windows 判定（OSTYPE msys*/cygwin* 或 uname -s M
 
 # C3 平台分档默认值：必须是「赋值」而非散落字面量，且 Windows 分支的 180 必须与平台判定同域
 # （禁止「180 只出现在注释里」或「180/90 与平台判定无因果」的伪实现）。
-C_PY=$(python3 - "$CLI_SRC" <<'PY2'
+C_PY=$(python3 -X utf8 - "$CLI_SRC" <<'PY2'
 import re
 import sys
 
@@ -1064,7 +1076,7 @@ assert_file_not_matches "GH6/rev3 ponygo 内同源 README heredoc 不得写死 c
 # ============================================================
 # 契约 D（§4）：CI 拓扑（真 YAML 结构化解析，禁止一行注释/子串命中冒充接线）
 # ============================================================
-CI_PY=$(python3 - "$CI_YML" <<'PY'
+CI_PY=$(python3 -X utf8 - "$CI_YML" <<'PY'
 import re
 import sys
 

@@ -53,9 +53,18 @@ ponygo 的测试规模与 CI 反馈已经失真，继续按现状扩展会把维
 - 配置类错误：`PONYGO_TEST_LAYER=bogus bash tests/run.sh` → 2；`PONYGO_SCN_TIMEOUT=abc bash tests/run.sh` → 2；`PONYGO_SPEC_TIMEOUT=abc ./ponygo audit --run-specs` → 2。
 - 守卫降级：`PATH=/tmp/wtstub:$PATH ./ponygo audit --run-specs` → WARN + `PONYGO_SPEC_NO_GUARD=1` 下 spec 不再被假 timeout 假杀。
 
+### Windows CI 实跑证据（首轮真值，含缺陷修复）
+
+- 运行 `43031069740`（push 8edd7cf，windows-core）：**失败**，但拿到了第一份真实的 Windows core 层日志。
+- 根因（Lead 本机复现）：Windows 控制台默认 cp1252 → 所有打印中文的 `python3` 调用抛 `UnicodeEncodeError` 并 rc=1、无 stdout。复现：`PYTHONIOENCODING=cp1252 python3 tests/acceptance/gate-hardening/gh2_ci_aggregate.py .`。CI 症状即 gh2 3/1、gh3 9/1、gh6 83/8（「解析器未产出 #PARSE-END 哨兵」是连锁反应）、verify-p0 15/2。
+- 另两处 Windows 差异一并修掉：gh6 的 CLI guard 过窄（Windows 更慢 → C14 空串探针被判 124）、`autocrlf` 使 `^sNN_...$` 行尾多 `\r` 导致场景计数为 0（I-1 类断言）。
+- 修法（测试侧，未弱化任何语义断言、未新增 SKIP）：14 个套件入口 `export PYTHONUTF8=1 PYTHONIOENCODING=utf-8`；`gh2/gh3/probe_server.py` 做 stdout/stderr `reconfigure(utf-8)` 与 `open(..., encoding=)`；gh6 内联 heredoc 统一 `python3 -X utf8 -`；gh6 guard 平台感知（Windows 60/300/300、Linux 8/20/90）；p0 计数 `tr -d '\r'`、沙箱比对改 `pwd -P`。
+- 修复后本机全量仍绿：`scenarios=94 pass=1054 fail=0 checks=2833 skipped=0`；`gate-hardening`/`auditfix`/`carrier-audit`/`ci-verify`/`verify-note` 全 exit 0；`PYTHONIOENCODING=cp1252 python3 gh2_ci_aggregate.py .` → 0。
+- 可诊断性同时修掉：汇总行 `fail=` 只数叶子、折叠失败也会 exit 1（CI 曾出现「`fail=0` 却红」）；现当 `NESTED_FAIL+FOLDED_FAIL>0` 追加 `==== 结果：FAIL（嵌套失败 N / 折叠失败 M）====`，红相回显改为**先输出全部失败行**再补关键行尾部（≤45 行），失败断言不再被 tail 截掉。
+
 ## Risks and known limits
 
-- **Windows 真值仍缺**：本波没有新增 Windows CI 实跑证据（历史证据全部为人工取消）；`windows-core`/`windows-full` 预算（60/240）基于 Linux 实测 × Windows 慢 10.3x 的估算，首次真实运行后才能校准。未取得 Windows 日志前不得宣称「CI 全绿」。
+- **Windows 真值（部分获得）**：本波首轮 windows-core 实跑**失败并已定位修复**（cp1252 编码 + guard 过窄 + autocrlf，见上节）；修复后的 Windows 结果以修复提交后的 CI 运行为准。`windows-full` 全量在 Windows 上**仍未有绿证**，预算 240min 仍属估算。未取得修复后 Windows 绿证前不得宣称「CI 全绿」。
 - **分支保护无机器收据**：仓内无 `required_status_checks` 证据，`all-checks-passed` 是否真被分支保护引用属 `[UNVERIFIED]`，需 `gh api` 取外部收据。
 - **双份真值残留**：AT2 夹具内仍自带一份平台判定（`is_windows()`），与 `ponygo` 的推导规则重复，已登记待办；后续可由 SUT 打印的预算行反向校验。
 - **看门狗默认关闭**：`PONYGO_SCN_TIMEOUT` 未设 = 禁用，故「超时点名」是**可配置护栏**而非默认护栏；默认兜底仍依赖 CI 的 job 级 `timeout-minutes`。
