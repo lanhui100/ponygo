@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # L2-AT ②：恶意 spec 挂死（sleep 999）。`audit --run-specs` 必须在超时护栏内返回：
-# 外部 `timeout 60` 兜底断言「不得 hang」，返回码不得为 124（外层硬杀），也不得 0（假绿）。
+# 外部 `timeout 120` 兜底断言「不得 hang」，返回码不得为 124（外层硬杀），也不得 0（假绿）。
 # 禁 sleep 轮询：本用例只测「被测对象自身的超时护栏」，不用 sleep 等状态。
-# 冻结契约来源：.dev-team/contract-matrix-auditfix.md（L2-AT ②）；run_gate_specs 头注「超时：30 秒上限」。
+# 冻结契约来源：.dev-team/contract-matrix-auditfix.md（L2-AT ②）；run_gate_specs 头注「软 90s + KILL 兜底 5s」。
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/../../auditfix/lib.sh"
 
@@ -25,17 +25,17 @@ SPECEOF
   chmod +x "$T/.meta/gates/zz-hang.spec.sh"
 
   START=$(date +%s)
-  run_timeout_in "$T" 60 audit --run-specs
+  run_timeout_in "$T" 120 audit --run-specs
   ELAPSED=$(( $(date +%s) - START ))
 
   if [ "$R_RC" -eq 124 ]; then
-    bad "AT2 超时护栏失效：靠外层 timeout 60 兜底才结束（elapsed=${ELAPSED}s）"
+    bad "AT2 超时护栏失效：靠外层 timeout 120 兜底才结束（elapsed=${ELAPSED}s）"
   else
-    ok "AT2 audit 在外部 60s 兜底内自行返回（elapsed=${ELAPSED}s，rc=$R_RC）"
+    ok "AT2 audit 在外部 120s 兜底内自行返回（elapsed=${ELAPSED}s，rc=$R_RC）"
   fi
 
-  if [ "$ELAPSED" -lt 60 ]; then
-    ok "AT2 返回耗时在护栏窗口内（${ELAPSED}s < 60s）"
+  if [ "$ELAPSED" -lt 120 ]; then
+    ok "AT2 返回耗时在护栏窗口内（${ELAPSED}s < 120s）"
   else
     bad "AT2 返回耗时超出护栏窗口（${ELAPSED}s）"
   fi
