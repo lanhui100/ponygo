@@ -4123,7 +4123,15 @@ EOF
   assert_eq "C3⑥ 未声明 ai-surface → status exit 0（SKIPPED 不是 FAIL）" 0 "$R_RC"
   # 契约字面「1.9b SKIPPED 不计入 PASS」必须在**同一行**（对齐 2.6 既有措辞）；
   # 不能拿 1.10 载体 WARN 里那句「不计入 PASS」冒充（那是另一条判据的提示）
-  if printf '%s\n' "$R_OUT" | grep -qE '1\.9b[^。]*SKIPPED[^。]*不计入 PASS'; then
+  # 用 bash 逐行匹配而非 grep -E：Windows Git Bash 的 grep 对中文/CRLF 组合不稳，
+  # 且契约要求三者同**行**；case 逐行匹配可跨平台保持同一语义。
+  c3_seen=0
+  while IFS= read -r _line; do
+    case "$_line" in
+      *1.9b*SKIPPED*"不计入 PASS"*) c3_seen=1; break ;;
+    esac
+  done <<< "$R_OUT"
+  if [ "$c3_seen" -eq 1 ]; then
     ok "C3⑦ 输出「1.9b SKIPPED … 不计入 PASS」提示（对齐 2.6 措辞）"
   else
     bad "C3⑦ 输出「1.9b SKIPPED … 不计入 PASS」提示（同行未同时出现 1.9b / SKIPPED / 不计入 PASS）"

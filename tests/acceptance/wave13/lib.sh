@@ -45,9 +45,10 @@ git_at() { # <dir> <git args...>
 }
 
 # ---------- 断言 ----------
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIPPED=0
 ok()  { PASS=$((PASS+1)); printf '  ok   %s\n' "$1"; }
 bad() { FAIL=$((FAIL+1)); printf 'FAIL %s\n' "$1"; }
+skip() { SKIPPED=$((SKIPPED+1)); printf '  SKIP %s\n' "$1"; }
 
 assert_eq() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1（期望 [$2] 实得 [$3]）"; fi; }
 assert_contains() { case "$2" in *"$3"*) ok "$1" ;; *) bad "$1（未找到 [$3]）" ;; esac; }
@@ -208,5 +209,6 @@ tamper_one_byte() { # <file>
 
 finish() {
   printf '##CASE %s pass=%s fail=%s\n' "$(basename "$0")" "$PASS" "$FAIL"
+  [ "$SKIPPED" -gt 0 ] && printf '##SKIP %s\n' "$SKIPPED"
   if [ "$FAIL" -eq 0 ]; then exit 0; else exit 1; fi
 }

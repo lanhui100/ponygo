@@ -4040,9 +4040,10 @@ expect_reject_with "TOCTOU 反向（暂存非法/工作区合法）拒绝且文�
 # F9（A1 先查 `git ls-files -s` 模式 120000/160000）由 Executor 落地，落地前本 case 必然 FAIL。
 R=$(new_repo symlink-adr)
 write_adr "$R" legal-target.md "$LEGAL_BODY"
-ln -s ../../../../legal-target.md \
-  "$R/.agents/notes/implemented/process/2026-10-29-link.md"
-git -C "$R" add -A >/dev/null 2>&1
+# 用 git 索引的 120000 模式构造 symlink 样本，不依赖 OS 的 ln -s 权限（Windows runner 默认
+# 无 symlink 权限；A1 的 F9 判据只看 index 模式，故可跨平台证明同一拒绝语义）。
+link_blob=$(printf '%s' '../../../../legal-target.md' | git -C "$R" hash-object -w --stdin)
+git -C "$R" update-index --add --cacheinfo 120000,"$link_blob",.agents/notes/implemented/process/2026-10-29-link.md
 OUT=$(run_gate "$R") && RC=0 || RC=$?
 if [ "$RC" -eq 0 ]; then
   fail "符号链接 ADR 应拒绝，实得 exit 0（F9 未落地：ADR 必须是普通文件）"

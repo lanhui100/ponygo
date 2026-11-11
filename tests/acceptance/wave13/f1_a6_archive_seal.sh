@@ -279,10 +279,20 @@ assert_eq "A6-24 夹具：seal exit 0" 0 "$S_RC"
 LEFT=$(find "$T/$ARCHIVED_REL" \( -name '*.tmp' -o -name '*.new' \) 2>/dev/null | head -n3 | tr '\n' ' ')
 assert_eq "A6-24 [NOGO] 不得遗留 .tmp/.new 中间文件" "" "$LEFT"
 
+# 平台能力探测：Windows Git Bash 默认无 symlink 权限；无能力时 symlink 专项只能 SKIP，
+# 不能把「夹具造不出来」误报成门禁失败（Linux/macOS 仍完整跑）。
+W13_SYMLINK_OK=0
+_probe=$(mktemp -d "$SBASE/symlink-probe.XXXXXX")
+mkdir -p "$_probe/target"
+ln -s target "$_probe/link" 2>/dev/null || true
+[ -L "$_probe/link" ] && W13_SYMLINK_OK=1
+rm -rf "$_probe"
+
 # ============ A6-SYM：符号链接绕过（L3 BLOCKING 回归，task-10）============
 # 缺陷形态：archived/ 下放 `*.md` 符号链接 → 既不被收进集合 B（`-type f` 跳过 symlink），
 # 也不报错 → check/seal 双双 exit 0，等于给「归档件」开了一条不受封印约束的旁路。
 # 判定：存在归档案符号链接时 check 与 seal 均 exit 1 且文案含「符号链接」；移除后合法件仍 0。
+if [ "$W13_SYMLINK_OK" -eq 1 ]; then
 T=$(new_case); gov_repo "$T" 2 || finish
 stage_archived_adr "$T" "testing/2026-01-02-sym-legit.md"
 a6 "$T" seal
@@ -411,6 +421,10 @@ assert_eq "A6-SYM-DIR [GO] 恢复真实归档目录后 seal exit 0（反向控�
 a6 "$T" check
 assert_eq "A6-SYM-DIR [GO] 恢复真实归档目录后 check exit 0" 0 "$S_RC"
 
+else
+  skip "A6-SYM/A6-SYM-DIR：平台不支持 symlink（Windows 默认无权限），symlink 专项未执行"
+fi
+
 # ============ A6-STA：Status: archived 来源代理判据（L3 ADVISORY 回归，task-10）============
 # 缺陷形态：seal 只认 Status 首词 == implemented → 已按 1.7 迁到 archived/ 的冻结件
 # （Status: archived）永远封印不了，等于「归档目录里的合法终态被锁死」。
@@ -440,8 +454,9 @@ stage_archived_adr "$T" "testing/2026-01-02-eol-b.md"
 a6 "$T" seal
 assert_eq "A6-EOL 夹具：seal exit 0" 0 "$S_RC"
 assert_eq "A6-EOL 夹具：manifest 2 条" 2 "$(grep -c . "$T/$MANIFEST_REL" 2>/dev/null || printf '0')"
-# 转 CRLF（逐行加 \r），并取证确已变成 CRLF
-sed -i 's/$/\r/' "$T/$MANIFEST_REL"
+# 转 CRLF（逐行加 \r；不使用 sed 的 \r 展开——Windows Git Bash 的 sed 行为不一致）
+while IFS= read -r _line || [ -n "$_line" ]; do printf '%s\r\n' "$_line"; done   < "$T/$MANIFEST_REL" > "$T/$MANIFEST_REL.crlf"
+mv -f "$T/$MANIFEST_REL.crlf" "$T/$MANIFEST_REL"
 if grep -q $'\r' "$T/$MANIFEST_REL"; then
   ok "A6-EOL 取证：manifest 确已转为 CRLF"
 else
