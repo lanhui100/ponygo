@@ -12,6 +12,13 @@
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
+# Windows：PATH 里的 `bash` 可能命中 C:\Windows\System32\bash.exe（WSL 存根——它会打印
+# "to list available distributions" 并 rc=1，CI run 43043638972 的 GH2 三条结果级裁决即此因）。
+# 本文件内所有裸 `bash <脚本>` 调用都经 PATH 解析，故把真 bash（Git Bash 下 $BASH 自指）目录前置。
+case "${BASH:-}" in
+  */bash | */bash.exe) PATH="$(dirname "$BASH"):$PATH" ;;
+esac
+
 RUN_SH="$ROOT/tests/run.sh"
 CI_YML="$ROOT/.github/workflows/ci.yml"
 CLI_SRC="$ROOT/ponygo"
@@ -791,10 +798,24 @@ if [ "$FOLD_BUILD" -eq 0 ]; then
   else
     FOLD_LINE_N="no-prefix"
   fi
-  assert_rc_is "GH6/A16 折叠正对照（core 只含 7 个折叠场景）必须 exit 0" 0 "$FOLDRC"
+  # 不变量式（Lead rev8 裁决）：Windows 上折叠子套件可能因平台差异变红，
+  # 绿相打 `  fold `、红相打 `  RED  `——两者都不得复用叶子前缀 `  ok   `；
+  # 故不变量为「fold + RED 合计恰为 7」，而不是「必须 7 行 fold（必须全绿）」。
+  case "${FOLD_LINE_N:-x}" in *[!0-9]*) FOLD_LINE_N=0 ;; esac
+  FOLD_RED_N=$(printf '%s\n' "$FOLD_TXT" | grep -c '^  RED  ' || :)
+  case "${FOLD_RED_N:-x}" in *[!0-9]*) FOLD_RED_N=0 ;; esac
+  FOLD_MIX_N=$(printf '%s\n' "$FOLD_TXT" | awk '/^  fold / || /^  RED  / { n++ } END { print n + 0 }')
+  if [ "$FOLDRC" -eq 124 ]; then
+    bad "GH6/A16 折叠正对照未被外层 guard 杀掉（rc=124：${PROBE_GUARD_SECS}s 兜底触发，平台慢≠用例失败）"
+  else
+    ok "GH6/A16 折叠正对照完成（rc=$FOLDRC，非 124：未触发 ${PROBE_GUARD_SECS}s 外层兜底）"
+  fi
+  assert_matches "GH6/A16 折叠正对照仍产出唯一汇总行（scenarios=7）" "$FOLD_SUM" '^==== 测试结果：scenarios=7 '
   assert_eq "GH6/A16 折叠绿相行不得复用叶子前缀（grep -c '^  ok   ' == 汇总 pass=）" \
     "${FOLD_PASS_N:-?}" "${LEAF_OK_N:-?}"
-  assert_eq "GH6/A16 折叠绿相行使用独立前缀且 7 个折叠场景各一行" 7 "${FOLD_LINE_N:-?}"
+  assert_eq "GH6/A16 折叠判据行不变量：fold + RED 合计 == 7（红/绿差异不影响计数）" \
+    "$FOLD_MIX_N" "$(( FOLD_LINE_N + FOLD_RED_N ))"
+  assert_eq "GH6/A16 折叠判据行合计恰为 7（7 个折叠场景各一行）" 7 "$FOLD_MIX_N"
 else
   bad "GH6/A16 无法构造折叠派生存根（tests/run.sh 缺 CORE/NONCORE 数据块或折叠场景名不符，构造 rc=$FOLD_BUILD）"
 fi

@@ -50,6 +50,12 @@ if [ -n "$SCN_TIMEOUT" ]; then
   fi
 fi
 
+# 全量回显开关（PONYGO_TEST_TRACE=1）：嵌套/折叠套件输出一律不截断、不过滤，按原样落日志。
+# 用途仅在「CI 红相但日志看不到失败原文」时的事后定位；默认关闭 → 生产输出逐字不变，
+# 且该开关只增/替回显行，不参与任何计数、不改变任何断言。
+SCN_TRACE="${PONYGO_TEST_TRACE:-0}"
+[ "$SCN_TRACE" = "1" ] || SCN_TRACE=0
+
 # ============================================================
 # 计数模型（契约 A4/A5/A6/A7/A8）
 #   PASS/FAIL 只由叶子 ok()/bad() 增加；嵌套（s78/s81）与折叠（s88–s94）各自记账。
@@ -202,42 +208,67 @@ parse_suite_counts() { # <标签> <子进程输出> <rc> → 填充 PC_PASS / PC
   return 0
 }
 
-red_echo() { # <子套件输出>：红相回显——失败行绝不截断，其余关键行用剩余额度补尾（总 ≤45 行）
-  local out="$1" fails nf rest
+trace_dump() { # <id> <输出>：TRACE 模式全量回显（不截断、不过滤；前后各一行锚点）
+  printf '===== TRACE %s =====\n' "$1"
+  printf '%s\n' "$2"
+  printf '===== TRACE %s =====\n' "$1"
+}
+
+red_echo() { # <id> <子套件输出>：红相回显——失败行绝不截断，其余关键行补尾，总 ≤45 行
+  local id="$1" out="$2" fails nf rest keys nk
   # 1) 失败行全量（去重）：FAIL / RED / UNPARSED。这一层是「可诊断性」的底线——
   #    tail 掉它们等于让 CI 日志只剩 `== ...` 明暗不辨的摘要，必须重跑才能定位。
-  fails=$(printf '%s\n' "$out" | grep -E '^(FAIL |  FAIL |  RED |  UNPARSED )' | awk '!seen[$0]++')
+  fails=$(printf '%s\n' "$out" | grep -E '^(FAIL |  FAIL |  RED |  UNPARSED )' | awk '!seen[$0]++' || true)
+  if [ -z "$fails" ]; then
+    # 1b) 兜底扫描：跨平台（CRLF/编码/缩进）下行首锚定未必命中，但「声称红却一行失败原文都不给」
+    #     是把定位成本推回人工重跑，所以退化为宽匹配再抓一遍。
+    fails=$(printf '%s\n' "$out" | grep -E '(^|[^A-Za-z_])FAIL([^A-Za-z_]|$)|UNPARSED|^  RED ' | awk '!seen[$0]++' || true)
+  fi
   nf=0
   [ -n "$fails" ] && nf=$(printf '%s\n' "$fails" | wc -l | tr -d ' ')
   [ -n "$fails" ] && printf '%s\n' "$fails"
   # 2) 其它关键行：CASE/EXIT/SUMMARY/断言小结/结果行，按剩余额度取尾部（≤45 行总预算）
   rest=$((45 - nf))
+  keys=""
   if [ "$rest" -gt 0 ]; then
-    printf '%s\n' "$out" \
+    keys=$(printf '%s\n' "$out" \
       | grep -E '^(== |##CASE |##EXIT |##SUMMARY |断言：|PASS=|结果：)' \
-      | awk '!seen[$0]++' | tail -n "$rest" || true
+      | awk '!seen[$0]++' | tail -n "$rest" || true)
+  fi
+  nk=0
+  [ -n "$keys" ] && nk=$(printf '%s\n' "$keys" | wc -l | tr -d ' ')
+  [ "$nk" -gt 0 ] && printf '%s\n' "$keys"
+  # 3) 既无失败行也无关键行（崩溃/编码异常）→ 至少给原始尾部，否则这条红相日志等于空白
+  if [ "$nf" -eq 0 ] && [ "$nk" -eq 0 ]; then
+    printf '===== RAW TAIL %s =====\n' "$id"
+    printf '%s\n' "$out" | tail -n 20
   fi
   return 0
 }
 
 fold_account() { # <场景 id> <输出> <rc>：折叠套件统一记账（假定 parse_suite_counts 已填 PC_*）
-  local id="$1" out="$2" rc="$3"
+  local id="$1" out="$2" rc="$3" red=0
   FOLDED_PASS=$((FOLDED_PASS + PC_PASS))
   FOLDED_FAIL=$((FOLDED_FAIL + PC_FAIL))
   if [ "$rc" -ne 0 ]; then
     # A12a：rc≠0 即使解析出 fail=0 也判失败，绝不因「汇总行自称全绿」放行
     FOLDED_FAIL=$((FOLDED_FAIL + 1))
     printf '  RED  %s（rc=%s pass=%s fail=%s｜来源 %s）\n' "$id" "$rc" "$PC_PASS" "$PC_FAIL" "$PC_SRC"
+    red=1
   elif [ "$PC_FAIL" -ne 0 ]; then
     printf '  RED  %s（rc=%s pass=%s fail=%s｜来源 %s）\n' "$id" "$rc" "$PC_PASS" "$PC_FAIL" "$PC_SRC"
+    red=1
   else
     # 前缀刻意不是 `  ok   `：折叠计数不进叶子 pass（A4），若与 ok() 同形，
     # 任何按 `^  ok   ` 计数的消费者都会多算（含 gh6 的叶子代理），实测 370 ≠ 368。
     printf '  fold %s（pass=%s｜来源 %s）\n' "$id" "$PC_PASS" "$PC_SRC"
-    return 0
   fi
-  # 红相才回显（A15/§1.2）：失败行全量优先、其余关键行补尾；绿相整卷不回显，避免刷屏
-  red_echo "$out"
+  # 回显分支统一收敛到这里：TRACE=1 → 全量原样；否则仅在红相走 red_echo（绿相整卷不回显，避免刷屏）
+  if [ "$SCN_TRACE" = "1" ]; then
+    trace_dump "$id" "$out"
+  elif [ "$red" -eq 1 ]; then
+    red_echo "$id" "$out"
+  fi
   return 0
 }
 
@@ -4421,16 +4452,19 @@ s78_wave13_acceptance() {
     parse_suite_counts "场景78 $base" "$out" "$rc"
     NESTED_PASS=$((NESTED_PASS + PC_PASS))
     NESTED_FAIL=$((NESTED_FAIL + PC_FAIL))
+    if [ "$SCN_TRACE" = "1" ]; then
+      trace_dump "场景78 $base" "$out"     # TRACE=1：全量原样，不截断不过滤
+    fi
     if [ "$rc" -ne 0 ]; then
       # A12a：rc≠0 必计失败——旧实现此处只 printf RED 不递增 FAIL（pre-existing false-green）
       NESTED_FAIL=$((NESTED_FAIL + 1))
       printf '  RED  %s（rc=%s pass=%s fail=%s）\n' "$base" "$rc" "$PC_PASS" "$PC_FAIL"
-      red_echo "$out"
+      [ "$SCN_TRACE" = "1" ] || red_echo "场景78 $base" "$out"
     elif [ "$PC_FAIL" -ne 0 ]; then
       printf '  RED  %s（rc=%s pass=%s fail=%s）\n' "$base" "$rc" "$PC_PASS" "$PC_FAIL"
-      red_echo "$out"
+      [ "$SCN_TRACE" = "1" ] || red_echo "场景78 $base" "$out"
     else
-      printf '%s\n' "$out" | grep -E '^##CASE ' || true
+      if [ "$SCN_TRACE" != "1" ]; then printf '%s\n' "$out" | grep -E '^##CASE ' || true; fi
       # 同理不用 `  ok   ` 前缀：嵌套计数不入叶子 pass（A4），避免按 ok 行计数的消费者多算
       printf '  nest %s（pass=%s）\n' "$base" "$PC_PASS"
     fi
@@ -4961,16 +4995,19 @@ s81_carrier_audit_acceptance() {
     parse_suite_counts "场景81 $base" "$out" "$rc"
     NESTED_PASS=$((NESTED_PASS + PC_PASS))
     NESTED_FAIL=$((NESTED_FAIL + PC_FAIL))
+    if [ "$SCN_TRACE" = "1" ]; then
+      trace_dump "场景81 $base" "$out"     # TRACE=1：全量原样，不截断不过滤
+    fi
     if [ "$rc" -ne 0 ]; then
       # A12a：rc≠0 必计失败（旧实现同款假绿：只 printf RED 不记账）
       NESTED_FAIL=$((NESTED_FAIL + 1))
       printf '  RED  %s（rc=%s pass=%s fail=%s）\n' "$base" "$rc" "$PC_PASS" "$PC_FAIL"
-      red_echo "$out"
+      [ "$SCN_TRACE" = "1" ] || red_echo "场景81 $base" "$out"
     elif [ "$PC_FAIL" -ne 0 ]; then
       printf '  RED  %s（rc=%s pass=%s fail=%s）\n' "$base" "$rc" "$PC_PASS" "$PC_FAIL"
-      red_echo "$out"
+      [ "$SCN_TRACE" = "1" ] || red_echo "场景81 $base" "$out"
     else
-      printf '%s\n' "$out" | grep -E '^##CASE ' || true
+      if [ "$SCN_TRACE" != "1" ]; then printf '%s\n' "$out" | grep -E '^##CASE ' || true; fi
       # 同理不用 `  ok   ` 前缀：嵌套计数不入叶子 pass（A4），避免按 ok 行计数的消费者多算
       printf '  nest %s（pass=%s）\n' "$base" "$PC_PASS"
     fi

@@ -64,6 +64,51 @@ def norm(value) -> str:
     return " ".join(str(value).split())
 
 
+BASH_RESOLVE_TRIED: list[str] = []
+
+
+def _is_wsl_stub(path: str) -> bool:
+    """Windows 上 C:\\Windows\\System32\\bash.exe 是 WSL 存根：会打印 "to list available
+    distributions" 并 rc=1，绝不接受（CI run 43043638972 的 3 条 GH2 结果级裁决即此因）。"""
+    flat = path.replace("\\", "/").lower()
+    return "/system32/" in flat or "/windowsapps/" in flat or flat.endswith("/system32/bash.exe")
+
+
+def resolve_bash() -> str | None:
+    """按序解析真 bash：$BASH → which(bash)（排除存根）→ Windows Git 固定候选；
+    每个候选都跑 `bash -c "exit 0"` 做语义探针，全部失败则返回 None（调用方显式失败）。"""
+    import os
+
+    cands: list[str] = []
+    env_bash = os.environ.get("BASH")
+    if env_bash:
+        cands.append(env_bash)
+    which = shutil.which("bash")
+    if which:
+        cands.append(which)
+    if os.name == "nt":
+        for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)"),
+                     r"C:\\Program Files"):
+            if base:
+                cands.append(os.path.join(base, "Git", "bin", "bash.exe"))
+                cands.append(os.path.join(base, "Git", "usr", "bin", "bash.exe"))
+    seen: set[str] = set()
+    for c in cands:
+        if not c or c in seen:
+            continue
+        seen.add(c)
+        BASH_RESOLVE_TRIED.append(c)
+        if _is_wsl_stub(c):
+            continue
+        try:
+            probe = subprocess.run([c, "-c", "exit 0"], capture_output=True, text=True)
+        except OSError:
+            continue
+        if probe.returncode == 0:
+            return c
+    return None
+
+
 def aggregate_steps(doc) -> list[dict]:
     agg = doc.get("jobs", {}).get("all-checks-passed", {})
     steps = agg.get("steps") if isinstance(agg, dict) else None
@@ -159,7 +204,13 @@ def evaluate(doc, results: dict[str, str], event: str = "pull_request") -> tuple
     script = re.sub(r"__EVENT_CMP_n_([a-z_]+)__", lambda m: "false" if event == m.group(1) else "true", script)
     for job, value in results.items():
         script = script.replace("__" + job.upper().replace("-", "_") + "__", value)
-    proc = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    bash_bin = resolve_bash()
+    if bash_bin is None:
+        # 显式失败并打印尝试过的路径：绝不把「没有可用 bash」静默记成 rc=1（那会与
+        # 「聚合门判失败」混淆，把环境缺陷伪装成契约红）。
+        tried = ", ".join(BASH_RESOLVE_TRIED) or "（无候选：$BASH/which/Git 固定路径均为空）"
+        raise RuntimeError(f"找不到可用的真 bash（已尝试：{tried}）")
+    proc = subprocess.run([bash_bin, "-c", script], capture_output=True, text=True)
     return proc.returncode, (proc.stdout + proc.stderr)
 
 
@@ -272,7 +323,12 @@ def main() -> int:
                   file=sys.stderr)
     else:
         for label, results, event, expected in verdict_cases:
-            rc, out = evaluate(original, results, event)
+            try:
+                rc, out = evaluate(original, results, event)
+            except RuntimeError as exc:
+                failures += 1
+                print(f"FAIL GH2 结果级裁决：{label}（harness：{exc}）", file=sys.stderr)
+                continue
             if rc == expected:
                 print(f"  ok   GH2 结果级裁决：{label}（rc={rc}）")
             else:
