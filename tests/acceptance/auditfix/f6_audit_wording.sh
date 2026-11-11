@@ -58,8 +58,11 @@ if gov_repo "$T" 1; then
   assert_eq "F6c 夹具：core.hooksPath 已清空（干跑将走「未设 hooksPath」分支）" "" "$HP_BEFORE"
   assert_exists "F6c 夹具：.githooks/pre-commit 存在" "$T/.githooks/pre-commit"
   chmod 644 "$T/.githooks/pre-commit"
-  [ -x "$T/.githooks/pre-commit" ] && bad "F6c 夹具：pre-commit 仍可执行（chmod 0644 失败）" \
-    || ok "F6c 夹具：pre-commit 已不可执行（沉睡钩子）"
+  if [ -x "$T/.githooks/pre-commit" ]; then
+    # Windows/Git Bash 的 chmod 不能可靠清除可执行位；无「沉睡钩子」能力时整段显式 SKIP。
+    skip "F6c：平台不支持 chmod 去执行位（Windows），沉睡钩子 dry-run 专项未执行"
+  else
+  ok "F6c 夹具：pre-commit 已不可执行（沉睡钩子）"
 
   SNAP0=$(snap "$T")
   run_in "$T" init --dry-run
@@ -83,6 +86,7 @@ if gov_repo "$T" 1; then
   assert_matches "F6c-3 GO：实跑同样声明沉睡钩子/不改权限" "$R_OUT" "沉睡钩子|不改权限"
   [ -x "$T/.githooks/pre-commit" ] && bad "F6c-3 实跑改变了钩子权限（框架不得替人 chmod）" \
     || ok "F6c-3 实跑未改钩子权限（沉睡钩子仍是人的决定）"
+  fi
 fi
 
 # ================= F6d：悬空文档引用 URL 化 =================

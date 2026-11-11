@@ -26,7 +26,7 @@ GitHubDumper.add_representer(str, _github_str)
 
 
 def load(path: pathlib.Path):
-    value = yaml.safe_load(path.read_text())
+    value = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
         raise ValueError("workflow root is not a mapping")
     # YAML 1.1 会把裸 on 解析成布尔 True；GitHub Actions 使用 YAML 1.2 的 on 键。

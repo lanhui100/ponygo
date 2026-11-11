@@ -19,6 +19,8 @@ jobs:
           fetch-depth: 0
       - name: 配置本地治理钩子路径（git config 不入库）
         run: git config core.hooksPath .githooks
+      - name: 安装测试 YAML 依赖（PyYAML）
+        run: python3 -m pip install --disable-pip-version-check pyyaml
       - name: bash tests/run.sh
         run: bash tests/run.sh
 
@@ -31,6 +33,9 @@ jobs:
       - name: 配置本地治理钩子路径（git config 不入库）
         shell: bash
         run: git config core.hooksPath .githooks
+      - name: 安装测试 YAML 依赖（PyYAML）
+        shell: bash
+        run: python3 -m pip install --disable-pip-version-check pyyaml
       - name: bash tests/run.sh (Git Bash)
         shell: bash
         run: bash tests/run.sh

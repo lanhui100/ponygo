@@ -11,7 +11,7 @@ def main() -> int:
     if len(sys.argv) != 2:
         return 2
     path = pathlib.Path(sys.argv[1]) / "audit/checklist.md"
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
     failures = 0
 

@@ -31,7 +31,7 @@ repo_path = os.path.join(root, ".meta", "gates", "ci-verify.sh")
 marker = 'gate_asset_put "$META_DIR/gates/ci-verify.sh"'
 
 try:
-    with open(ponygo_path, encoding="utf-8") as fh:
+    with open(ponygo_path, encoding="utf-8", newline="") as fh:
         lines = fh.read().splitlines(keepends=True)
 except OSError as exc:
     print(f"FAIL 无法读取 {ponygo_path}: {exc}")
@@ -62,7 +62,7 @@ if not closed:
 
 embedded = "".join(body).replace("\r\n", "\n")
 try:
-    with open(repo_path, encoding="utf-8") as fh:
+    with open(repo_path, encoding="utf-8", newline="") as fh:
         repo = fh.read().replace("\r\n", "\n")
 except OSError as exc:
     print(f"FAIL 无法读取 {repo_path}: {exc}")

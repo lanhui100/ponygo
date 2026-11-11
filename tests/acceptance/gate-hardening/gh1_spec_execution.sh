@@ -61,7 +61,8 @@ fi
 python3 - "$ROOT" <<'PY'
 import pathlib, sys
 root = pathlib.Path(sys.argv[1])
-cli = (root / "ponygo").read_text()
+with open(root / "ponygo", encoding="utf-8", newline="") as fh:
+    cli = fh.read()
 marker = 'gate_asset_put "$META_DIR/gates/ci-verify.sh"'
 pos = cli.find(marker)
 if pos < 0:
@@ -77,7 +78,8 @@ if end < 0:
     print("GH1 heredoc: missing terminator", file=sys.stderr)
     sys.exit(1)
 embedded = cli[body_start:end].replace("\r\n", "\n").rstrip("\n")
-repo = (root / ".meta/gates/ci-verify.sh").read_text().replace("\r\n", "\n").rstrip("\n")
+with open(root / ".meta/gates/ci-verify.sh", encoding="utf-8", newline="") as fh:
+    repo = fh.read().replace("\r\n", "\n").rstrip("\n")
 if embedded != repo:
     print("GH1 heredoc differs from .meta/gates/ci-verify.sh", file=sys.stderr)
     sys.exit(1)

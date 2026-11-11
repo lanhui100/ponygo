@@ -457,7 +457,11 @@ assert_eq "A6-EOL 夹具：manifest 2 条" 2 "$(grep -c . "$T/$MANIFEST_REL" 2>/
 # 转 CRLF（逐行加 \r；不使用 sed 的 \r 展开——Windows Git Bash 的 sed 行为不一致）
 while IFS= read -r _line || [ -n "$_line" ]; do printf '%s\r\n' "$_line"; done   < "$T/$MANIFEST_REL" > "$T/$MANIFEST_REL.crlf"
 mv -f "$T/$MANIFEST_REL.crlf" "$T/$MANIFEST_REL"
-if grep -q $'\r' "$T/$MANIFEST_REL"; then
+_cr_seen=0
+while IFS= read -r _cr_line; do
+  case "$_cr_line" in *$'\r') _cr_seen=1; break ;; esac
+done < "$T/$MANIFEST_REL"
+if [ "$_cr_seen" -eq 1 ]; then
   ok "A6-EOL 取证：manifest 确已转为 CRLF"
 else
   bad "A6-EOL 夹具失败：未能把 manifest 转成 CRLF"
