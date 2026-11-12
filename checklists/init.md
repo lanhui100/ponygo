@@ -65,7 +65,7 @@ agent 读根 `AGENTS.md` / `CLAUDE.md` 即知该做什么，无需人传话：
 
 ---
 
-## TODO（未来从 ponygo 回收的自动化）
+## 延后工作去哪
 
-- [ ] init 后自动填槽（交互式问项目名/定位/栈）——当前用 sed 手填
-- [ ] init 后自动写第一篇决策模板——当前手写
+本清单只保留「照着做就能落地」的操作步骤，不积压 TODO：活动待办在账本 `backlog/`
+（`node scripts/backlog.mjs list`），决策性提案在 `.agents/notes/proposed/`。

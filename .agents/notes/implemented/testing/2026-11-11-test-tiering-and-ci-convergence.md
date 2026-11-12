@@ -66,7 +66,7 @@ ponygo 的测试规模与 CI 反馈已经失真，继续按现状扩展会把维
 
 - **Windows 真值（部分获得）**：本波首轮 windows-core 实跑**失败并已定位修复**（cp1252 编码 + guard 过窄 + autocrlf，见上节）；修复后的 Windows 结果以修复提交后的 CI 运行为准。`windows-full` 全量在 Windows 上**仍未有绿证**，预算 240min 仍属估算。未取得修复后 Windows 绿证前不得宣称「CI 全绿」。
 - **分支保护无机器收据**：仓内无 `required_status_checks` 证据，`all-checks-passed` 是否真被分支保护引用属 `[UNVERIFIED]`，需 `gh api` 取外部收据。
-- **双份真值残留**：AT2 夹具内仍自带一份平台判定（`is_windows()`），与 `ponygo` 的推导规则重复，已登记待办；后续可由 SUT 打印的预算行反向校验。
+- **双份真值残留**：AT2 夹具内仍自带一份平台判定（`is_windows()`），与 `ponygo` 的推导规则重复，已登记为 `backlog:B008`；后续可由 SUT 打印的预算行反向校验。
 - **看门狗默认关闭**：`PONYGO_SCN_TIMEOUT` 未设 = 禁用，故「超时点名」是**可配置护栏**而非默认护栏；默认兜底仍依赖 CI 的 job 级 `timeout-minutes`。
 - **`scn_end` 为 best-effort**：场景体内早退（`return`）会缺结束行，测试只断言「已开始者成对」。
 - **nightly 冗余**：`windows-core`(27) ⊂ `windows-full`(94)，nightly 下同一 commit 会在 Windows 上跑两遍（估算 ≈28min 冗余）。本波不优化：core 是 PR 必跑语义、full 是覆盖语义，合并会破坏 PR 时延目标。
