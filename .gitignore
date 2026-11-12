@@ -8,6 +8,9 @@ Thumbs.db
 .scratch/
 .dev-team/
 
+# backlog 任务级租约（本地运行时，含 pid/会话/心跳；干净克隆不应有此目录）
+backlog/.locks/
+
 # 构建产物/依赖目录按栈补充，例如：
 # target/         # Rust
 # node_modules/   # Node

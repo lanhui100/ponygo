@@ -282,7 +282,9 @@ ponygo 的双根"变成可逐项勾掉的清单，而不是一句"先 audit 再�
 | `tests/run.sh` | CLI 自测（纯 bash、零依赖）——当前共 **94 场景**（N 由脚本自身枚举派生：`grep -cE '^s[0-9]+_[a-z0-9_]+$' tests/run.sh`，不手抄子计数）；汇总行 `scenarios= / pass= / fail= / checks= / skipped=`：`pass` 只数叶子断言，`checks` = 叶子 + 嵌套（s78/s81）+ 折叠（s88–s94）三类之和；`bash tests/run.sh` 全绿为准。分层 `PONYGO_TEST_LAYER=core` 只跑 27 个平台/门禁核心场景，可选看门狗 `PONYGO_SCN_TIMEOUT=<秒>`（默认关） | 维护者；回归门禁 |
 | `.github/workflows/ci.yml` | 回归门禁挂载：`selftest-linux`（全量）+ `windows-core`（PR，Git Bash，core 层）+ `windows-full`（nightly/手动，全量）+ `governance`；聚合门 `all-checks-passed` 是分支保护唯一依赖（required 三元组须全 success，skipped 不算通过；nightly 下 windows-full 缺失即判失败） | 维护者；分支保护依赖 |
 | `.github/workflows/release.yml` | 发布校验和链：tag-push 触发，生成并发布 ponygo.sha256（裸哈希 + CRLF 断言 + 最小权限） | 维护者；发布动作 |
-| `.githooks/` | 本地层门禁落点（A3）：`ponygo init` 把 ADR 门哨兵块挂到 `pre-commit`，`core.hooksPath` 指向此处 | 使用者；提交时强制 |
+| `.githooks/` | 本地层门禁落点（A3）：`ponygo init` 把 ADR 门哨兵块挂到 `pre-commit`，`core.hooksPath` 指向此处；哨兵块之外另有本仓 backlog 账本门调用（fail-closed） | 使用者；提交时强制 |
+| `backlog/` | 本仓活账本（dogfood，**不属** `ponygo init` 播种的骨架）：`tasks.jsonl` 唯一活账本 + `archive/` 闭环归档 + `.next-id` 高水位 + `legacy/` 冻结旧 md 任务单。契约 `backlog/README.md`；判定真源 `scripts/backlog.mjs`；门禁 `.meta/gates/backlog-gate.sh`（登记 `.meta/gates/INSTANCE-GATES.md`） | 维护者；待办与执行证据 |
+| `scripts/backlog.mjs` | 账本 CLI（`record`/`start`/`heartbeat`/`release`/`resolve`/`annotate`/`lint`/`doctor`/`reap`）；与 `backlog-gate.sh` 共用同一判定真源 | 维护者；账本操作 |
 | `docs/` | 文档树：`docs/AGENTS.md`（文档标准）/ `docs/architecture.md`（架构地图）/ `docs/methodology.md`（原理层）/ `docs/dev-team/`（工程过程记录） | 想懂"为什么"与"过程"的人 |
 | `docs/methodology.md` | 原理层：方法论设计依据（源自 deepseek-harness） | 想懂"为什么"的人；机制层的理论源头 |
 | `.meta/` + `.agents/` | 治理根骨架（双根）：.meta/ = constitution / gates（A1/A2/A4/A6/A7/A8/A9 框架资产）/ docs-tier / adaptation（检出替代治理时）/ meta.yaml；.agents/ = notes / skills | 实例化产物；由 `ponygo init` 生成进用户项目 |

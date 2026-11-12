@@ -1,6 +1,6 @@
 # docs/dev-team/ —— 工程过程记录（tier：工程过程记录）
 
-> 承载**已完成的交付证据**：spec / task / review / 交接快照。**不作当前契约**——当前契约的家是
+> 承载**已完成的交付证据**：spec / review / 交接快照。**不作当前契约**——当前契约的家是
 > 根 `README.md`（人读契约）、`maturity-ladder.md`（判据语义）、`.meta/constitution/constitution.md`
 > （常载命约）；文档标准与写作规则在 `docs/AGENTS.md`。
 > 过程记录只增不改结论：历史正文保留当时原貌，失效口径**就地标注现值**（不改写历史）。
@@ -11,8 +11,10 @@
 |---|---|
 | `HANDOFF.md` | v0 收口交接快照（换窗口续接用；路径/档位/计数口径已按现值校正，映射见其 §六） |
 | `specs/` | 版本化实施规格（`spec-ponygo-vX.Y.md`：范围 / 不变量 / 验收） |
-| `tasks/` | 任务单（`TASK-NNN.md`：范围 / 不变量 / 验收） |
 | `reviews/` | 对抗审核报告（architect / adversarial / `review-EXTERNAL-NNN`） |
+
+> **任务单不在本目录**：活动待办与执行证据的唯一活账本是 `backlog/`（契约 `backlog/README.md`，
+> 判定真源 `scripts/backlog.mjs`）；历史 md 任务单冻结在 `backlog/legacy/dev-team-tasks/`，只读。
 
 > 交付过程证据的另一半曾放在本仓 `.dev-team/`——那是**本地工作区（不入库），不作为文档家**，
 > 只在单次交付期间存在；长期可寻址的记录一律落本目录。

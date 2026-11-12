@@ -18,6 +18,7 @@
 | 事故复盘 | `.agents/notes/implemented/bug-fix/` |
 | 用户文档 | `README.md` |
 | 工程过程记录 | `docs/dev-team/`（交付证据，不作当前产品契约）；`.dev-team/` 是本地工作区（不入库），不作为文档家 |
+| 待办账本 | `backlog/README.md`（活动待办 / 租约 / 归档的唯一活账本契约；旧 md 任务单冻结在 `backlog/legacy/`） |
 | 生成参考 | `ponygo --help` 的实时输出；无手编命令参考副本 |
 
 **放置速查**：bug→事故复盘；理由→决策记录；过程→how-to；契约→模块 README；

@@ -1,7 +1,7 @@
 # Review 记录 —— TASK-002 / spec-ponygo-v2.3 rev1（@consultant 对抗审核）
 
 > 审核者：独立子智能体（@consultant 角色，证伪立场）｜ 2026-09-08
-> 对象：`docs/dev-team/specs/spec-ponygo-v2.3.md` rev1 + `docs/dev-team/tasks/TASK-002.md`
+> 对象：`docs/dev-team/specs/spec-ponygo-v2.3.md` rev1 + `docs/dev-team/tasks/TASK-002.md`（该单现值：`backlog/legacy/dev-team-tasks/TASK-002.md`，2026-11-12 随 backlog v2 冻结）
 > 方法：通读 spec + 仓库实证核实（`ponygo` 源码逐段、`tests/run.sh` s12/s14、`maturity-ladder.md` §3/§5/§6、`git shortlog`）
 
 ## 结论
