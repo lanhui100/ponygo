@@ -23,7 +23,8 @@ Status: implemented
      `backlog/.next-id`（高水位，单调不减）、`scripts/backlog.mjs`（CLI，`validateRecord` / `lint` /
      `doctor` 是唯一判定真源）。`backlog/.locks/` 是本地运行时租约，已 `.gitignore`。
    - CLI 从上游基线仓 `pony-agent` 的同名脚本搬运，并做**三处本地差量**（写在文件头血缘注释里）：
-     `ID_FLOOR = 1`（上游因 triage 迁移把候选编号钳在 56；本仓首批编号须从 `B001` 起）；
+     `ID_FLOOR = 1`（**搬运时的上游版本**因 triage 迁移把候选编号钳在 56；本仓首批编号须从 `B001` 起，
+     且不跟随上游后续对该取值的改动）；
      `record` 强制显式 `--fingerprint`（上游缺省 `manual`：不同任务共用同一指纹会被静默合并成一条，
      `README` 却把 `metadata.fingerprint` 写成必填——声称与行为不一致）；`annotate` 拒绝 `--status`
      （状态迁移只走 `start` / `release` / `resolve`，不留「改字段顺手改状态」的旁路）。

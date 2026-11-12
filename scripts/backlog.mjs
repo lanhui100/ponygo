@@ -11,8 +11,9 @@
  * 工作树之间混淆。测试可用 PONY_BACKLOG_ROOT 覆盖。
  *
  * 血缘与本地差量（相对上游基线仓 pony-agent 的同名脚本）：
- * - ID 下限本地化为 `ID_FLOOR = 1`：上游因 triage 迁移遗留把候选编号钳在 56，
- *   ponygo 是新接入仓（首批编号从 B001 起），保留 56 会让首次 `record` 凭空跳到 B056；
+ * - ID 下限本地化为 `ID_FLOOR = 1`：**搬运时的上游版本**因 triage 迁移遗留把候选编号钳在 56
+ *   （上游后续已改，但本仓不跟随上游的下限取值），ponygo 是新接入仓（首批编号从 B001 起），
+ *   保留 56 会让首次 `record` 凭空跳到 B056；
  * - 不搬运上游的 `import-triage` / `normalizeLegacy`：它们只服务 pony-agent 的旧
  *   triage 账本，本仓无该载体（无消费者即不引入死代码）；旧 md 任务单一次性迁移
  *   按 `backlog/README.md`「迁移」节的口径直接生成 JSONL；
@@ -633,7 +634,9 @@ export function main(argv = process.argv.slice(2)) {
       return 0;
     }
     case 'annotate': {
-      if (arg('status') !== undefined) {
+      // 注意用 rest.includes 而不是 arg()：`annotate B001 --status`（末 token 无值）时 arg 取不到，
+      // 这正是要拦的旁路——状态只能经 start / release / resolve。
+      if (rest.includes('--status')) {
         throw new Error('annotate 不支持 --status：状态迁移走 start / release / resolve（done 只能由 resolve 写入）');
       }
       const id = rest[0];

@@ -140,8 +140,8 @@ expect_pass "$c" "P3 真实操作闭环（归档后账本仍合法）"
 # P5 接线实证（静态）：CI governance job 真跑本门；pre-commit 在哨兵块之外调用本门
 grep -qF 'bash .meta/gates/backlog-gate.sh' "$ROOT/.github/workflows/ci.yml" \
   || fail "P5 CI 未挂 backlog 门（governance job 缺 .meta/gates/backlog-gate.sh 调用）"
-grep -qF 'backlog-gate.sh' "$ROOT/.githooks/pre-commit" \
-  || fail "P5 pre-commit 未调用 backlog 门（本地层失守）"
+grep -qF 'bash "$(git rev-parse --show-toplevel)/.meta/gates/backlog-gate.sh" || exit 1' "$ROOT/.githooks/pre-commit" \
+  || fail "P5 pre-commit 未真正调用 backlog 门（缺调用行；注释/echo 不算接线）"
 grep -qF 'fail-closed' "$ROOT/.githooks/pre-commit" \
   || fail "P5 pre-commit 缺 fail-closed 分支（门缺失时应拒绝提交）"
 
