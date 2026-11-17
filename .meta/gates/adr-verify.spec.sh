@@ -59,9 +59,15 @@ TMP=$(mktemp -d) || {
 trap 'rm -rf "$TMP"' EXIT
 
 FAIL=0
+# U4（W3b）运行时计数：asserts = PASS_N + FAIL_N；REJECTS = **期望被拒/期望非零退出**的断言条数，
+# 逐条在断言点累加（禁止手写常数——常数与真实断言数脱钩时，运行时契约就退化成又一个静态扫描）。
+PASS_N=0
+FAIL_N=0
+REJECTS=0
 fail() {
   printf 'FAIL  %s\n' "$*" >&2
   FAIL=1
+  FAIL_N=$((FAIL_N+1))
 }
 
 # 造一个"已安装接线"的最小 git 仓：A1 + 判定真源 + 四态 notes 目录
@@ -101,23 +107,27 @@ expect_accept() { # $1=用例名 $2=仓 [extra args]
     printf '%s\n' "$out" | tail -n 3 | sed 's/^/      /' >&2
     return
   fi
+  PASS_N=$((PASS_N+1))
   printf 'PASS  %s（exit 0）\n' "$name"
 }
 
 expect_reject() { # $1=用例名 $2=仓 [extra args]
   local name="$1" d="$2" out rc
   shift 2
+  REJECTS=$((REJECTS+1))
   out=$(run_gate "$d" "$@") && rc=0 || rc=$?
   if [ "$rc" -eq 0 ]; then
     fail "$name：门应拒绝，实得 exit 0"
     printf '%s\n' "$out" | tail -n 3 | sed 's/^/      /' >&2
     return
   fi
+  PASS_N=$((PASS_N+1))
   printf 'PASS  %s（exit %d）\n' "$name" "$rc"
 }
 
 expect_reject_with() { # $1=用例名 $2=仓 $3=拒绝文案正则（补救必须可执行）
   local name="$1" d="$2" pat="$3" out rc
+  REJECTS=$((REJECTS+1))
   out=$(run_gate "$d") && rc=0 || rc=$?
   if [ "$rc" -eq 0 ]; then
     fail "$name：门应拒绝，实得 exit 0"
@@ -129,6 +139,7 @@ expect_reject_with() { # $1=用例名 $2=仓 $3=拒绝文案正则（补救必�
     printf '%s\n' "$out" | tail -n 3 | sed 's/^/      /' >&2
     return
   fi
+  PASS_N=$((PASS_N+1))
   printf 'PASS  %s（exit %d）\n' "$name" "$rc"
 }
 
@@ -231,6 +242,8 @@ elif ! printf '%s' "$OUT" | grep -q 'ADR 有未暂存改动，请先 git add'; t
   fail "TOCTOU 拒绝文案缺「ADR 有未暂存改动，请先 git add」→ 补救不可执行"
   printf '%s\n' "$OUT" | tail -n 3 | sed 's/^/      /' >&2
 else
+  REJECTS=$((REJECTS+1))
+  PASS_N=$((PASS_N+1))
   printf 'PASS  TOCTOU 拒绝且文案可执行（exit %d）\n' "$RC"
 fi
 
@@ -285,8 +298,12 @@ if [ "$RC" -eq 0 ]; then
   fail "符号链接 ADR 应拒绝，实得 exit 0（F9 未落地：ADR 必须是普通文件）"
   printf '%s\n' "$OUT" | tail -n 3 | sed 's/^/      /' >&2
 elif printf '%s' "$OUT" | grep -qE '普通文件|符号链接|120000'; then
+  REJECTS=$((REJECTS+1))
+  PASS_N=$((PASS_N+1))
   printf 'PASS  符号链接 ADR 拒绝且文案指向"必须是普通文件"（exit %d）\n' "$RC"
 else
+  REJECTS=$((REJECTS+1))
+  PASS_N=$((PASS_N+1))
   printf 'PASS  符号链接 ADR 已拒绝（exit %d）；WARN: 文案未指向"必须是普通文件"（F9 文案待补）\n' "$RC"
 fi
 
@@ -604,6 +621,8 @@ rm -f "$R/.meta/gates/archive-verify.sh"
 expect_reject_with "A6 缺失 → fail-closed 拒绝（文案点名 A6 + fail-closed）" "$R" 'A6 缺失.*fail-closed|fail-closed.*A6'
 # 同样场景再点一次 A6 字样与补救可执行性（分两条断言，便于定位是"没拒"还是"没点名"）
 if printf '%s' "$(run_gate "$R")" | grep -q 'A6'; then
+  REJECTS=$((REJECTS+1))
+  PASS_N=$((PASS_N+1))
   printf 'PASS  A6 缺失拒绝文案点名 A6\n'
 else
   fail "A6 缺失拒绝文案未点名 A6（补救不可执行）"
@@ -647,6 +666,8 @@ spec_commit "$R" base
 git -C "$R" rm -q .agents/notes/implemented/process/2026-10-29-to-remove.md >/dev/null 2>&1
 expect_reject_with "删除 ADR 而无简化 note → 拒绝（文案点名 simplification）" "$R" 'simplification'
 if printf '%s' "$(run_gate "$R")" | grep -q '移除本身是一次决策'; then
+  REJECTS=$((REJECTS+1))
+  PASS_N=$((PASS_N+1))
   printf 'PASS  删除 ADR 拒绝文案声明「移除本身是一次决策」\n'
 else
   fail "删除 ADR 拒绝文案缺「移除本身是一次决策」（理由不可见）"
@@ -727,5 +748,8 @@ if [ "$FAIL" -ne 0 ]; then
   printf '[%s] 未通过：门禁的拒绝/放行语义与预期不符（见上方 FAIL）\n' "$SPEC" >&2
   exit 1
 fi
+# U4（W3b）运行时契约：**成功路径的最后一行**。asserts = 本 spec 自身 PASS+FAIL；
+# rejects = 期望被拒/期望非零退出的断言条数（逐断言累加，不是手写的常数）。
 printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节 + 1.7 rejected 理由（含 CJK 标点）+ 1.8 ## Decision/中文提案标题（含复合词）+ 围栏感知（1.8/1.10）+ A6 缺失/被清空/被换成假门 → fail-closed（含 A6 在场正控制与补回反向对照）+ 删除 ADR 必须同提交入册简化记录（无 note 拒 / 有合法 note 放 / 缺复活条件由 1.11 拒 / 带参模式不受影响 / 生命周期迁移不算删除 / README 不算入册载体）均已证明（exit 0）\n' "$SPEC"
+printf '##SPEC asserts=%s rejects=%s\n' "$((PASS_N + FAIL_N))" "$REJECTS"
 exit 0

@@ -36,6 +36,12 @@ GATE="$ROOT/.meta/gates/scratch-hygiene.sh"
 TMPDIR_SPEC=$(mktemp -d)
 trap 'rm -rf "$TMPDIR_SPEC"' EXIT
 
+# U4（W3b）运行时计数：asserts = PASS_N + FAIL_N；REJECTS = **期望被拒**的断言条数（逐断言累加）。
+PASS_N=0
+FAIL_N=0
+REJECTS=0
+pass1() { PASS_N=$((PASS_N+1)); }
+
 run_gate() {
   (cd "$TMPDIR_SPEC" && bash "$GATE")
 }
@@ -52,16 +58,19 @@ if ! run_gate >/dev/null 2>&1; then
   echo "spec: FAIL 合规样本未能正常放行" >&2
   exit 1
 fi
+pass1
 
 # 2. 负样本 E1: .scratch 被强制跟踪入库
 (
   cd "$TMPDIR_SPEC"
   git add -f .scratch/temp.txt
 )
+REJECTS=$((REJECTS+1))
 if run_gate >/dev/null 2>&1; then
   echo "spec: FAIL [E1] 跟踪 .scratch 样本未被门禁拦截" >&2
   exit 1
 fi
+pass1
 (
   cd "$TMPDIR_SPEC"
   git rm -q -f .scratch/temp.txt
@@ -72,10 +81,12 @@ fi
   cd "$TMPDIR_SPEC"
   echo "" > .gitignore
 )
+REJECTS=$((REJECTS+1))
 if run_gate >/dev/null 2>&1; then
   echo "spec: FAIL [E2] 缺少 .gitignore 规则未被门禁拦截" >&2
   exit 1
 fi
+pass1
 (
   cd "$TMPDIR_SPEC"
   echo ".scratch/" > .gitignore
@@ -85,7 +96,7 @@ fi
 TMPDIR_INSTALL="$TMPDIR_SPEC/install-case"
 mkdir -p "$TMPDIR_INSTALL"
 INSTALL_CASE="$TMPDIR_INSTALL"
-[ ! -e "$INSTALL_CASE/.github/workflows/release.yml" ] || {
+[ ! -e "$INSTALL_CASE/.github/workflows/release.yml" ] && pass1 || {
   echo "spec: FAIL [E3] install-case 不应包含 release.yml" >&2
   exit 1
 }
@@ -95,11 +106,13 @@ INSTALL_CASE="$TMPDIR_INSTALL"
   printf '.scratch/\n' > .gitignore
   echo "cp .scratch/foo ." > install.sh
 )
+REJECTS=$((REJECTS+1))
 if (cd "$INSTALL_CASE" && bash "$GATE") >"$INSTALL_CASE/gate.out" 2>&1; then
   echo "spec: FAIL [E3] 发布安装脚本引用 .scratch 未被门禁拦截" >&2
   exit 1
 fi
-grep -q '\[E3\]' "$INSTALL_CASE/gate.out" && grep -qF 'install.sh' "$INSTALL_CASE/gate.out" || {
+pass1
+grep -q '\[E3\]' "$INSTALL_CASE/gate.out" && grep -qF 'install.sh' "$INSTALL_CASE/gate.out" && pass1 || {
   echo "spec: FAIL [E3] install.sh 拒绝证据不完整" >&2
   exit 1
 }
@@ -109,7 +122,7 @@ printf 'SCRATCH_E3_INSTALL isolated\n'
 TMPDIR_RELEASE="$TMPDIR_SPEC/release-case"
 mkdir -p "$TMPDIR_RELEASE"
 RELEASE_CASE="$TMPDIR_RELEASE"
-[ ! -e "$RELEASE_CASE/install.sh" ] || {
+[ ! -e "$RELEASE_CASE/install.sh" ] && pass1 || {
   echo "spec: FAIL [E3] release-case 不应包含 install.sh" >&2
   exit 1
 }
@@ -120,13 +133,15 @@ RELEASE_CASE="$TMPDIR_RELEASE"
   mkdir -p .github/workflows
   printf 'jobs:\n  release:\n    steps:\n      - run: cp .scratch/artifact ponygo\n' > .github/workflows/release.yml
 )
+REJECTS=$((REJECTS+1))
 if (cd "$RELEASE_CASE" && bash "$GATE") >"$RELEASE_CASE/gate.out" 2>&1; then
   echo "spec: FAIL [E3] release.yml 引用 .scratch 未被门禁拦截" >&2
   exit 1
 fi
+pass1
 grep -q '\[E3\]' "$RELEASE_CASE/gate.out" \
   && grep -qF '.github/workflows/release.yml' "$RELEASE_CASE/gate.out" \
-  && grep -qF '.scratch' "$RELEASE_CASE/gate.out" || {
+  && grep -qF '.scratch' "$RELEASE_CASE/gate.out" && pass1 || {
     echo "spec: FAIL [E3] release.yml 拒绝证据不完整" >&2
     exit 1
   }
@@ -136,7 +151,10 @@ if ! (cd "$RELEASE_CASE" && bash "$GATE") >/dev/null 2>&1; then
   echo "spec: FAIL [E3] release.yml 恢复后未重新放行" >&2
   exit 1
 fi
+pass1
 printf 'SCRATCH_E3_RELEASE isolated\n'
 
 echo "scratch-hygiene.spec: PASS（所有自检与负样本测试通过）"
+# U4（W3b）运行时契约：成功路径的最后一行
+printf '##SPEC asserts=%s rejects=%s\n' "$((PASS_N + FAIL_N))" "$REJECTS"
 exit 0

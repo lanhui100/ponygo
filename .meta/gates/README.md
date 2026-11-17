@@ -288,6 +288,18 @@ bash .meta/gates/<name>.spec.sh   # CI / pre-push 层的等价写法
 
 `*.spec.sh` 契约（违反即执行判据失败）：
 
+- **自报运行时计数 `##SPEC`**（U4/W3b，灰度）：成功路径的**最后一行**打印
+  `##SPEC asserts=<PASS+FAIL> rejects=<期望被拒断言数>`。
+  - `rejects` 必须**逐断言累加**（在每条"期望门拒绝/期望非零退出"的断言旁
+    `REJECTS=$((REJECTS+1))`），**禁止手写常数**——常数迟早与真实断言数脱钩，那时"运行时契约"
+    就退化成又一个静态扫描；
+  - `rejects>=1` 是硬要求：`rejects=0` 等于 spec 自报"我没有拒绝断言" → `--run-specs` **立即判 FAIL**
+    （`[bad] … 自报 rejects=0：没有拒绝断言`）；
+  - **legacy 灰度**：不打印 `##SPEC` 的既有 spec 本轮只打 `[warn] … 未提供 ##SPEC 运行时计数
+    （legacy；本轮 WARN，v3 起判 FAIL）`，**不改退出码**；v3 起 legacy 转 FAIL；
+  - 为什么静态扫描不够：2.3 的形状判据只能看"文本里有没有 `exit 1` 字样"，
+    `if false; then exit 1; fi`、注释掉调用行、把拒绝断言塞进不可达分支都能骗过它；而 spec 自己
+    exit 0 又会把门洗成绿的。运行时自报的 `rejects` 是**执行中真的走到过**的拒绝断言条数。
 - **自包含**：从自身路径解析仓库根（`ROOT=$(cd "$(dirname "$0")/../.." && pwd)`），不依赖调用者 cwd；
 - **只读仓库**：样本一律建在 `mktemp -d` 临时目录、退出时清理；不得改动仓库文件；
 - **秒级**：有 `timeout` 时施加**分档软超时 + KILL 兜底 5s**（KILL 窗口恒 5s，不随预算/平台变）：

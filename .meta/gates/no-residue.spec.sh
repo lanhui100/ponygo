@@ -36,8 +36,13 @@ GATE="$HERE/no-residue.sh"
 }
 
 FAILN=0
-ok()  { printf '  [ok]   %s\n' "$*"; }
-bad() { printf '  [FAIL] %s\n' "$*" >&2; FAILN=$((FAILN+1)); }
+# U4（W3b）运行时计数：asserts = PASS_N + FAIL_N；REJECTS = **期望被拒（期望非零退出）**的断言条数，
+# 由 assert_rc 依"期望值"自动累加（贴着断言走，不是手写常数）。
+PASS_N=0
+FAIL_N=0
+REJECTS=0
+ok()  { PASS_N=$((PASS_N+1)); printf '  [ok]   %s\n' "$*"; }
+bad() { printf '  [FAIL] %s\n' "$*" >&2; FAILN=$((FAILN+1)); FAIL_N=$((FAIL_N+1)); }
 
 TMP=$(mktemp -d 2>/dev/null) || { printf 'no-residue.spec: FAIL 无法创建样本目录\n' >&2; exit 1; }
 trap 'rm -rf "$TMP"' EXIT
@@ -70,6 +75,7 @@ run_gate_grep() { # <样本仓根>（强制 grep 退化路径）
 }
 tail_of() { printf '%s' "$OUT" | tail -n 2 | tr '\n' ' '; }
 assert_rc() { # <期望 rc> <描述>
+  case "$1" in 0) ;; *) REJECTS=$((REJECTS+1)) ;; esac   # 期望非零 = 一条拒绝断言
   if [ "$RC" -eq "$1" ]; then ok "$2（exit $RC）"
   else bad "$2（期望 exit $1，实得 $RC；输出尾部：$(tail_of)）"; fi
 }
@@ -255,4 +261,6 @@ if [ "$FAILN" -ne 0 ]; then
   exit 1
 fi
 printf '== no-residue.spec：通过（负样本必拒 + 正样本放行 + 参数/清单/范围/字面口径 + rg/grep 检索面同口径（隐藏目录、被 ignore 目录）全部符合预期）==\n'
+# U4（W3b）运行时契约：成功路径的最后一行
+printf '##SPEC asserts=%s rejects=%s\n' "$((PASS_N + FAIL_N))" "$REJECTS"
 exit 0

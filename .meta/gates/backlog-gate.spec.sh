@@ -54,7 +54,12 @@ CLI="$ROOT/scripts/backlog.mjs"
 TMPDIR_SPEC=$(mktemp -d)
 trap 'rm -rf "$TMPDIR_SPEC"' EXIT
 
-fail() { echo "spec: FAIL $*" >&2; exit 1; }
+# U4（W3b）运行时计数：asserts = PASS_N + FAIL_N；REJECTS = **期望被拒**的断言条数（逐断言累加）。
+PASS_N=0
+FAIL_N=0
+REJECTS=0
+pass1() { PASS_N=$((PASS_N+1)); }
+fail() { FAIL_N=$((FAIL_N+1)); echo "spec: FAIL $*" >&2; exit 1; }
 
 # 每个样本是独立夹具仓：只放被测 CLI 副本与账本，门禁按 PONYGO_WORKSPACE_ROOT 寻址。
 mkcase() {
@@ -77,10 +82,12 @@ expect_pass() {
     cat "$1/gate.out" >&2
     fail "$2 未被放行"
   fi
+  pass1
 }
 
-expect_fail() {
+expect_fail() { # 期望门拒绝：一条 rejects 断言（拒绝 + 拒绝证据两段都必须成立）
   case_dir="$1"; label="$2"; needle="$3"
+  REJECTS=$((REJECTS+1))
   if run_gate "$case_dir" >"$case_dir/gate.out" 2>&1; then
     cat "$case_dir/gate.out" >&2
     fail "$label 未被拒绝"
@@ -89,6 +96,7 @@ expect_fail() {
     cat "$case_dir/gate.out" >&2
     fail "$label 拒绝证据不完整（未出现：$needle）"
   }
+  pass1
 }
 
 # P1 合法账本：todo 记录 + 高水位越过最大编号 → 放行
@@ -120,30 +128,30 @@ fi
 if ! bl "$c" start B001 --owner spec-verifier --paths "scripts/backlog.mjs" >>"$c/p3.out" 2>&1; then
   cat "$c/p3.out" >&2; fail "P3 start 失败（应获取租约并置 in_progress）"
 fi
-[ -f "$c/backlog/.locks/B001.lock" ] || fail "P3 start 未生成租约锁 .locks/B001.lock"
+[ -f "$c/backlog/.locks/B001.lock" ] && pass1 || fail "P3 start 未生成租约锁 .locks/B001.lock"
 if ! bl "$c" resolve B001 --evidence "spec e2e：record→start→resolve" >>"$c/p3.out" 2>&1; then
   cat "$c/p3.out" >&2; fail "P3 resolve 失败（应归档并释放租约）"
 fi
 [ -f "$c/backlog/.locks/B001.lock" ] && fail "P3 resolve 未释放租约锁（残留 .locks/B001.lock）"
 archive_file="$c/backlog/archive/tasks-$(date -u +%Y).jsonl"
-[ -f "$archive_file" ] || fail "P3 resolve 未写入归档 tasks-$(date -u +%Y).jsonl"
-grep -qF '"id":"B001"' "$archive_file" || fail "P3 归档文件不含 B001"
+[ -f "$archive_file" ] && pass1 || fail "P3 resolve 未写入归档 tasks-$(date -u +%Y).jsonl"
+grep -qF '"id":"B001"' "$archive_file" && pass1 || fail "P3 归档文件不含 B001"
 [ -s "$c/backlog/tasks.jsonl" ] && fail "P3 活跃池未清空已闭环记录"
 expect_pass "$c" "P3 真实操作闭环（归档后账本仍合法）"
 
 # P4 实例级在场断言（本仓已启用账本，防「删账本 → 门静默跳过 → 整链变绿」）
 # spec 常驻跑在本仓根上：这里断的不是夹具，而是"本仓确实有账本"这个事实。
-[ -f "$ROOT/backlog/tasks.jsonl" ] || fail "P4 本仓 backlog/tasks.jsonl 缺失（门会静默跳过 = 账本门失效）"
-[ -f "$ROOT/backlog/.next-id" ] || fail "P4 本仓 backlog/.next-id 缺失（高水位丢失，ID 单调性无载体）"
-[ -f "$ROOT/scripts/backlog.mjs" ] || fail "P4 判定真源 scripts/backlog.mjs 缺失"
+[ -f "$ROOT/backlog/tasks.jsonl" ] && pass1 || fail "P4 本仓 backlog/tasks.jsonl 缺失（门会静默跳过 = 账本门失效）"
+[ -f "$ROOT/backlog/.next-id" ] && pass1 || fail "P4 本仓 backlog/.next-id 缺失（高水位丢失，ID 单调性无载体）"
+[ -f "$ROOT/scripts/backlog.mjs" ] && pass1 || fail "P4 判定真源 scripts/backlog.mjs 缺失"
 
 # P5 接线实证（静态）：CI governance job 真跑本门；pre-commit 在哨兵块之外调用本门
 grep -qF 'bash .meta/gates/backlog-gate.sh' "$ROOT/.github/workflows/ci.yml" \
-  || fail "P5 CI 未挂 backlog 门（governance job 缺 .meta/gates/backlog-gate.sh 调用）"
+  && pass1 || fail "P5 CI 未挂 backlog 门（governance job 缺 .meta/gates/backlog-gate.sh 调用）"
 grep -qF 'bash "$(git rev-parse --show-toplevel)/.meta/gates/backlog-gate.sh" || exit 1' "$ROOT/.githooks/pre-commit" \
-  || fail "P5 pre-commit 未真正调用 backlog 门（缺调用行；注释/echo 不算接线）"
+  && pass1 || fail "P5 pre-commit 未真正调用 backlog 门（缺调用行；注释/echo 不算接线）"
 grep -qF 'fail-closed' "$ROOT/.githooks/pre-commit" \
-  || fail "P5 pre-commit 缺 fail-closed 分支（门缺失时应拒绝提交）"
+  && pass1 || fail "P5 pre-commit 缺 fail-closed 分支（门缺失时应拒绝提交）"
 
 # N1 缺 metadata.fingerprint → lint 拒绝
 c=$(mkcase neg-fingerprint)
@@ -175,7 +183,7 @@ expect_fail "$c" "N4 高水位越界" "越过高水位"
 c="$TMPDIR_SPEC/no-ledger"
 mkdir -p "$c"
 expect_pass "$c" "N5 无账本（迁移期跳过）"
-grep -qF '跳过' "$c/gate.out" || fail "N5 跳过提示缺失"
+grep -qF '跳过' "$c/gate.out" && pass1 || fail "N5 跳过提示缺失"
 
 # N6 无 node → fail-closed 拒绝
 c=$(mkcase no-node)
@@ -185,7 +193,7 @@ if env -i PATH=/nonexistent PONYGO_WORKSPACE_ROOT="$c" PONY_BACKLOG_ROOT="$c" "$
   cat "$c/gate.out" >&2
   fail "N6 无 node 未被拒绝（fail-open）"
 fi
-grep -qF 'fail-closed' "$c/gate.out" || fail "N6 拒绝文案缺失 fail-closed"
+grep -qF 'fail-closed' "$c/gate.out" && pass1 || fail "N6 拒绝文案缺失 fail-closed"
 
 # N7 锁存在但记录非 in_progress → 租约-状态互斥拒绝
 c=$(mkcase neg-lease-status-mismatch)
@@ -198,6 +206,7 @@ expect_fail "$c" "N7 锁存而记录非 in_progress" "存在租约锁但记录�
 # N8 record 缺 --fingerprint → exit 1（缺省会退化为"所有任务共用一个指纹"并被静默合并成一条）
 c=$(mkcase neg-record-fingerprint)
 : > "$c/backlog/tasks.jsonl"
+REJECTS=$((REJECTS+1))
 if bl "$c" record --category Task --title "无指纹" >"$c/n8.out" 2>&1; then
   cat "$c/n8.out" >&2
   fail "N8 record 缺 --fingerprint 未被拒绝（静默合并风险）"
@@ -205,7 +214,7 @@ fi
 grep -qF 'fingerprint' "$c/n8.out" || { cat "$c/n8.out" >&2; fail "N8 拒绝文案未提 fingerprint"; }
 
 # H pre-commit 接线：门在场必须放行，门缺失必须 fail-closed 拒绝
-command -v git >/dev/null 2>&1 || fail "H 需要 git 才能验证 pre-commit 接线"
+command -v git >/dev/null 2>&1 && pass1 || fail "H 需要 git 才能验证 pre-commit 接线"
 h="$TMPDIR_SPEC/hook-wiring"
 mkdir -p "$h"
 (
@@ -228,23 +237,30 @@ if ! ( cd "$h" && git commit -qm control ) >"$h/hook.out" 2>&1; then
   cat "$h/hook.out" >&2
   fail "H 门在场时合法提交被误拒"
 fi
+pass1
 # H2 门在场 + 账本非法 → commit 必须被拒，且拒绝证据来自门本身：
 # 这一步杀掉「钩子里只判断文件存在、没有真正调用门」的接线 mutant（把调用行换成 true/|| true 仍会全绿）。
 ( cd "$h" && printf '%s\n' '{"id":"B001","category":"Task","priority":"P1","status":"todo","title":"t","created_at":"2026-01-01T00:00:00.000Z","metadata":{}}' > backlog/tasks.jsonl && echo bad > c.txt && git add c.txt )
+REJECTS=$((REJECTS+1))
 if ( cd "$h" && git commit -qm bad-ledger ) >"$h/hook2a.out" 2>&1; then
   cat "$h/hook2a.out" >&2
   fail "H2 账本非法时提交未被拒绝（钩子可能未真正执行门）"
 fi
+pass1
 grep -qF 'backlog-gate: FAIL' "$h/hook2a.out" || {
   cat "$h/hook2a.out" >&2
   fail "H2 拒绝证据不含 backlog-gate: FAIL（门未被执行）"
 }
 ( cd "$h" && rm -f .meta/gates/backlog-gate.sh && echo world > b.txt && git add b.txt )
+REJECTS=$((REJECTS+1))
 if ( cd "$h" && git commit -qm blocked ) >"$h/hook2.out" 2>&1; then
   cat "$h/hook2.out" >&2
   fail "H 门缺失时提交未被 fail-closed 拒绝"
 fi
-grep -qF 'fail-closed' "$h/hook2.out" || fail "H 拒绝文案缺失 fail-closed"
+pass1
+grep -qF 'fail-closed' "$h/hook2.out" && pass1 || fail "H 拒绝文案缺失 fail-closed"
 
 echo "backlog-gate.spec: PASS（P1 合法账本放行 + P2 编号下限 B001 + P3 真实操作闭环 + P4 实例级在场 + P5 接线 + N1–N8 全部按预期拒绝/跳过 + H/H2 pre-commit 接线与真执行）"
+# U4（W3b）运行时契约：成功路径的最后一行
+printf '##SPEC asserts=%s rejects=%s\n' "$((PASS_N + FAIL_N))" "$REJECTS"
 exit 0

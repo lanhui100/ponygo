@@ -777,6 +777,18 @@ bash .meta/gates/<name>.spec.sh   # CI / pre-push 层的等价写法
 
 `*.spec.sh` 契约（违反即执行判据失败）：
 
+- **自报运行时计数 `##SPEC`**（U4/W3b，灰度）：成功路径的**最后一行**打印
+  `##SPEC asserts=<PASS+FAIL> rejects=<期望被拒断言数>`。
+  - `rejects` 必须**逐断言累加**（在每条"期望门拒绝/期望非零退出"的断言旁
+    `REJECTS=$((REJECTS+1))`），**禁止手写常数**——常数迟早与真实断言数脱钩，那时"运行时契约"
+    就退化成又一个静态扫描；
+  - `rejects>=1` 是硬要求：`rejects=0` 等于 spec 自报"我没有拒绝断言" → `--run-specs` **立即判 FAIL**
+    （`[bad] … 自报 rejects=0：没有拒绝断言`）；
+  - **legacy 灰度**：不打印 `##SPEC` 的既有 spec 本轮只打 `[warn] … 未提供 ##SPEC 运行时计数
+    （legacy；本轮 WARN，v3 起判 FAIL）`，**不改退出码**；v3 起 legacy 转 FAIL；
+  - 为什么静态扫描不够：2.3 的形状判据只能看"文本里有没有 `exit 1` 字样"，
+    `if false; then exit 1; fi`、注释掉调用行、把拒绝断言塞进不可达分支都能骗过它；而 spec 自己
+    exit 0 又会把门洗成绿的。运行时自报的 `rejects` 是**执行中真的走到过**的拒绝断言条数。
 - **自包含**：从自身路径解析仓库根（`ROOT=$(cd "$(dirname "$0")/../.." && pwd)`），不依赖调用者 cwd；
 - **只读仓库**：样本一律建在 `mktemp -d` 临时目录、退出时清理；不得改动仓库文件；
 - **秒级**：有 `timeout` 时施加**分档软超时 + KILL 兜底 5s**（KILL 窗口恒 5s，不随预算/平台变）：
@@ -3730,7 +3742,7 @@ verify_ladder() {
 # verify_ladder 的 FAIL 分支输出（VL_FAILS 非空 → 提前 return 1），故「2.3 执行判据 已真跑并通过」
 # 绝不会与「静态 2.3 FAIL」同屏——执行侧不得给静态侧的失败洗白。
 run_gate_specs() {
-  local n=0 bad=0 skip=0 f out rc tail_ outfile spec_depth=0 allout=""
+  local n=0 bad=0 skip=0 legacy=0 f out rc tail_ outfile spec_depth=0 allout="" spec_line="" spec_a="" spec_r=""
   # A：结论行要能说清「N 真跑通过 / M 未验证（SKIPPED）」——计数用文件级变量（verify_ladder 读）
   SPEC_RUN_PASS=0; SPEC_RUN_SKIP=0
   if [ "${PONYGO_IN_SPEC:-0}" = "1" ]; then
@@ -3870,7 +3882,27 @@ run_gate_specs() {
       skip=$((skip+1))
       printf '  [skipped] 2.3 spec 自检：%s 自报 SKIPPED（不计入 PASS）\n' "$f"
     else
-      printf '  [ok]   2.3 spec 自检：%s\n' "$f"
+      # U4（W3b）：**运行时契约** `##SPEC asserts=<a> rejects=<r>`（spec 成功路径的最后一行）。
+      # 为什么需要它：静态扫描（2.3 形状判据）只证明"文本里有 exit 1 字样"，抓不到
+      # 「拒绝断言写在不可达分支里」——`if false; then exit 1; fi` 与注释掉调用行都能过静态扫描，
+      # 而 spec 照样 exit 0。运行时自报的 rejects 是**执行中真的走到过**的拒绝断言条数。
+      # 灰度：rejects=0 → 立即 FAIL（自报"我没有拒绝断言"= 门没被证明过）；
+      #       无该行（legacy）→ 本轮只 WARN、不改退出码（存量实例的 spec 不可能一夜改完），v3 起转 FAIL。
+      spec_line=$(printf '%s\n' "${allout:-}" | grep -E '^##SPEC[[:space:]]' | tail -n1)
+      spec_a=""; spec_r=""
+      if [ -n "$spec_line" ]; then
+        spec_a=$(printf '%s' "$spec_line" | sed -n 's/.*asserts=\([0-9][0-9]*\).*/\1/p')
+        spec_r=$(printf '%s' "$spec_line" | sed -n 's/.*rejects=\([0-9][0-9]*\).*/\1/p')
+      fi
+      if [ -z "$spec_line" ] || [ -z "$spec_r" ]; then
+        legacy=$((legacy+1))
+        printf '  [warn]  2.3 %s 未提供 ##SPEC 运行时计数（legacy；本轮 WARN，v3 起判 FAIL）\n' "$f"
+      elif [ "$spec_r" -ge 1 ]; then
+        printf '  [ok]   2.3 spec 自检：%s（##SPEC asserts=%s rejects=%s）\n' "$f" "${spec_a:-?}" "$spec_r"
+      else
+        bad=$((bad+1))
+        printf '  [bad]   2.3 %s 自报 rejects=0：没有拒绝断言（##SPEC asserts=%s rejects=0）\n' "$f" "${spec_a:-?}"
+      fi
     fi
   done < <(find "$META_DIR/gates" -type f -name '*.spec.sh' -print0 2>/dev/null)
   if [ -n "$SPEC_TMPFILE" ]; then rm -f "$SPEC_TMPFILE"; SPEC_TMPFILE=""; fi
@@ -3887,6 +3919,9 @@ run_gate_specs() {
   fi
   if [ "$bad" -ne 0 ]; then
     printf 'ponygo: 2.3 执行判据未通过：%s/%s 个 spec 自检失败（门可能已失效）\n' "$bad" "$n" >&2
+    if [ "$legacy" -gt 0 ]; then
+      printf '  [warn]  2.3 legacy spec：%s 个未提供 ##SPEC 运行时计数（本轮 WARN；v3 起判 FAIL）\n' "$legacy"
+    fi
     return 1
   fi
   if [ "$skip" -gt 0 ]; then
@@ -3898,6 +3933,9 @@ run_gate_specs() {
     return 2
   fi
   printf '  [ok]   2.3 执行判据：%s 个 spec 全部自检通过\n' "$n"
+  if [ "$legacy" -gt 0 ]; then
+    printf '  [warn]  2.3 legacy spec：%s 个未提供 ##SPEC 运行时计数（本轮 WARN；v3 起判 FAIL）\n' "$legacy"
+  fi
   return 0
 }
 
@@ -4256,9 +4294,15 @@ TMP=$(mktemp -d) || {
 trap 'rm -rf "$TMP"' EXIT
 
 FAIL=0
+# U4（W3b）运行时计数：asserts = PASS_N + FAIL_N；REJECTS = **期望被拒/期望非零退出**的断言条数，
+# 逐条在断言点累加（禁止手写常数——常数与真实断言数脱钩时，运行时契约就退化成又一个静态扫描）。
+PASS_N=0
+FAIL_N=0
+REJECTS=0
 fail() {
   printf 'FAIL  %s\n' "$*" >&2
   FAIL=1
+  FAIL_N=$((FAIL_N+1))
 }
 
 # 造一个"已安装接线"的最小 git 仓：A1 + 判定真源 + 四态 notes 目录
@@ -4298,23 +4342,27 @@ expect_accept() { # $1=用例名 $2=仓 [extra args]
     printf '%s\n' "$out" | tail -n 3 | sed 's/^/      /' >&2
     return
   fi
+  PASS_N=$((PASS_N+1))
   printf 'PASS  %s（exit 0）\n' "$name"
 }
 
 expect_reject() { # $1=用例名 $2=仓 [extra args]
   local name="$1" d="$2" out rc
   shift 2
+  REJECTS=$((REJECTS+1))
   out=$(run_gate "$d" "$@") && rc=0 || rc=$?
   if [ "$rc" -eq 0 ]; then
     fail "$name：门应拒绝，实得 exit 0"
     printf '%s\n' "$out" | tail -n 3 | sed 's/^/      /' >&2
     return
   fi
+  PASS_N=$((PASS_N+1))
   printf 'PASS  %s（exit %d）\n' "$name" "$rc"
 }
 
 expect_reject_with() { # $1=用例名 $2=仓 $3=拒绝文案正则（补救必须可执行）
   local name="$1" d="$2" pat="$3" out rc
+  REJECTS=$((REJECTS+1))
   out=$(run_gate "$d") && rc=0 || rc=$?
   if [ "$rc" -eq 0 ]; then
     fail "$name：门应拒绝，实得 exit 0"
@@ -4326,6 +4374,7 @@ expect_reject_with() { # $1=用例名 $2=仓 $3=拒绝文案正则（补救必�
     printf '%s\n' "$out" | tail -n 3 | sed 's/^/      /' >&2
     return
   fi
+  PASS_N=$((PASS_N+1))
   printf 'PASS  %s（exit %d）\n' "$name" "$rc"
 }
 
@@ -4428,6 +4477,8 @@ elif ! printf '%s' "$OUT" | grep -q 'ADR 有未暂存改动，请先 git add'; t
   fail "TOCTOU 拒绝文案缺「ADR 有未暂存改动，请先 git add」→ 补救不可执行"
   printf '%s\n' "$OUT" | tail -n 3 | sed 's/^/      /' >&2
 else
+  REJECTS=$((REJECTS+1))
+  PASS_N=$((PASS_N+1))
   printf 'PASS  TOCTOU 拒绝且文案可执行（exit %d）\n' "$RC"
 fi
 
@@ -4482,8 +4533,12 @@ if [ "$RC" -eq 0 ]; then
   fail "符号链接 ADR 应拒绝，实得 exit 0（F9 未落地：ADR 必须是普通文件）"
   printf '%s\n' "$OUT" | tail -n 3 | sed 's/^/      /' >&2
 elif printf '%s' "$OUT" | grep -qE '普通文件|符号链接|120000'; then
+  REJECTS=$((REJECTS+1))
+  PASS_N=$((PASS_N+1))
   printf 'PASS  符号链接 ADR 拒绝且文案指向"必须是普通文件"（exit %d）\n' "$RC"
 else
+  REJECTS=$((REJECTS+1))
+  PASS_N=$((PASS_N+1))
   printf 'PASS  符号链接 ADR 已拒绝（exit %d）；WARN: 文案未指向"必须是普通文件"（F9 文案待补）\n' "$RC"
 fi
 
@@ -4801,6 +4856,8 @@ rm -f "$R/.meta/gates/archive-verify.sh"
 expect_reject_with "A6 缺失 → fail-closed 拒绝（文案点名 A6 + fail-closed）" "$R" 'A6 缺失.*fail-closed|fail-closed.*A6'
 # 同样场景再点一次 A6 字样与补救可执行性（分两条断言，便于定位是"没拒"还是"没点名"）
 if printf '%s' "$(run_gate "$R")" | grep -q 'A6'; then
+  REJECTS=$((REJECTS+1))
+  PASS_N=$((PASS_N+1))
   printf 'PASS  A6 缺失拒绝文案点名 A6\n'
 else
   fail "A6 缺失拒绝文案未点名 A6（补救不可执行）"
@@ -4844,6 +4901,8 @@ spec_commit "$R" base
 git -C "$R" rm -q .agents/notes/implemented/process/2026-10-29-to-remove.md >/dev/null 2>&1
 expect_reject_with "删除 ADR 而无简化 note → 拒绝（文案点名 simplification）" "$R" 'simplification'
 if printf '%s' "$(run_gate "$R")" | grep -q '移除本身是一次决策'; then
+  REJECTS=$((REJECTS+1))
+  PASS_N=$((PASS_N+1))
   printf 'PASS  删除 ADR 拒绝文案声明「移除本身是一次决策」\n'
 else
   fail "删除 ADR 拒绝文案缺「移除本身是一次决策」（理由不可见）"
@@ -4924,7 +4983,10 @@ if [ "$FAIL" -ne 0 ]; then
   printf '[%s] 未通过：门禁的拒绝/放行语义与预期不符（见上方 FAIL）\n' "$SPEC" >&2
   exit 1
 fi
+# U4（W3b）运行时契约：**成功路径的最后一行**。asserts = 本 spec 自身 PASS+FAIL；
+# rejects = 期望被拒/期望非零退出的断言条数（逐断言累加，不是手写的常数）。
 printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节 + 1.7 rejected 理由（含 CJK 标点）+ 1.8 ## Decision/中文提案标题（含复合词）+ 围栏感知（1.8/1.10）+ A6 缺失/被清空/被换成假门 → fail-closed（含 A6 在场正控制与补回反向对照）+ 删除 ADR 必须同提交入册简化记录（无 note 拒 / 有合法 note 放 / 缺复活条件由 1.11 拒 / 带参模式不受影响 / 生命周期迁移不算删除 / README 不算入册载体）均已证明（exit 0）\n' "$SPEC"
+printf '##SPEC asserts=%s rejects=%s\n' "$((PASS_N + FAIL_N))" "$REJECTS"
 exit 0
 PONYGO_EOF
   # 已有但丢执行位（如经 Windows/zip 转手）→ 补回；A1/A2/A4 是框架不可变资产，改权限不改字节
@@ -5548,12 +5610,22 @@ TMP=$(mktemp -d 2>/dev/null) || {
 trap 'rm -rf "$TMP" 2>/dev/null || true' EXIT INT TERM
 
 FAIL=0
+# U4（W3b）运行时计数：asserts = PASS_N + FAIL_N；REJECTS = **期望被拒**的断言条数（逐断言累加）。
+PASS_N=0
+FAIL_N=0
+REJECTS=0
 # 通过行（A7 的 [ok] 行数被上游计数：5 负样本 + 1 合法样本 = 6）
-ok_case() { printf '[ok]   %s\n' "$*"; }
+ok_case() { PASS_N=$((PASS_N+1)); printf '[ok]   %s\n' "$*"; }
 fail_case() {
   FAIL=1
+  FAIL_N=$((FAIL_N+1))
   printf '[fail] %s\n' "$*"
   printf '[%s] 失败：%s\n' "$SPEC" "$*" >&2
+}
+# 期望被拒的断言：先记一条 rejects，再按 rc 判通过/失败（计数点贴着断言，禁止手写常数）
+reject_case() { # <rc> <描述>：rc≠0 即门确实拒绝了
+  REJECTS=$((REJECTS+1))
+  if [ "$1" -ne 0 ]; then ok_case "$2"; else fail_case "$2（门未拒绝，exit 0）"; fi
 }
 
 # 造一个独立样本仓：只放被测门禁 + 归档目录（不需要 git，A6 以自身路径解析仓库根）
@@ -5612,7 +5684,7 @@ if [ -n "$d" ]; then
     if run_gate "$d" check; then
       fail_case "N1 篡改：归档件被改一字节后 check 仍放行（门未拒绝哈希不符）"
     else
-      ok_case "N1 篡改：封印后被改一字节 → check 拒绝（exit 1）"
+      reject_case 1 "N1 篡改：封印后被改一字节 → check 拒绝（exit 1）"
     fi
   fi
 fi
@@ -5624,7 +5696,7 @@ if [ -n "$d" ]; then
   if run_gate "$d" check; then
     fail_case "N2 缺条目：归档件未封印时 check 仍放行（门未报未封印）"
   else
-    ok_case "N2 缺条目：归档件未封印 → check 拒绝（exit 1）"
+    reject_case 1 "N2 缺条目：归档件未封印 → check 拒绝（exit 1）"
   fi
 fi
 
@@ -5639,7 +5711,7 @@ if [ -n "$d" ]; then
     if run_gate "$d" check; then
       fail_case "N3 孤儿：manifest 条目指向不存在文件时 check 仍放行（门未报孤儿）"
     else
-      ok_case "N3 孤儿：manifest 条目指向不存在的归档件 → check 拒绝（exit 1）"
+      reject_case 1 "N3 孤儿：manifest 条目指向不存在的归档件 → check 拒绝（exit 1）"
     fi
   fi
 fi
@@ -5656,7 +5728,7 @@ if [ -n "$d" ]; then
     if run_gate "$d" check; then
       fail_case "N4 重复：manifest 同一路径登记两行时 check 仍放行（门未报重复）"
     else
-      ok_case "N4 重复：manifest 重复条目 → check 拒绝（exit 1）"
+      reject_case 1 "N4 重复：manifest 重复条目 → check 拒绝（exit 1）"
     fi
   fi
 fi
@@ -5675,7 +5747,7 @@ if [ -n "$d" ]; then
     else
       after=$(sha_of "$d/.agents/notes/archived/manifest.sha256")
       if [ "$before" = "$after" ]; then
-        ok_case "N5 非追加：既有条目被改动 → seal 拒绝且 manifest 零写入"
+        reject_case 1 "N5 非追加：既有条目被改动 → seal 拒绝且 manifest 零写入"
       else
         fail_case "N5 非追加：seal 拒绝但仍改写了 manifest（篡改被洗白）"
       fi
@@ -5701,6 +5773,10 @@ rm -rf "$TMP" 2>/dev/null || true
 trap - EXIT INT TERM
 
 if [ "$FAIL" -eq 0 ]; then
+  # U4（W3b）运行时契约：成功路径打印机读计数（asserts=PASS+FAIL；rejects=期望被拒断言数）。
+  # 位置放在人类「通过」横幅**之前**：末行「通过」是 A7-1 的既有断言（wave13 f2），
+  # 计数行只需存在于输出中（CLI 取最后一条 ##SPEC），不必抢末行。
+  printf '##SPEC asserts=%s rejects=%s\n' "$((PASS_N + FAIL_N))" "$REJECTS"
   printf '== %s：通过（5 类负样本 + 1 合法样本全部符合预期）==\n' "$SPEC"
   exit 0
 fi
@@ -5905,8 +5981,13 @@ GATE="$HERE/no-residue.sh"
 }
 
 FAILN=0
-ok()  { printf '  [ok]   %s\n' "$*"; }
-bad() { printf '  [FAIL] %s\n' "$*" >&2; FAILN=$((FAILN+1)); }
+# U4（W3b）运行时计数：asserts = PASS_N + FAIL_N；REJECTS = **期望被拒（期望非零退出）**的断言条数，
+# 由 assert_rc 依"期望值"自动累加（贴着断言走，不是手写常数）。
+PASS_N=0
+FAIL_N=0
+REJECTS=0
+ok()  { PASS_N=$((PASS_N+1)); printf '  [ok]   %s\n' "$*"; }
+bad() { printf '  [FAIL] %s\n' "$*" >&2; FAILN=$((FAILN+1)); FAIL_N=$((FAIL_N+1)); }
 
 TMP=$(mktemp -d 2>/dev/null) || { printf 'no-residue.spec: FAIL 无法创建样本目录\n' >&2; exit 1; }
 trap 'rm -rf "$TMP"' EXIT
@@ -5939,6 +6020,7 @@ run_gate_grep() { # <样本仓根>（强制 grep 退化路径）
 }
 tail_of() { printf '%s' "$OUT" | tail -n 2 | tr '\n' ' '; }
 assert_rc() { # <期望 rc> <描述>
+  case "$1" in 0) ;; *) REJECTS=$((REJECTS+1)) ;; esac   # 期望非零 = 一条拒绝断言
   if [ "$RC" -eq "$1" ]; then ok "$2（exit $RC）"
   else bad "$2（期望 exit $1，实得 $RC；输出尾部：$(tail_of)）"; fi
 }
@@ -6124,6 +6206,8 @@ if [ "$FAILN" -ne 0 ]; then
   exit 1
 fi
 printf '== no-residue.spec：通过（负样本必拒 + 正样本放行 + 参数/清单/范围/字面口径 + rg/grep 检索面同口径（隐藏目录、被 ignore 目录）全部符合预期）==\n'
+# U4（W3b）运行时契约：成功路径的最后一行
+printf '##SPEC asserts=%s rejects=%s\n' "$((PASS_N + FAIL_N))" "$REJECTS"
 exit 0
 PONYGO_EOF
   [ -x "$META_DIR/gates/no-residue.spec.sh" ] || chmod +x "$META_DIR/gates/no-residue.spec.sh" 2>/dev/null || true
