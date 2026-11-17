@@ -21,7 +21,8 @@ for case_file in \
   gh10_w2b_residue_parity.sh \
   gh11_w3a_miss_ids.sh \
   gh12_w3b_spec_runtime_contract.sh \
-  gh13_w3c_bypass_ledger.sh
+  gh13_w3c_bypass_ledger.sh \
+  gh14_w3d_hook_v2.sh
 do
   TOTAL=$((TOTAL+1))
   printf '\n===== %s =====\n' "$case_file"
