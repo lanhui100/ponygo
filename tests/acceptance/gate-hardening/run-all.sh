@@ -17,7 +17,8 @@ for case_file in \
   gh6_test_tiering_contract.sh \
   gh7_w0_baseline_seed.sh \
   gh8_w1_gate_closure.sh \
-  gh9_w2a_deletion_and_verdict.sh
+  gh9_w2a_deletion_and_verdict.sh \
+  gh10_w2b_residue_parity.sh
 do
   TOTAL=$((TOTAL+1))
   printf '\n===== %s =====\n' "$case_file"
