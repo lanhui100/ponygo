@@ -500,11 +500,11 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 
 | 资产 | 路径 | 角色 | 退出语义 |
 |---|---|---|---|
-| A1 | `.meta/gates/adr-verify.sh` | 暂存区 ADR 格式门（无参=暂存 ADR；带参=指定路径）；A6 `check` 在**任何跳过分支之前**早期 probe（见下「A6 的时序」） | 0 放行 / 非零拒绝 |
+| A1 | `.meta/gates/adr-verify.sh` | 暂存区 ADR 格式门（无参=暂存 ADR；带参=指定路径）；A6 `check` 在**任何跳过分支之前**早期 probe（见下「A6 的时序」）；**A6 缺失 → fail-closed 拒绝**（A6 不可判定即不许提交，删一个文件不能把封印摘掉） | 0 放行 / 非零拒绝 |
 | A2 | `.meta/gates/adr-verify.spec.sh` | A1 的负样本执行判据（非法→拒、合法→放行、TOCTOU→拒） | 0 = 自检通过 |
 | A3 | `.githooks/pre-commit`（或既有钩子内追加块） | 本地层挂载点 | 转发 A1 的退出码 |
 | A4 | `.meta/gates/ci-verify.sh` | forge 无关全树门（verify-note 整树 + A2 + A6/A7 + A8/A9，四段） | 0 放行 / 非零拒绝 |
-| A5 | `.github/workflows/ponygo-governance.yml` | GitHub 薄适配器（checkout + A4）；等价形态是主 `ci.yml` 内 `governance` job 直接跑 A4——只有同 workflow 的 job 才能被聚合门 `needs` 消费 | 同 A4 |
+| A5 | `.github/workflows/ponygo-governance.yml` | GitHub 薄适配器（checkout + A4 + 步骤 ②：`ponygo status`）；步骤 ② 覆盖 A4 看不见的判据面 2.1/2.4/2.5/2.6/1.2/1.9b/1.9c，实例无 CLI 时 `::warning::` + exit 0（如实声明未验证，**不是通过**）；等价形态是主 `ci.yml` 内 `governance` job 直接跑 A4——只有同 workflow 的 job 才能被聚合门 `needs` 消费 | 同 A4（步骤 ② 无 CLI 时不改退出码） |
 | A6 | `.meta/gates/archive-verify.sh` | 归档 SHA-256 封印门：`check`（默认，只读）/ `seal`（追加封印，互斥 + 原子替换），零旗标 | 0 通过 / 1 拒绝 |
 | A7 | `.meta/gates/archive-verify.spec.sh` | A6 的负样本执行判据（篡改/缺条目/孤儿/重复/非追加 → 必须拒；合法样本 → 放行） | 0 = 自检通过 |
 | A8 | `.meta/gates/no-residue.sh` | 零残留门（删除/收窄后的符号检索验收）：读清单 `.meta/gates/no-residue.manifest`（每行 `<pattern><TAB><scope>`），`rg --fixed-strings` 按字面检索（无 `rg` 退化 `grep -rIlF`）；缺清单/空清单 → 放行并打印跳过 | 0 放行（无命中 / 跳过）/ 1 命中、清单格式非法、未知参数 |
@@ -575,7 +575,12 @@ A1 里 A6 是**早期 probe**，不是末尾收口：判定在任何 `skip` 分�
 变的是**判定时机**——把 A6 留到末尾会把"本次没有暂存 ADR"变成绕过封印的门（实测缺陷：
 删除或移出归档件不产生暂存 ADR 变更，末尾调用的 A6 永远跑不到）。故：
 `archive_probe` 先算出 A6 的 rc 与输出 → ADR 段照常判 → `archive_finish` 打印归档段并按 rc
-fail-closed 收口。门缺失时优雅回退（不影响 ADR 判定）。
+fail-closed 收口。
+
+**门缺失 → 拒绝（fail-closed）**：A6 不在场时 `archive_probe` 直接把 `ARCHIVE_RC=2` 并给出
+点名 A6 的拒绝文案（补救：跑 `ponygo init` 补回）。理由：封印是"归档件字节未变"的证据，而
+**删掉证据源本身**恰恰是最省力的绕过——旧实现"缺失则优雅回退"让 `rm .meta/gates/archive-verify.sh`
+一句话就永久关掉了封印判定（实测：删 A6 后篡改归档件 A1 仍 exit 0）。
 
 ### 本地层与远端层：互补，**不等价**（B5 实测结论）
 
@@ -3964,9 +3969,14 @@ archive_finish() {
   return 0
 }
 
-# 归档封印探测（A6 存在时无条件跑；缺失则优雅回退，不改变 ADR 判定）
+# 归档封印探测（A6 缺失 → fail-closed：删一个文件不能把封印从提交窗口里摘掉）
 archive_probe() {
-  [ -f "$ARCHIVE_GATE" ] || return 0
+  if [ ! -f "$ARCHIVE_GATE" ]; then
+    ARCHIVE_OUT="[adr-verify] 拒绝：归档封印门 A6 缺失（$ARCHIVE_GATE）——A6 不可判定 = fail-closed；跑 'ponygo init' 补回"
+    ARCHIVE_RC=2
+    ARCHIVE_DONE=1
+    return 0
+  fi
   ARCHIVE_OUT=$(bash "$ARCHIVE_GATE" check 2>&1)
   ARCHIVE_RC=$?
   ARCHIVE_DONE=1
@@ -4094,7 +4104,8 @@ bash "$VERIFY" ${PATHS[@]+"${PATHS[@]}"} || exit 1
 printf '[%s] 通过：%d 条 ADR 经 %s 校验（暂存区与工作区一致）\n' "$PROG" "${#PATHS[@]}" "$VERIFY"
 
 # 5) 归档 SHA-256 封印（A6 check）：**判定**已在步骤 1b 完成，这里只打印其输出并收口——
-#    归档件被改一字节、或归档件未封印，都拒绝提交。A6 缺失时优雅回退（步骤 1b 直接返回）。
+#    归档件被改一字节、或归档件未封印、或**A6 门本身缺失**（fail-closed：删掉门不能把封印
+#    从提交窗口里摘掉），都拒绝提交。
 archive_finish
 exit 0
 PONYGO_EOF
@@ -4145,7 +4156,10 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd) || {
 }
 GATE="$ROOT/.meta/gates/adr-verify.sh"
 VERIFY="$ROOT/.agents/skills/write-adr/verify-note.sh"
-for f in "$GATE" "$VERIFY"; do
+# A6（归档封印门）：A1 在它缺失时 fail-closed（W1/U2）。夹具默认**在场**，否则"放行"类用例
+# 会一律被拒；「A6 缺失」专项用例自己删掉它再验拒绝语义。
+A6="$ROOT/.meta/gates/archive-verify.sh"
+for f in "$GATE" "$VERIFY" "$A6"; do
   [ -f "$f" ] || {
     printf '[%s] FAIL：缺被测资产 %s\n' "$SPEC" "$f" >&2
     exit 1
@@ -4171,6 +4185,7 @@ new_repo() { # $1 = 目录名（在 $TMP 下）
     "$d/.agents/notes/proposed/process" "$d/.agents/notes/implemented/process" \
     "$d/.agents/notes/rejected" "$d/.agents/notes/archived"
   cp "$GATE" "$d/.meta/gates/adr-verify.sh"
+  cp "$A6" "$d/.meta/gates/archive-verify.sh"
   cp "$VERIFY" "$d/.agents/skills/write-adr/verify-note.sh"
   git -C "$d" -c init.defaultBranch=main init -q
   git -C "$d" config user.email spec@example.invalid
@@ -4419,9 +4434,12 @@ git -C "$R" commit -q -m init >/dev/null 2>&1
 expect_accept "无暂存 ADR 变更放行" "$R"
 
 # ---------- 10. 空场景一律放行：无 .agents/notes ----------
+# 夹具同样带 A6：真实实例的 gates 是框架资产（A6 与 notes 无关），本 case 要证明的是
+# 「没有决策记录制度时不越权」，不是「A6 缺失时也放行」——后者是 W1/U2 明确要堵的洞（见用例 17）。
 R="$TMP/no-notes"
 mkdir -p "$R/.meta/gates"
 cp "$GATE" "$R/.meta/gates/adr-verify.sh"
+cp "$A6" "$R/.meta/gates/archive-verify.sh"
 git -C "$R" -c init.defaultBranch=main init -q
 expect_accept "无 .agents/notes 放行" "$R"
 
@@ -4690,11 +4708,29 @@ other
 git -C "$R" add -A >/dev/null 2>&1
 expect_reject_with "围栏内的 ## Alternatives considered 不算在场（文案带「缺 ## Alternatives considered」）" "$R" '缺 ## Alternatives considered'
 
+# ---------- 17. W1/U2：A6 缺失 → A1 fail-closed（删掉门不能把封印从提交窗口里摘掉）----------
+# 正控制先立：A6 在场 + 无暂存 ADR → 仍放行（证明下面的拒绝来自 A6 缺失，不是门变严格了）
+R=$(new_repo a6-present-control)
+expect_accept "A6 在场 + 无暂存 ADR 放行（正控制，不得回退）" "$R"
+# 拒绝语义：删掉 A6 → 即便本次没有暂存 ADR 变更也必须非零（旧实现"缺失则优雅回退"正是被删的洞）
+R=$(new_repo a6-missing)
+rm -f "$R/.meta/gates/archive-verify.sh"
+expect_reject_with "A6 缺失 → fail-closed 拒绝（文案点名 A6 + fail-closed）" "$R" 'A6 缺失.*fail-closed|fail-closed.*A6'
+# 同样场景再点一次 A6 字样与补救可执行性（分两条断言，便于定位是"没拒"还是"没点名"）
+if printf '%s' "$(run_gate "$R")" | grep -q 'A6'; then
+  printf 'PASS  A6 缺失拒绝文案点名 A6\n'
+else
+  fail "A6 缺失拒绝文案未点名 A6（补救不可执行）"
+fi
+# 反向对照：A6 补回后同一棵树恢复放行（证明拒绝确由 A6 缺失造成）
+cp "$A6" "$R/.meta/gates/archive-verify.sh"
+expect_accept "A6 缺失用例：A6 补回后恢复放行（拒绝确由 A6 缺失造成）" "$R"
+
 if [ "$FAIL" -ne 0 ]; then
   printf '[%s] 未通过：门禁的拒绝/放行语义与预期不符（见上方 FAIL）\n' "$SPEC" >&2
   exit 1
 fi
-printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节 + 1.7 rejected 理由（含 CJK 标点）+ 1.8 ## Decision/中文提案标题（含复合词）+ 围栏感知（1.8/1.10）均已证明（exit 0）\n' "$SPEC"
+printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节 + 1.7 rejected 理由（含 CJK 标点）+ 1.8 ## Decision/中文提案标题（含复合词）+ 围栏感知（1.8/1.10）+ A6 缺失 fail-closed（含 A6 在场正控制与补回反向对照）均已证明（exit 0）\n' "$SPEC"
 exit 0
 PONYGO_EOF
   # 已有但丢执行位（如经 Windows/zip 转手）→ 补回；A1/A2/A4 是框架不可变资产，改权限不改字节
@@ -5928,6 +5964,17 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: bash .meta/gates/ci-verify.sh
+      - name: ponygo 判据面（status）
+        # 2.1/2.4/2.5/2.6/1.2/1.9b/1.9c 只在 CLI 判定，A4 看不到（实测「CI 绿 / status 红」）。
+        # 实例自带 CLI 才跑；未携带 → WARN + exit 0（如实声明"判据面未验证"，不是通过）。
+        run: |
+          CLI=""
+          if [ -x ./ponygo ]; then CLI=./ponygo; elif [ -n "${PONYGO_BIN:-}" ] && [ -x "${PONYGO_BIN}" ]; then CLI="${PONYGO_BIN}"; fi
+          if [ -z "$CLI" ]; then
+            echo "::warning::实例未携带 ponygo CLI（./ponygo 或 PONYGO_BIN）→ 判据面 2.1/2.4/2.5/2.6 未验证（这不是通过）"
+            exit 0
+          fi
+          bash "$CLI" status
 PONYGO_EOF
 }
 

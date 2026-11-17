@@ -55,9 +55,14 @@ archive_finish() {
   return 0
 }
 
-# 归档封印探测（A6 存在时无条件跑；缺失则优雅回退，不改变 ADR 判定）
+# 归档封印探测（A6 缺失 → fail-closed：删一个文件不能把封印从提交窗口里摘掉）
 archive_probe() {
-  [ -f "$ARCHIVE_GATE" ] || return 0
+  if [ ! -f "$ARCHIVE_GATE" ]; then
+    ARCHIVE_OUT="[adr-verify] 拒绝：归档封印门 A6 缺失（$ARCHIVE_GATE）——A6 不可判定 = fail-closed；跑 'ponygo init' 补回"
+    ARCHIVE_RC=2
+    ARCHIVE_DONE=1
+    return 0
+  fi
   ARCHIVE_OUT=$(bash "$ARCHIVE_GATE" check 2>&1)
   ARCHIVE_RC=$?
   ARCHIVE_DONE=1
@@ -185,6 +190,7 @@ bash "$VERIFY" ${PATHS[@]+"${PATHS[@]}"} || exit 1
 printf '[%s] 通过：%d 条 ADR 经 %s 校验（暂存区与工作区一致）\n' "$PROG" "${#PATHS[@]}" "$VERIFY"
 
 # 5) 归档 SHA-256 封印（A6 check）：**判定**已在步骤 1b 完成，这里只打印其输出并收口——
-#    归档件被改一字节、或归档件未封印，都拒绝提交。A6 缺失时优雅回退（步骤 1b 直接返回）。
+#    归档件被改一字节、或归档件未封印、或**A6 门本身缺失**（fail-closed：删掉门不能把封印
+#    从提交窗口里摘掉），都拒绝提交。
 archive_finish
 exit 0

@@ -42,7 +42,10 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd) || {
 }
 GATE="$ROOT/.meta/gates/adr-verify.sh"
 VERIFY="$ROOT/.agents/skills/write-adr/verify-note.sh"
-for f in "$GATE" "$VERIFY"; do
+# A6（归档封印门）：A1 在它缺失时 fail-closed（W1/U2）。夹具默认**在场**，否则"放行"类用例
+# 会一律被拒；「A6 缺失」专项用例自己删掉它再验拒绝语义。
+A6="$ROOT/.meta/gates/archive-verify.sh"
+for f in "$GATE" "$VERIFY" "$A6"; do
   [ -f "$f" ] || {
     printf '[%s] FAIL：缺被测资产 %s\n' "$SPEC" "$f" >&2
     exit 1
@@ -68,6 +71,7 @@ new_repo() { # $1 = 目录名（在 $TMP 下）
     "$d/.agents/notes/proposed/process" "$d/.agents/notes/implemented/process" \
     "$d/.agents/notes/rejected" "$d/.agents/notes/archived"
   cp "$GATE" "$d/.meta/gates/adr-verify.sh"
+  cp "$A6" "$d/.meta/gates/archive-verify.sh"
   cp "$VERIFY" "$d/.agents/skills/write-adr/verify-note.sh"
   git -C "$d" -c init.defaultBranch=main init -q
   git -C "$d" config user.email spec@example.invalid
@@ -316,9 +320,12 @@ git -C "$R" commit -q -m init >/dev/null 2>&1
 expect_accept "无暂存 ADR 变更放行" "$R"
 
 # ---------- 10. 空场景一律放行：无 .agents/notes ----------
+# 夹具同样带 A6：真实实例的 gates 是框架资产（A6 与 notes 无关），本 case 要证明的是
+# 「没有决策记录制度时不越权」，不是「A6 缺失时也放行」——后者是 W1/U2 明确要堵的洞（见用例 17）。
 R="$TMP/no-notes"
 mkdir -p "$R/.meta/gates"
 cp "$GATE" "$R/.meta/gates/adr-verify.sh"
+cp "$A6" "$R/.meta/gates/archive-verify.sh"
 git -C "$R" -c init.defaultBranch=main init -q
 expect_accept "无 .agents/notes 放行" "$R"
 
@@ -587,9 +594,27 @@ other
 git -C "$R" add -A >/dev/null 2>&1
 expect_reject_with "围栏内的 ## Alternatives considered 不算在场（文案带「缺 ## Alternatives considered」）" "$R" '缺 ## Alternatives considered'
 
+# ---------- 17. W1/U2：A6 缺失 → A1 fail-closed（删掉门不能把封印从提交窗口里摘掉）----------
+# 正控制先立：A6 在场 + 无暂存 ADR → 仍放行（证明下面的拒绝来自 A6 缺失，不是门变严格了）
+R=$(new_repo a6-present-control)
+expect_accept "A6 在场 + 无暂存 ADR 放行（正控制，不得回退）" "$R"
+# 拒绝语义：删掉 A6 → 即便本次没有暂存 ADR 变更也必须非零（旧实现"缺失则优雅回退"正是被删的洞）
+R=$(new_repo a6-missing)
+rm -f "$R/.meta/gates/archive-verify.sh"
+expect_reject_with "A6 缺失 → fail-closed 拒绝（文案点名 A6 + fail-closed）" "$R" 'A6 缺失.*fail-closed|fail-closed.*A6'
+# 同样场景再点一次 A6 字样与补救可执行性（分两条断言，便于定位是"没拒"还是"没点名"）
+if printf '%s' "$(run_gate "$R")" | grep -q 'A6'; then
+  printf 'PASS  A6 缺失拒绝文案点名 A6\n'
+else
+  fail "A6 缺失拒绝文案未点名 A6（补救不可执行）"
+fi
+# 反向对照：A6 补回后同一棵树恢复放行（证明拒绝确由 A6 缺失造成）
+cp "$A6" "$R/.meta/gates/archive-verify.sh"
+expect_accept "A6 缺失用例：A6 补回后恢复放行（拒绝确由 A6 缺失造成）" "$R"
+
 if [ "$FAIL" -ne 0 ]; then
   printf '[%s] 未通过：门禁的拒绝/放行语义与预期不符（见上方 FAIL）\n' "$SPEC" >&2
   exit 1
 fi
-printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节 + 1.7 rejected 理由（含 CJK 标点）+ 1.8 ## Decision/中文提案标题（含复合词）+ 围栏感知（1.8/1.10）均已证明（exit 0）\n' "$SPEC"
+printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节 + 1.7 rejected 理由（含 CJK 标点）+ 1.8 ## Decision/中文提案标题（含复合词）+ 围栏感知（1.8/1.10）+ A6 缺失 fail-closed（含 A6 在场正控制与补回反向对照）均已证明（exit 0）\n' "$SPEC"
 exit 0

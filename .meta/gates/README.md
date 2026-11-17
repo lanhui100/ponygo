@@ -11,11 +11,11 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 
 | 资产 | 路径 | 角色 | 退出语义 |
 |---|---|---|---|
-| A1 | `.meta/gates/adr-verify.sh` | 暂存区 ADR 格式门（无参=暂存 ADR；带参=指定路径）；A6 `check` 在**任何跳过分支之前**早期 probe（见下「A6 的时序」） | 0 放行 / 非零拒绝 |
+| A1 | `.meta/gates/adr-verify.sh` | 暂存区 ADR 格式门（无参=暂存 ADR；带参=指定路径）；A6 `check` 在**任何跳过分支之前**早期 probe（见下「A6 的时序」）；**A6 缺失 → fail-closed 拒绝**（A6 不可判定即不许提交，删一个文件不能把封印摘掉） | 0 放行 / 非零拒绝 |
 | A2 | `.meta/gates/adr-verify.spec.sh` | A1 的负样本执行判据（非法→拒、合法→放行、TOCTOU→拒） | 0 = 自检通过 |
 | A3 | `.githooks/pre-commit`（或既有钩子内追加块） | 本地层挂载点 | 转发 A1 的退出码 |
 | A4 | `.meta/gates/ci-verify.sh` | forge 无关全树门（verify-note 整树 + A2 + A6/A7 + A8/A9，四段） | 0 放行 / 非零拒绝 |
-| A5 | `.github/workflows/ponygo-governance.yml` | GitHub 薄适配器（checkout + A4）；等价形态是主 `ci.yml` 内 `governance` job 直接跑 A4——只有同 workflow 的 job 才能被聚合门 `needs` 消费 | 同 A4 |
+| A5 | `.github/workflows/ponygo-governance.yml` | GitHub 薄适配器（checkout + A4 + 步骤 ②：`ponygo status`）；步骤 ② 覆盖 A4 看不见的判据面 2.1/2.4/2.5/2.6/1.2/1.9b/1.9c，实例无 CLI 时 `::warning::` + exit 0（如实声明未验证，**不是通过**）；等价形态是主 `ci.yml` 内 `governance` job 直接跑 A4——只有同 workflow 的 job 才能被聚合门 `needs` 消费 | 同 A4（步骤 ② 无 CLI 时不改退出码） |
 | A6 | `.meta/gates/archive-verify.sh` | 归档 SHA-256 封印门：`check`（默认，只读）/ `seal`（追加封印，互斥 + 原子替换），零旗标 | 0 通过 / 1 拒绝 |
 | A7 | `.meta/gates/archive-verify.spec.sh` | A6 的负样本执行判据（篡改/缺条目/孤儿/重复/非追加 → 必须拒；合法样本 → 放行） | 0 = 自检通过 |
 | A8 | `.meta/gates/no-residue.sh` | 零残留门（删除/收窄后的符号检索验收）：读清单 `.meta/gates/no-residue.manifest`（每行 `<pattern><TAB><scope>`），`rg --fixed-strings` 按字面检索（无 `rg` 退化 `grep -rIlF`）；缺清单/空清单 → 放行并打印跳过 | 0 放行（无命中 / 跳过）/ 1 命中、清单格式非法、未知参数 |
@@ -86,7 +86,12 @@ A1 里 A6 是**早期 probe**，不是末尾收口：判定在任何 `skip` 分�
 变的是**判定时机**——把 A6 留到末尾会把"本次没有暂存 ADR"变成绕过封印的门（实测缺陷：
 删除或移出归档件不产生暂存 ADR 变更，末尾调用的 A6 永远跑不到）。故：
 `archive_probe` 先算出 A6 的 rc 与输出 → ADR 段照常判 → `archive_finish` 打印归档段并按 rc
-fail-closed 收口。门缺失时优雅回退（不影响 ADR 判定）。
+fail-closed 收口。
+
+**门缺失 → 拒绝（fail-closed）**：A6 不在场时 `archive_probe` 直接把 `ARCHIVE_RC=2` 并给出
+点名 A6 的拒绝文案（补救：跑 `ponygo init` 补回）。理由：封印是"归档件字节未变"的证据，而
+**删掉证据源本身**恰恰是最省力的绕过——旧实现"缺失则优雅回退"让 `rm .meta/gates/archive-verify.sh`
+一句话就永久关掉了封印判定（实测：删 A6 后篡改归档件 A1 仍 exit 0）。
 
 ### 本地层与远端层：互补，**不等价**（B5 实测结论）
 
