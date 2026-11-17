@@ -50,6 +50,24 @@
 # ============================================================
 set -u
 
+# ---------- W0/U6 空桩：--json 机读违例清单（契约 .dev-team/contract-w0-u6-u8.md §1.3） ----------
+# 空桩纪律：只打印 NOT_IMPLEMENTED 并 exit 2；**无 --json 时本段零副作用**，其后所有输出逐字节不变。
+# U6 实现者就在本段接入：--json → 单行 JSON（schema=ponygo.verify-note/1；字段/排序/退出码见契约 §1.3/§4），
+# 人类 FAIL 行整体改道 stderr、stdout 只留一行 JSON（与 audit/status --json 同款改道纪律）。
+# 违例 fingerprint 由**本脚本**计算（单一口径）：`ponygo adopt` 只解析本脚本输出，不在 CLI 复刻判据（P9）。
+VN_ARGS=(); VN_JSON=0
+for vn_a in "$@"; do
+  case "$vn_a" in
+    --json) VN_JSON=1 ;;
+    *) VN_ARGS+=("$vn_a") ;;
+  esac
+done
+if [ "$VN_JSON" = "1" ]; then
+  printf '[ponygo] NOT_IMPLEMENTED verify-note.sh --json（W0 空桩；契约 .dev-team/contract-w0-u6-u8.md §1.3）\n' >&2
+  exit 2
+fi
+set -- ${VN_ARGS[@]+"${VN_ARGS[@]}"}
+
 NOTES_DIR=".agents/notes"
 LIFECYCLES="proposed implemented rejected archived"
 CLASSES="feature bug-fix simplification architecture process testing"
