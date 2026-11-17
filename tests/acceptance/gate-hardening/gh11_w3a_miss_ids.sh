@@ -34,7 +34,8 @@ PY
 
 # ---------- 全命中夹具：补 rejected 留痕 + 实例门配对 + 技能 + 封印归档 ----------
 T2=$(new_case)
-make_gov_repo "$T2" 2
+mkdir -p "$T2/.github/workflows"            # CI 载体（q2.ci_present）
+make_gov_repo "$T2" 2                        # 含实例门 + 同名 spec（q2.instance_gate / negative_spec / gate_spec_paired）
 mkdir -p "$T2/.agents/notes/rejected/process"
 printf '# 被否方案\n\nStatus: rejected — 与单文件零依赖铁律冲突，落选\n\n## Proposal\n\n引入外部依赖。\n' > "$T2/.agents/notes/rejected/process/2026-01-10-rejected.md"
 mkdir -p "$T2/.agents/skills/demo-skill"
@@ -53,6 +54,10 @@ description: 何时用：演示技能四要素时使用。
 ## 验证与报告
 - 报告：贴 exit code。
 SKILL
+# 封印一条归档件（q4.sealed_archive）
+mkdir -p "$T2/.agents/notes/archived/process"
+printf '# 旧决策\n\nStatus: archived\n' > "$T2/.agents/notes/archived/process/2025-01-01-old.md"
+(cd "$T2" && bash .meta/gates/archive-verify.sh seal >/dev/null 2>&1)
 run_json "$T2" audit --level M --json
 assert_zero "T-B022-3 前置：全命中夹具 audit exit 0" "$R_RC"
 MISS2=$(json_get "$R_OUT" "' '.join(d.get('miss_ids') or [])")
