@@ -292,8 +292,9 @@ ponygo 的双根"变成可逐项勾掉的清单，而不是一句"先 audit 再�
 | `docs/methodology.md` | 原理层：方法论设计依据（源自 deepseek-harness） | 想懂"为什么"的人；机制层的理论源头 |
 | `.meta/` + `.agents/` | 治理根骨架（双根）：.meta/ = constitution / gates（A1/A2/A4/A6/A7/A8/A9 框架资产）/ docs-tier / adaptation（检出替代治理时）/ meta.yaml；.agents/ = notes / skills | 实例化产物；由 `ponygo init` 生成进用户项目 |
 | `maturity-ladder.md` | 成熟度阶梯定义（L0–L5 逐档判据） | `ponygo status` 与 review 的判定来源 |
-| `audit/` | 四问记分卡 + 分层细目库 + 自适应深度选择器 | `ponygo audit` 的执行依据 |
+| `audit/` | 四问记分卡 + 分层细目库 + 自适应深度选择器 + 卫生体检指引 | `ponygo audit` 的执行依据 |
 | `audit/checklist.md` | 分层细目（骨架 / 机制 / 精微三层条目） | 审计打分时的逐项参照 |
+| `audit/hygiene-design.md` | 仓库卫生的**体检面 + 设计菜单 + 骨架**（指引，非判据/非门禁；编号 `HY-n` 不映射判据号） | 植入时体检与设计本仓卫生体系 |
 | `checklists/` | 四入口清单：init（冷启动）/ audit（改造）/ observe-init（维度落地）/ observe-audit（维度审计） | 使用者；落地动作指引 |
 | `revisions/` | 框架自身演进记录：proposed / accepted | 维护者；框架"吃自己狗粮"的 ADR |
 | `LICENSE` | MIT 许可证 | 分发与二次使用依据 |

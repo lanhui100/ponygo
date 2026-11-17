@@ -51,7 +51,11 @@ disable-model-invocation: true
      - **文档与代码同提交吗？**（dsh same-commit 规则）`git log` 对照：改行为/契约的提交是否带了对应文档更新？文档家是不是空壳（有文件无内容/无索引）？
      - **新鲜度抽查（v2.1）**：取近 5 个功能提交，逐个对照有无对应文档更新（计数排除 `.agents/notes/`——ADR 不算用户文档更新）；用户可见行为（新命令/新端点/新配置项/新面板）必须在 README 或包 README 可寻，否则记"新鲜度欠账"。
      - 分层激活了吗？`.meta/docs-tier/README.md` 是模板态还是已激活清单？（判据 2.5）
-   - **卫生面**：游离计划文档？.gitignore/.rgignore 有效性？构建产物入版本库？
+   - **卫生面（体检 + 设计两步，指引不在本技能内）**：按 `audit/hygiene-design.md` 走——
+     ①**体检**：逐项跑其 §1 的锚定命令，产出事实清单（不评判）；②**设计**：按 §2 的 level 映射选定
+     "机械门 / 实例门+负样本 / 靠 review / 明确不做"，并核对 §3 的卫生基线记录是否存在且四节齐
+     （L2 升级与 `upgrade adopt` 之前必须核对；内容真实性靠 review）。粗筛三条仍可先跑：
+     游离过程文档？`.gitignore/.rgignore` 有效性？构建产物入版本库？
    - **负空间面（语义 + 初筛机械）**：语料是否开始腐烂——
      - 初筛：`find .agents/notes/implemented -name '*.md' -mtime +180`（半年未动的 implemented note 清单，仅作候选，不作结论）；
      - supersession 检查：近 90 天新增的决策是否覆盖了旧决策却未处理旧条（`git log --since='90 days ago' --name-only .agents/notes/` 对照）；

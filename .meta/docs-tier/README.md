@@ -12,7 +12,7 @@
 | 架构地图 | `docs/architecture.md` |
 | 决策记录 | 实例决策 `.agents/notes/`；框架冻结演进史 `revisions/`（只读，不作现行权威） |
 | 判据语义来源 | `maturity-ladder.md`（L0–L5 判据语义 + 停止线；`ponygo status` / `ponygo audit` 的判定来源） |
-| 权威细目库 | `audit/`（四问记分卡 + 分层细目库 + 自适应深度选择器；判据细目的权威真源） |
+| 权威细目库 | `audit/`（四问记分卡 + 分层细目库 + 自适应深度选择器 + `hygiene-design.md` 卫生体检指引；判据细目的权威真源） |
 | 包/模块契约 | 单文件 CLI 无包目录；命令契约由 `ponygo --help` 与根 `README.md` 承载；技能模板库契约由 `.meta/skills-library/README.md` 承载 |
 | how-to | `checklists/` |
 | 事故复盘 | `.agents/notes/implemented/bug-fix/` |

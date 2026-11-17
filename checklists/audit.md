@@ -31,6 +31,10 @@ ponygo audit            # 自适应定 S/M 档（或 --level M 强制）
 2. **决策层**（问①缺项）：补决策载体 / 触发规则 / Alternatives。
 3. **复用层**（问③缺项）：把高频流程资产化为 skill。
 4. **退场层**（问④缺项）：建 archived + 冻结封印。
+5. **卫生面（跨问，不在四问计分内）**：按 `audit/hygiene-design.md` 走"体检 → 设计"两步——
+   逐项跑其 §1 的锚定命令，按 §2 的 level 映射选定"机械门 / 实例门+负样本 / 靠 review / 明确不做"，
+   并把结果落成一条 `hygiene-baseline` 决策记录（L2 升级与 `upgrade adopt` 之前必须有）。
+   只记录"不适用"时也要给理由；不得用"看起来挺整洁"代替体检。
 
 每个动作必须小到**一次提交可完成**；拒绝"先做整套治理体系"式大而空。
 
@@ -64,3 +68,6 @@ ponygo audit --level M  # 复查，确认命中数上升
 
 一份「改造路线图」：现状等级 → 目标等级 → N 条按杠杆排序的最小改进动作 → 各自的验收命令。
 写入 `.agents/notes/proposed/{class}/yyyy-mm-dd-audit-roadmap.md`（proposed 态），执行完再迁到 implemented。
+
+若本次改造包含卫生体系：另产一条 `yyyy-mm-dd-hygiene-baseline.md`（四节：体检事实 / 已选机械门 /
+明确不做项 / 复审条件，见 `audit/hygiene-design.md` §3）。
