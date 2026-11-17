@@ -15,7 +15,8 @@ for case_file in \
   gh4_gate_spec_pairing.sh \
   gh5_release_scratch.sh \
   gh6_test_tiering_contract.sh \
-  gh7_w0_baseline_seed.sh
+  gh7_w0_baseline_seed.sh \
+  gh8_w1_gate_closure.sh
 do
   TOTAL=$((TOTAL+1))
   printf '\n===== %s =====\n' "$case_file"
