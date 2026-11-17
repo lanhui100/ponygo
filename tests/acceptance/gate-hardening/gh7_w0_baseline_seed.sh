@@ -180,6 +180,27 @@ if b.get("state") not in ("absent", "ok", "expired", "corrupt"): fail.append("ba
 if d.get("schema") != "ponygo.verify-note/1": fail.append("schema=%r" % d.get("schema"))
 '
 
+# 回归：整树类违例（file 为空，如 1.9 缺 docs/AGENTS.md）必须能进基线
+T5=$(new_case)
+make_gov_repo "$T5" 1
+rm -f "$T5/docs/AGENTS.md"
+vnote "$T5" --json
+assert_nonzero "T-U6-19 整树违例（file 空）时 verify-note --json exit 1" "$R_RC"
+json_assert "T-U6-19b JSON violations 非空且 counts 恒等式成立（空 file 不得丢条）" "$R_OUT" '
+fail = []
+v = d.get("violations") or []
+c = d.get("counts") or {}
+if not v: fail.append("violations 为空（空 file 违例被丢弃）")
+if c.get("total") != len(v): fail.append("counts.total=%r ≠ len(violations)=%d" % (c.get("total"), len(v)))
+if c.get("total", 0) < 1: fail.append("counts.total=%r" % c.get("total"))
+'
+run_cli "$T5" upgrade adopt
+assert_zero "T-U6-20 整树违例可被 adopt 冻结（exit 0）" "$R_RC"
+ENT5=$(json_field "$(cat "$T5/$BASE_REL")" "len(d['entries'])")
+assert_eq "T-U6-20b 基线条目数 ≥ 1（空 file 违例已入册）" "1" "$([ "${ENT5:-0}" -ge 1 ] && echo 1 || echo 0)"
+vnote "$T5"
+assert_zero "T-U6-20c 冻结后 verify-note exit 0（存量全部豁免）" "$R_RC"
+
 # ============================================================
 # U8：植入 seed 与漂移分类
 # ============================================================
@@ -248,9 +269,11 @@ run_cli "$ROOT" --help
 CMDS=$(printf '%s\n' "$R_OUT" | sed -n 's/^  ponygo \([a-z][a-z-]*\).*/\1/p' | LC_ALL=C sort -u | tr '\n' ' ')
 assert_eq "T-INV-1 顶层命令词集合恰为 7 词（未新增/未删除）" "audit init observe retire status sync upgrade " "$CMDS"
 assert_not_contains "T-INV-2 usage 不得出现顶层 adopt 行" "$R_OUT" "  ponygo adopt"
-# A1–A9 = 门禁脚本与负样本 spec；`.meta/gates/README.md` 是文档家（W0 同批更新），不属门资产
-GATES_DIFF=$(git -C "$ROOT" status --porcelain -- .meta/gates 2>/dev/null | grep -v 'README\.md' || true)
-assert_eq "T-INV-3 A1–A9 门资产（脚本与 spec）字节零改动" "" "$GATES_DIFF"
+# A1–A9 与其它宇宙文件必须与内嵌模板逐字节一致（= `upgrade --check` 零漂移）。
+# 为什么不用 `git status`：那只反映未提交改动，改完就提交的篡改会假绿（审核 ADVISORY）。
+run_cli "$ROOT" upgrade --check
+assert_zero "T-INV-3 本仓 upgrade --check exit 0（A1–A9 与模板逐字节一致，未提交/已提交篡改都能抓到）" "$R_RC"
+assert_not_contains "T-INV-3b 零漂移（无 drift: 行）" "$R_OUT" "drift:"
 
 T4=$(new_case)
 mk_legacy_repo "$T4"
