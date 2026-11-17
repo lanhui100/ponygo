@@ -46,11 +46,13 @@ ponygo 已在 15 个实例仓植入（`.meta` 骨架 + ADR 门 A1/A2 + 全树门
    U4（spec 输出机读计数，`rejects≥1` 才算过）、U9（补 `no-residue.manifest`，不让 A8 空转）、
    U10（rg 分支加 `--no-ignore`，与 grep 退化路径同判）。
 
-**落地进度**：W0（U6→B012、U8→B015）与 W1（U1→B010、U2→B011）已于 2026-11-17 落地并闭环，决策记录见
-`.agents/notes/implemented/process/2026-11-17-baseline-ratchet-and-seed-provenance.md` 与
-`.agents/notes/implemented/process/2026-11-17-ci-judge-surface-and-a6-fail-closed.md`
-（`upgrade adopt` 位置模式 + `.meta/notes-baseline.json` + `.meta/.ponygo-seed`；A5 判据面步骤 + A6 缺失 fail-closed）；
-本提案继续承载 W2/W3 余项（U3/U4/U5/U7/U9/U10）。
+**落地进度**：W0（U6→B012、U8→B015）、W1（U1→B010、U2→B011）、W2a（U3→B014、U5 判词→B016）
+已于 2026-11-17 落地并闭环，决策记录见
+`.agents/notes/implemented/process/2026-11-17-baseline-ratchet-and-seed-provenance.md`、
+`.../2026-11-17-ci-judge-surface-and-a6-fail-closed.md`、`.../2026-11-17-deletion-gate-and-verdict-honesty.md`
+（`upgrade adopt` 位置模式 + 存量基线 + 植入 seed；A5 判据面步骤 + A6 fail-closed；
+A1 扩 ACMRD 的删除入册 + 结论行改「已判定部分通过」）。
+本提案继续承载 W2b/W3 余项（U7 逃生口 ledger、U4 spec 运行时契约、U5 剩余 miss_ids、U9/U10、B020）。
 
 backlog 账本已登记对应待办：U1→B010、U2→B011、U6→B012（已闭环）、U7→B013、U3→B014、U8→B015（已闭环）、U5→B016、U4→B017、U9/U10→B018。
 
