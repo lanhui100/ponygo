@@ -32,6 +32,21 @@ Status: implemented
    `.meta/gates/README.md` 的 A1/A5 行与「A6 的时序」末句同步改成 fail-closed 口径（此前写的是
    「门缺失时优雅回退」——那正是被审计抓到的 fail-open 的原话）。
 
+## 审核修正（2026-11-17 独立对抗审核，verdict=PASS / 0 BLOCKING / 5 ADVISORY）
+
+- **A6 被清空即绕过**（实测：`: > archive-verify.sh` → A1 rc=0）：fail-closed 只认"文件不存在"不够。
+  修法：`archive_probe` 跑完 A6 后要求输出含「归档封印」判定标记，缺失即 `rc=2`（不可判定 = fail-closed）；
+  A2 同批补「A6 清空」「A6 换成只 exit 0 的假门」两条负样本。
+- **A5 编辑被误判为「人接手治理」**：`github_only_init_artifacts` 原以"逐字节等于模板"判定 init 所有权，
+  A5 是文档明示的**实例可编辑**文件，模板一改就把存量实例的 `audit` 自动档从 S 抬到 M。
+  修法：A5 分支只判存在、不比对模板（自建 workflow 仍判"人接手"，机制不削弱）。
+- **`PONYGO_BIN` 手误静默变「未携带」**：拆两支 WARN——已设置但不可执行时点名实际取值，
+  让配置手误在 CI 日志里可见（退出码仍 0，不改变"未验证 ≠ 通过"的语义）。
+- **不修（登记 B020）**：A3 钩子的哨兵调用块用 `if [ -f A1 ]` 包裹，删掉 A1 自身仍静默放行。
+  修它要改 canonical 哨兵块常量与其字节级断言（s58–s70），属同族 fail-open 的下一批。
+- 审核亦确认：U1/U2 的两处 P0 已真实关闭（删 A6 后篡改归档件 = 非零；A6 删除后各入口一律非零，
+  含真 `git commit` 被 A3 拒绝）。
+
 ## Alternatives considered
 
 - **A5 未携带 CLI 时直接失败**：否决——存量实例多半没有 CLI（实测 pony-agent 连 `./ponygo` 都没有），

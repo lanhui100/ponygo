@@ -3969,7 +3969,8 @@ archive_finish() {
   return 0
 }
 
-# 归档封印探测（A6 缺失 → fail-closed：删一个文件不能把封印从提交窗口里摘掉）
+# 归档封印探测（A6 缺失/被清空/被换成不判封印的空壳 → 一律 fail-closed：
+# 删掉或掏空一个文件不能把封印从提交窗口里摘掉）
 archive_probe() {
   if [ ! -f "$ARCHIVE_GATE" ]; then
     ARCHIVE_OUT="[adr-verify] 拒绝：归档封印门 A6 缺失（$ARCHIVE_GATE）——A6 不可判定 = fail-closed；跑 'ponygo init' 补回"
@@ -3980,6 +3981,22 @@ archive_probe() {
   ARCHIVE_OUT=$(bash "$ARCHIVE_GATE" check 2>&1)
   ARCHIVE_RC=$?
   ARCHIVE_DONE=1
+  # 可判定性证据：A6 的 check 输出必须带「归档封印」判定标记（正常恒有——
+  # `== 归档封印校验（…）==` / `== 归档封印：通过 ==`）。标记缺失 = 门被清空、或换成了
+  # 不判封印的空壳：此时 rc 可能仍是 0，但封印**从未被判定过**——这与"删掉 A6"等价，
+  # 同样 fail-closed（否则 `: > .meta/gates/archive-verify.sh` 一句就把判定摘掉了）。
+  case "$ARCHIVE_OUT" in
+    *归档封印*) ;;
+    *)
+      if [ -n "$ARCHIVE_OUT" ]; then
+        ARCHIVE_OUT="$ARCHIVE_OUT
+[adr-verify] 拒绝：归档封印门 A6 的输出不含「归档封印」判定标记（$ARCHIVE_GATE）——不可判定 = fail-closed；跑 'ponygo init' 补回 A6 后重试"
+      else
+        ARCHIVE_OUT="[adr-verify] 拒绝：归档封印门 A6 未输出任何封印判定（$ARCHIVE_GATE 输出不含「归档封印」判定标记）——不可判定 = fail-closed；跑 'ponygo init' 补回 A6 后重试"
+      fi
+      ARCHIVE_RC=2
+      ;;
+  esac
   return 0
 }
 
@@ -4726,11 +4743,21 @@ fi
 cp "$A6" "$R/.meta/gates/archive-verify.sh"
 expect_accept "A6 缺失用例：A6 补回后恢复放行（拒绝确由 A6 缺失造成）" "$R"
 
+# 同族第二形态：A6 不是被删除，而是被**清空/换成不判封印的空壳**（`> A6` 一行即可）。
+# 判据 = A6 的 check 输出必须带「归档封印」判定标记；缺标记的 rc=0 不算"通过"，算"没判过"。
+R=$(new_repo a6-emptied)
+: > "$R/.meta/gates/archive-verify.sh"
+expect_reject_with "A6 清空（0 字节）→ fail-closed 拒绝（文案点名 A6 不可判定）" "$R" 'A6.*不可判定|不可判定.*fail-closed'
+printf '#!/usr/bin/env bash\nexit 0\n' > "$R/.meta/gates/archive-verify.sh"
+expect_reject_with "A6 换成只 exit 0 的假门（无判定标记）→ 同样拒绝" "$R" 'A6.*fail-closed|fail-closed.*A6'
+cp "$A6" "$R/.meta/gates/archive-verify.sh"
+expect_accept "A6 清空用例：A6 补回后恢复放行" "$R"
+
 if [ "$FAIL" -ne 0 ]; then
   printf '[%s] 未通过：门禁的拒绝/放行语义与预期不符（见上方 FAIL）\n' "$SPEC" >&2
   exit 1
 fi
-printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节 + 1.7 rejected 理由（含 CJK 标点）+ 1.8 ## Decision/中文提案标题（含复合词）+ 围栏感知（1.8/1.10）+ A6 缺失 fail-closed（含 A6 在场正控制与补回反向对照）均已证明（exit 0）\n' "$SPEC"
+printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节 + 1.7 rejected 理由（含 CJK 标点）+ 1.8 ## Decision/中文提案标题（含复合词）+ 围栏感知（1.8/1.10）+ A6 缺失/被清空/被换成假门 → fail-closed（含 A6 在场正控制与补回反向对照）均已证明（exit 0）\n' "$SPEC"
 exit 0
 PONYGO_EOF
   # 已有但丢执行位（如经 Windows/zip 转手）→ 补回；A1/A2/A4 是框架不可变资产，改权限不改字节
@@ -5969,7 +5996,16 @@ jobs:
         # 实例自带 CLI 才跑；未携带 → WARN + exit 0（如实声明"判据面未验证"，不是通过）。
         run: |
           CLI=""
-          if [ -x ./ponygo ]; then CLI=./ponygo; elif [ -n "${PONYGO_BIN:-}" ] && [ -x "${PONYGO_BIN}" ]; then CLI="${PONYGO_BIN}"; fi
+          if [ -x ./ponygo ]; then
+            CLI=./ponygo
+          elif [ -n "${PONYGO_BIN:-}" ]; then
+            if [ -x "${PONYGO_BIN}" ]; then
+              CLI="${PONYGO_BIN}"
+            else
+              echo "::warning::PONYGO_BIN=${PONYGO_BIN} 已设置但不可执行（手误？）→ 判据面 2.1/2.4/2.5/2.6 未验证（这不是通过）"
+              exit 0
+            fi
+          fi
           if [ -z "$CLI" ]; then
             echo "::warning::实例未携带 ponygo CLI（./ponygo 或 PONYGO_BIN）→ 判据面 2.1/2.4/2.5/2.6 未验证（这不是通过）"
             exit 0
@@ -6437,12 +6473,17 @@ githooks_only_init_artifacts() { # → 0 = .githooks 下只有 init 写的 pre-c
   return 0
 }
 github_only_init_artifacts() { # → 0 = .github 下只有 init 写的 A5 适配器（或无内容）
+  # A5 **只判存在、不比对模板**：它是实例可编辑文件（与 A3 钩子同侧，不进 UPGRADE_UNIVERSE，
+  # `ponygo upgrade` 也不刷新它——见 .meta/gates/README.md 的 A5 行）。早先按"内容即模板"比对，
+  # 会把"实例在 A5 里补了自己的 step"误判成「人接手治理」证据，从而把 audit 的自动档从 S 抬到 M
+  # （12 项 → 16 项，凭空多出一档机制税）——改 A5 不等于接管治理，二者是不同的承诺。
+  # 其余 .github 文件（实例自建 workflow 等）仍返回 1 = 有人接手，语义不变。
   local f rel
   [ -d .github ] || return 0
   while IFS= read -r f; do
     rel="${f#./}"
     case "$rel" in
-      .github/workflows/ponygo-governance.yml) init_artifact_equal "$f" ci_adapter_template && continue ;;
+      .github/workflows/ponygo-governance.yml) continue ;;
     esac
     return 1
   done < <(find .github -type f 2>/dev/null)

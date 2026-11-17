@@ -55,7 +55,8 @@ archive_finish() {
   return 0
 }
 
-# 归档封印探测（A6 缺失 → fail-closed：删一个文件不能把封印从提交窗口里摘掉）
+# 归档封印探测（A6 缺失/被清空/被换成不判封印的空壳 → 一律 fail-closed：
+# 删掉或掏空一个文件不能把封印从提交窗口里摘掉）
 archive_probe() {
   if [ ! -f "$ARCHIVE_GATE" ]; then
     ARCHIVE_OUT="[adr-verify] 拒绝：归档封印门 A6 缺失（$ARCHIVE_GATE）——A6 不可判定 = fail-closed；跑 'ponygo init' 补回"
@@ -66,6 +67,22 @@ archive_probe() {
   ARCHIVE_OUT=$(bash "$ARCHIVE_GATE" check 2>&1)
   ARCHIVE_RC=$?
   ARCHIVE_DONE=1
+  # 可判定性证据：A6 的 check 输出必须带「归档封印」判定标记（正常恒有——
+  # `== 归档封印校验（…）==` / `== 归档封印：通过 ==`）。标记缺失 = 门被清空、或换成了
+  # 不判封印的空壳：此时 rc 可能仍是 0，但封印**从未被判定过**——这与"删掉 A6"等价，
+  # 同样 fail-closed（否则 `: > .meta/gates/archive-verify.sh` 一句就把判定摘掉了）。
+  case "$ARCHIVE_OUT" in
+    *归档封印*) ;;
+    *)
+      if [ -n "$ARCHIVE_OUT" ]; then
+        ARCHIVE_OUT="$ARCHIVE_OUT
+[adr-verify] 拒绝：归档封印门 A6 的输出不含「归档封印」判定标记（$ARCHIVE_GATE）——不可判定 = fail-closed；跑 'ponygo init' 补回 A6 后重试"
+      else
+        ARCHIVE_OUT="[adr-verify] 拒绝：归档封印门 A6 未输出任何封印判定（$ARCHIVE_GATE 输出不含「归档封印」判定标记）——不可判定 = fail-closed；跑 'ponygo init' 补回 A6 后重试"
+      fi
+      ARCHIVE_RC=2
+      ;;
+  esac
   return 0
 }
 

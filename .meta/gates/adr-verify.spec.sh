@@ -612,9 +612,19 @@ fi
 cp "$A6" "$R/.meta/gates/archive-verify.sh"
 expect_accept "A6 缺失用例：A6 补回后恢复放行（拒绝确由 A6 缺失造成）" "$R"
 
+# 同族第二形态：A6 不是被删除，而是被**清空/换成不判封印的空壳**（`> A6` 一行即可）。
+# 判据 = A6 的 check 输出必须带「归档封印」判定标记；缺标记的 rc=0 不算"通过"，算"没判过"。
+R=$(new_repo a6-emptied)
+: > "$R/.meta/gates/archive-verify.sh"
+expect_reject_with "A6 清空（0 字节）→ fail-closed 拒绝（文案点名 A6 不可判定）" "$R" 'A6.*不可判定|不可判定.*fail-closed'
+printf '#!/usr/bin/env bash\nexit 0\n' > "$R/.meta/gates/archive-verify.sh"
+expect_reject_with "A6 换成只 exit 0 的假门（无判定标记）→ 同样拒绝" "$R" 'A6.*fail-closed|fail-closed.*A6'
+cp "$A6" "$R/.meta/gates/archive-verify.sh"
+expect_accept "A6 清空用例：A6 补回后恢复放行" "$R"
+
 if [ "$FAIL" -ne 0 ]; then
   printf '[%s] 未通过：门禁的拒绝/放行语义与预期不符（见上方 FAIL）\n' "$SPEC" >&2
   exit 1
 fi
-printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节 + 1.7 rejected 理由（含 CJK 标点）+ 1.8 ## Decision/中文提案标题（含复合词）+ 围栏感知（1.8/1.10）+ A6 缺失 fail-closed（含 A6 在场正控制与补回反向对照）均已证明（exit 0）\n' "$SPEC"
+printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节 + 1.7 rejected 理由（含 CJK 标点）+ 1.8 ## Decision/中文提案标题（含复合词）+ 围栏感知（1.8/1.10）+ A6 缺失/被清空/被换成假门 → fail-closed（含 A6 在场正控制与补回反向对照）均已证明（exit 0）\n' "$SPEC"
 exit 0
