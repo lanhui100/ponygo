@@ -453,8 +453,8 @@ assert_same_as_template() { # <描述> <生成文件> <模板文件>
 # ---- ADR 门禁装配夹具（契约真源：.dev-team/plan-freeze.md §2/§6.5/§6.6）----
 # 说明：s12/s24/s28 的正例夹具按 §6.6 加强后的 2.4 判据补装配（哨兵块 + 非注释调用行
 # + 执行位 + A1 资产），属**判据加强**，断言一条不删、不弱化。
-GATE_MARKER='# >>> ponygo-gate: adr-verify v1 >>>'
-GATE_MARKER_END='# <<< ponygo-gate: adr-verify v1 <<<'
+GATE_MARKER='# >>> ponygo-gate: adr-verify v2 >>>'
+GATE_MARKER_END='# <<< ponygo-gate: adr-verify v2 <<<'
 
 # 前置哨兵块（F1 口径，plan-freeze §7 F1 / 与 ponygo 生成器一致）：
 # 插在 `#!` 首行之后（无 shebang 则文件最前），既有字节的顺序与内容**零改动**；
@@ -471,6 +471,9 @@ prepend_gate_block() { # <hook-file>
     printf '%s\n' "$GATE_MARKER"
     printf 'if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then\n'
     printf '  bash "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" || exit 1\n'
+    printf 'else\n'
+    printf '  printf '\''[pre-commit] 拒绝：缺失 .meta/gates/adr-verify.sh（A1 不可判定 = fail-closed）→ 跑 ponygo init 补回\\n'\'' >&2\n'
+    printf '  exit 1\n'
     printf 'fi\n'
     printf '%s\n' "$GATE_MARKER_END"
   } > "$block"
@@ -3008,7 +3011,7 @@ s45_observe_diff_timeout_budget() {
 # 2.4 ④ 锚定口径（与 maturity-ladder §2.4 锚定命令逐字同款）：
 # 取哨兵块区间，剔除注释行，剩下的必须含真实调用 adr-verify.sh
 sentinel_noncomment() { # <hook 文件>
-  sed -n '/>>> ponygo-gate: adr-verify v1 >>>/,/<<< ponygo-gate: adr-verify v1 <<</p' "$1" 2>/dev/null \
+  sed -n '/>>> ponygo-gate: adr-verify v2 >>>/,/<<< ponygo-gate: adr-verify v2 <<</p' "$1" 2>/dev/null \
     | grep -vE '^[[:space:]]*#'
 }
 
@@ -3022,8 +3025,8 @@ s46_init_gate_wiring() {
   assert_eq "core.hooksPath 设为 .githooks" ".githooks" "$(hookspath_of "$T")"
   assert_exists "生成 .githooks/pre-commit" "$T/.githooks/pre-commit"
   assert_exec ".githooks/pre-commit 可执行（R3：非可执行钩子被 git 静默忽略）" "$T/.githooks/pre-commit"
-  assert_file_has "含 marker 行 # ponygo-gate: adr-verify v1" "$T/.githooks/pre-commit" \
-    "# ponygo-gate: adr-verify v1"
+  assert_file_has "含 marker 行 # ponygo-gate: adr-verify v2" "$T/.githooks/pre-commit" \
+    "# ponygo-gate: adr-verify v2"
   assert_file_has "含哨兵尾行（2.4 ④）" "$T/.githooks/pre-commit" "$GATE_MARKER_END"
   assert_contains "哨兵块内有非注释行调用 adr-verify.sh（2.4 ④）" \
     "$(sentinel_noncomment "$T/.githooks/pre-commit")" "adr-verify.sh"
@@ -3443,11 +3446,11 @@ EOF
   cat > "$T/.githooks/pre-commit" <<'EOF'
 #!/usr/bin/env bash
 echo hook
-# >>> ponygo-gate: adr-verify v1 >>>
+# >>> ponygo-gate: adr-verify v2 >>>
 # if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
 #   bash "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" || exit 1
 # fi
-# <<< ponygo-gate: adr-verify v1 <<<
+# <<< ponygo-gate: adr-verify v2 <<<
 EOF
   chmod +x "$T/.githooks/pre-commit"
   # shellcheck disable=SC2046
@@ -3459,11 +3462,14 @@ EOF
   cat > "$T/.githooks/pre-commit" <<'EOF'
 #!/usr/bin/env bash
 echo hook
-# >>> ponygo-gate: adr-verify v1 >>>
+# >>> ponygo-gate: adr-verify v2 >>>
 if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
   bash "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" || exit 1
+else
+  printf '[pre-commit] 拒绝：缺失 .meta/gates/adr-verify.sh（A1 不可判定 = fail-closed）→ 跑 ponygo init 补回\n' >&2
+  exit 1
 fi
-# <<< ponygo-gate: adr-verify v1 <<<
+# <<< ponygo-gate: adr-verify v2 <<<
 EOF
   chmod +x "$T/.githooks/pre-commit"
   # shellcheck disable=SC2046
@@ -3568,7 +3574,7 @@ assert_fail_of() { # <描述> <整体输出> <判据号>
   fi
 }
 sentinel_block() { # <hook 文件> → 输出哨兵区间（含 BEGIN/END 两行）
-  sed -n '/>>> ponygo-gate: adr-verify v1 >>>/,/<<< ponygo-gate: adr-verify v1 <<</p' "$1" 2>/dev/null
+  sed -n '/>>> ponygo-gate: adr-verify v2 >>>/,/<<< ponygo-gate: adr-verify v2 <<</p' "$1" 2>/dev/null
 }
 block_begin_line() { # <hook 文件> → 哨兵 BEGIN 行号（无则空）
   grep -nF -m1 "$GATE_MARKER" "$1" 2>/dev/null | head -n1 | cut -d: -f1
@@ -3729,7 +3735,7 @@ s59_f2_concurrent_atomicity() {
   ( cd "$T" && mkdir -p .githooks && git config core.hooksPath .githooks ) >/dev/null 2>&1
   cat > "$T/.githooks/pre-commit" <<'EOF'
 #!/usr/bin/env bash
-# >>> ponygo-gate: adr-verify v1 >>>
+# >>> ponygo-gate: adr-verify v2 >>>
 if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
 EOF
   chmod +x "$T/.githooks/pre-commit"
@@ -3753,23 +3759,23 @@ s60_f3_canonical_block() {
     case "$V" in
       echo) TPL='#!/usr/bin/env bash
 echo hook
-# >>> ponygo-gate: adr-verify v1 >>>
+# >>> ponygo-gate: adr-verify v2 >>>
 echo adr-verify.sh
-# <<< ponygo-gate: adr-verify v1 <<<' ;;
+# <<< ponygo-gate: adr-verify v2 <<<' ;;
       ortrue) TPL='#!/usr/bin/env bash
 echo hook
-# >>> ponygo-gate: adr-verify v1 >>>
+# >>> ponygo-gate: adr-verify v2 >>>
 if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
   bash "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" || true
 fi
-# <<< ponygo-gate: adr-verify v1 <<<' ;;
+# <<< ponygo-gate: adr-verify v2 <<<' ;;
       iffalse) TPL='#!/usr/bin/env bash
 echo hook
-# >>> ponygo-gate: adr-verify v1 >>>
+# >>> ponygo-gate: adr-verify v2 >>>
 if false; then
   bash "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" || exit 1
 fi
-# <<< ponygo-gate: adr-verify v1 <<<' ;;
+# <<< ponygo-gate: adr-verify v2 <<<' ;;
     esac
     printf '%s\n' "$TPL" > "$T/.githooks/pre-commit"; chmod +x "$T/.githooks/pre-commit"
     run_cli "$T" init
@@ -3970,6 +3976,9 @@ gate_block_lines() { # 打印规范哨兵块（与 prepend_gate_block/ponygo 生
   printf '%s\n' "$GATE_MARKER"
   printf 'if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then\n'
   printf '  bash "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" || exit 1\n'
+  printf 'else\n'
+  printf '  printf '\''[pre-commit] 拒绝：缺失 .meta/gates/adr-verify.sh（A1 不可判定 = fail-closed）→ 跑 ponygo init 补回\\n'\'' >&2\n'
+  printf '  exit 1\n'
   printf 'fi\n'
   printf '%s\n' "$GATE_MARKER_END"
 }
@@ -4030,7 +4039,7 @@ s67_f2_foreign_lines_not_truncated() {
   cat > "$T/.githooks/pre-commit" <<'EOF'
 #!/usr/bin/env bash
 echo user-line-1
-# >>> ponygo-gate: adr-verify v1 >>>
+# >>> ponygo-gate: adr-verify v2 >>>
 if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
 echo user-line-2
 echo user-line-3
@@ -4049,7 +4058,7 @@ EOF
   T=$(new_case); git_seed_repo "$T"; run_cli "$T" init; set_level2 "$T"
   cat > "$T/.githooks/pre-commit" <<'EOF'
 #!/usr/bin/env bash
-# >>> ponygo-gate: adr-verify v1 >>>
+# >>> ponygo-gate: adr-verify v2 >>>
 if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
 EOF
   chmod +x "$T/.githooks/pre-commit"
@@ -4102,7 +4111,7 @@ s69_f_trailing_sentinel_no_user_loss() {
   ( cd "$T" && mkdir -p .githooks && git config core.hooksPath .githooks ) >/dev/null 2>&1
   # 完整规范块 + 其后的重复 BEGIN + 用户行（无 END）——写中断/重复装配的残留形态
   { printf '#!/usr/bin/env bash\n'; gate_block_lines; \
-    printf '# >>> ponygo-gate: adr-verify v1 >>>\necho USER-KEEP-ME\n'; } \
+    printf '# >>> ponygo-gate: adr-verify v2 >>>\necho USER-KEEP-ME\n'; } \
     > "$T/.githooks/pre-commit"
   chmod +x "$T/.githooks/pre-commit"
   run_cli "$T" init

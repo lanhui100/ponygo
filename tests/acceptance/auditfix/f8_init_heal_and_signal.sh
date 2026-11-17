@@ -13,8 +13,8 @@
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-BEGIN_LINE='# >>> ponygo-gate: adr-verify v1 >>>'
-END_LINE='# <<< ponygo-gate: adr-verify v1 <<<'
+BEGIN_LINE='# >>> ponygo-gate: adr-verify v2 >>>'
+END_LINE='# <<< ponygo-gate: adr-verify v2 <<<'
 
 count_line() { printf '%s\n' "$2" | grep -c -x -F -- "$1"; }
 

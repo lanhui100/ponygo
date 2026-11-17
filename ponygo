@@ -6265,13 +6265,16 @@ init_hook_template() { cat <<'PONYGO_EOF'
 # 本仓自用 = dogfood。允许 `git commit --no-verify` 绕过，但 CI 层（A4/A5）兜底。
 #
 # marker（2.4 机器识别用，与哨兵同文）：下一行
-# ponygo-gate: adr-verify v1
+# ponygo-gate: adr-verify v2
 #
-# >>> ponygo-gate: adr-verify v1 >>>
+# >>> ponygo-gate: adr-verify v2 >>>
 if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
   bash "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" || exit 1
+else
+  printf '[pre-commit] 拒绝：缺失 .meta/gates/adr-verify.sh（A1 不可判定 = fail-closed）→ 跑 ponygo init 补回\n' >&2
+  exit 1
 fi
-# <<< ponygo-gate: adr-verify v1 <<<
+# <<< ponygo-gate: adr-verify v2 <<<
 PONYGO_EOF
 }
 
@@ -6342,9 +6345,18 @@ write_ci_adapter() { # 无参；已存在则不覆盖（实例可编辑文件，
 
 # ---------- 「交付即接线」装配（plan-freeze §6.1–6.5；幂等、非破坏） ----------
 # 哨兵/标记常量（§6.5 逐字形态）：marker 行与哨兵同文，供 2.4 机器识别。
+# **v1 = 冻结的历史值**：只用于「双接受灰度」——合规 v1 块仍算接线（PASS + 一行升级 WARN）。
+# 不再由 init 写出；任何改动都视为改历史口径（2.4 的旧实例判定会漂移）。
 GATE_SENT_BEGIN='# >>> ponygo-gate: adr-verify v1 >>>'
 GATE_SENT_END='# <<< ponygo-gate: adr-verify v1 <<<'
 GATE_MARKER='# ponygo-gate: adr-verify v1'
+# **v2 = 现行规范**（B020）：哨兵块加 fail-closed 的 else 分支——删掉 A1 自身不再等于「静默放行」。
+# 为什么必须 v2：v1 块是 `if [ -f A1 ]; then bash A1 || exit 1; fi`，`rm .meta/gates/adr-verify.sh`
+# 之后条件为假、整块跳过 → pre-commit 放行（实测坏 ADR 落库）。删门比改门省事，所以必须让
+# 「门不在场」本身成为拒绝理由（与 A1 内部「缺 A6 → fail-closed」同族）。
+GATE_SENT_BEGIN_V2='# >>> ponygo-gate: adr-verify v2 >>>'
+GATE_SENT_END_V2='# <<< ponygo-gate: adr-verify v2 <<<'
+GATE_MARKER_V2='# ponygo-gate: adr-verify v2'
 
 # 规范哨兵块（F3 唯一真值）：gate_hook_bytes_ok（接线判据的字节原子）与它做「EOL 归一后逐字节」比较。
 # 末行/首行哨兵标记与测试夹具（tests/run.sh append_gate_block）逐字同款。
@@ -6354,13 +6366,46 @@ if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
   bash "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" || exit 1
 fi
 # <<< ponygo-gate: adr-verify v1 <<<'
+GATE_BLOCK_CANONICAL_V2='# >>> ponygo-gate: adr-verify v2 >>>
+if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
+  bash "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" || exit 1
+else
+  printf '"'"'[pre-commit] 拒绝：缺失 .meta/gates/adr-verify.sh（A1 不可判定 = fail-closed）→ 跑 ponygo init 补回\n'"'"' >&2
+  exit 1
+fi
+# <<< ponygo-gate: adr-verify v2 <<<'
 
 # 取**首个已闭合**哨兵区间（BEGIN..其后首个 END，含两行）。锚定口径与 maturity-ladder §2.4 /
 # 测试夹具一致。F17：BEGIN 重复出现时，sed 的 `/BEGIN/,/END/` 会从第一个区间结束后**再开一段**
 # 直到文件尾，导致「完整规范块 + 尾随 BEGIN + 用户行」被拼成 8 行、判成「字节非规范」——
 # 该文件其实是已接线的（门真的会跑）。故这里只取第一段闭合区间，遇 END 即停。
+# 哨兵块**版本**判定（v2 优先）：返回 v2 / v1 / 空（无完整哨兵区间）。
+# 双接受灰度的锚点：v2 = 现行规范（含 fail-closed else），v1 = 冻结历史值（只 WARN 不判红）。
+gate_hook_block_version() { # <hook 文件>
+  local f="$1"
+  [ -f "$f" ] || return 1
+  if grep -qxF "$GATE_SENT_BEGIN_V2" "$f" 2>/dev/null && grep -qxF "$GATE_SENT_END_V2" "$f" 2>/dev/null; then
+    printf 'v2'; return 0
+  fi
+  if grep -qxF "$GATE_SENT_BEGIN" "$f" 2>/dev/null && grep -qxF "$GATE_SENT_END" "$f" 2>/dev/null; then
+    printf 'v1'; return 0
+  fi
+  return 1
+}
+# <hook 文件> → 该版本对应的 BEGIN/END 哨兵（无版本时回落到 v2，用于「缺尾行」分因文案）
+gate_hook_sentinels() { # <hook 文件> → "BEGIN<TAB>END"
+  local ver=""
+  ver=$(gate_hook_block_version "$1" 2>/dev/null || true)
+  case "$ver" in
+    v1) printf '%s\t%s' "$GATE_SENT_BEGIN" "$GATE_SENT_END" ;;
+    *)  printf '%s\t%s' "$GATE_SENT_BEGIN_V2" "$GATE_SENT_END_V2" ;;
+  esac
+}
 gate_hook_block() { # <hook 文件>
-  awk -v b="$GATE_SENT_BEGIN" -v e="$GATE_SENT_END" '
+  local b="" e=""
+  b=$(gate_hook_sentinels "$1" | cut -f1)
+  e=$(gate_hook_sentinels "$1" | cut -f2)
+  awk -v b="$b" -v e="$e" '
     { line = $0; sub(/\r$/, "", line) }
     done { next }
     inb { print; if (line == e) done = 1; next }
@@ -6381,9 +6426,12 @@ gate_hook_block() { # <hook 文件>
 # 真实钩子）。函数体用 `name() {` … `}` 的 `{`/`}` 深度跟踪（`${…}` 参数展开不计），子壳用
 # `(`/`)` 深度（`$(…)`/`<(…)` 不计），case 用 `case … in` … `esac` 计数。
 gate_hook_early_exit_line() { # <hook 文件> → 首个顶层早退行号（无则空）
-  local f="$1"
+  local f="$1" av="" bv="" af="" bf=""
   [ -f "$f" ] || return 0
-  awk -v b="$GATE_SENT_BEGIN" -v e="$GATE_SENT_END" '
+  bv=$(gate_hook_sentinels "$f" | cut -f1); av=$(gate_hook_sentinels "$f" | cut -f2)
+  # 两个版本的哨兵区间都要跳过：v1 遗留块里的 `|| exit 1` 也算块自身，不得判成早退行。
+  bf="$GATE_SENT_BEGIN"; af="$GATE_SENT_END"
+  awk -v b="$bv" -v e="$av" -v b1="$bf" -v e1="$af" '
     function scandepth(s, upto,   i, c, d, pe) {
       d = 0; pe = 0
       for (i = 1; i <= upto; i++) {
@@ -6407,8 +6455,8 @@ gate_hook_early_exit_line() { # <hook 文件> → 首个顶层早退行号（无
     }
     {
       line = $0; sub(/\r$/, "", line)
-      if (line == b) { inb = 1; next }
-      if (line == e) { inb = 0; next }
+      if (line == b || line == b1) { inb = 1; next }
+      if (line == e || line == e1) { inb = 0; next }
       if (inb) next
       code = line
       if (match(code, /(^|[[:space:]])#/)) code = substr(code, 1, RSTART - 1)
@@ -6445,8 +6493,9 @@ gate_hook_early_exit_line() { # <hook 文件> → 首个顶层早退行号（无
 # 块必须位于首个顶层早退行（exit/exec/return）**之前**（F1/F13）：末尾追加在 `exit 0` /
 # 裸 `exit` / `exec 他脚本` 钩子里永不执行，而旧判据仍报「已接线」= 假绿。
 gate_hook_block_before_exit() { # <hook 文件> → 0 = 位置安全
-  local f="$1" bs="" es=""
-  bs=$(grep -nF -m1 "$GATE_SENT_BEGIN" "$f" 2>/dev/null | head -n1 | cut -d: -f1)
+  local f="$1" bs="" es="" gb=""
+  gb=$(gate_hook_sentinels "$f" | cut -f1)
+  bs=$(grep -nF -m1 "$gb" "$f" 2>/dev/null | head -n1 | cut -d: -f1)
   [ -n "$bs" ] || return 1
   es=$(gate_hook_early_exit_line "$f")
   [ -n "$es" ] || return 0
@@ -6454,8 +6503,11 @@ gate_hook_block_before_exit() { # <hook 文件> → 0 = 位置安全
 }
 
 # 哨兵块结构是否完整（BEGIN 与 END 两行都在）——半截块（写中断残留）不完整，须整块重建
-gate_hook_block_complete() { # <hook 文件> → 0 = 两个哨兵行都在
+gate_hook_block_complete() { # <hook 文件> → 0 = 某个版本的两个哨兵行都在（v1/v2 双接受）
   local f="$1"
+  if grep -qxF "$GATE_SENT_BEGIN_V2" "$f" 2>/dev/null && grep -qxF "$GATE_SENT_END_V2" "$f" 2>/dev/null; then
+    return 0
+  fi
   grep -qxF "$GATE_SENT_BEGIN" "$f" 2>/dev/null || return 1
   grep -qxF "$GATE_SENT_END" "$f" 2>/dev/null || return 1
   return 0
@@ -6464,12 +6516,17 @@ gate_hook_block_complete() { # <hook 文件> → 0 = 两个哨兵行都在
 # 已接线 = 哨兵区间逐字节等于规范块（EOL 归一，F3）。**只回答问题「字节对不对」**，
 # 不回答「这段字节会不会被执行」——后者是 gate_hook_block_before_exit（F1）。
 # 两者由 gate_hook_wired 合成唯一对外口径，本函数仅是它的原子谓词之一，勿单独作为接线判据。
-gate_hook_bytes_ok() { # <hook 文件> → 0 = 哨兵区间逐字节等于规范块
-  local f="$1" got=""
+gate_hook_bytes_ok() { # <hook 文件> → 0 = 哨兵区间逐字节等于**该版本**的规范块（v2 或 v1 冻结值）
+  local f="$1" got="" ver="" canon=""
   [ -f "$f" ] || return 1
-  grep -qxF "$GATE_SENT_END" "$f" 2>/dev/null || return 1
+  ver=$(gate_hook_block_version "$f") || return 1
+  case "$ver" in
+    v2) canon="$GATE_BLOCK_CANONICAL_V2" ;;
+    v1) canon="$GATE_BLOCK_CANONICAL" ;;
+    *) return 1 ;;
+  esac
   got=$(gate_hook_block "$f" | tr -d '\r')
-  [ "$got" = "$GATE_BLOCK_CANONICAL" ] || return 1
+  [ "$got" = "$canon" ] || return 1
   return 0
 }
 
@@ -6637,11 +6694,12 @@ gate_asset_put() { # <目标路径> <权限> <资产名>；规范内容走 stdin
 }
 
 # F14/F17 哨兵块计数（含重复块与残块；grep 按行计）
-gate_hook_begin_count() { # <hook 文件> → BEGIN 行数（无则 0）
-  local n=0
+gate_hook_begin_count() { # <hook 文件> → BEGIN 行数（v1 + v2 都算；无则 0）
+  local n=0 n2=0
   [ -f "$1" ] || { printf 0; return 0; }
   n=$(grep -cF "$GATE_SENT_BEGIN" "$1" 2>/dev/null || true)
-  printf '%s' "${n:-0}"
+  n2=$(grep -cF "$GATE_SENT_BEGIN_V2" "$1" 2>/dev/null || true)
+  printf '%s' "$(( ${n:-0} + ${n2:-0} ))"
 }
 
 # F14+F17「哨兵残留里是否含外来内容」的**唯一判定**：扫描**每一个** BEGIN（重复/尾随/未闭合
@@ -6651,10 +6709,42 @@ gate_hook_begin_count() { # <hook 文件> → BEGIN 行数（无则 0）
 # 任何一行不等 → 外来内容（用户自有行）→ 禁止删字节。
 # F17：本判据必须**独立于「是否已接线」**——「完整规范块 + 其后又一个 BEGIN + 用户行」时
 # 文件是「已接线」的，若先判接线就会跳过保护，把用户行删掉（BLOCKING 数据丢失）。
+# 单版本残块扫描（v2 侧复用；判据与 v1 侧逐字同款，只是换哨兵与规范块）
+_gate_hook_residue_foreign1() { # <hook> <BEGIN> <END> <CANON>
+  local f="$1" b="$2" e="$3" c="$4" verdict=""
+  [ -f "$f" ] || return 1
+  grep -qxF "$b" "$f" 2>/dev/null || return 1
+  verdict=$(PONYGO_CANON="$c" awk -v b="$b" -v e="$e" '
+      BEGIN { n = split(ENVIRON["PONYGO_CANON"], C, "\n"); state = 0; idx = 0; bad = 0; foreign = 0 }
+      { line = $0; sub(/\r$/, "", line) }
+      line == b {
+        if (state == 1 && bad) { foreign = 1; exit }
+        state = 1; idx = 1; bad = 0; next
+      }
+      state == 1 && line == e { state = 0; next }
+      state == 1 {
+        if (line ~ /^[[:space:]]*$/) next
+        idx++
+        if (idx > n || line != C[idx]) bad = 1
+        next
+      }
+      END {
+        if (state == 1 && bad) foreign = 1
+        print (foreign ? "FOREIGN" : "PURE")
+      }
+    ' "$f" 2>/dev/null)
+  [ "$verdict" = "FOREIGN" ]
+}
 gate_hook_residue_foreign() { # <hook 文件> → 0 = 残留含外来内容（禁止删字节）
   local f="$1" verdict=""
   [ -f "$f" ] || return 1
-  grep -qxF "$GATE_SENT_BEGIN" "$f" 2>/dev/null || return 1
+  # 入口闸门必须**版本无关**：v2 残块（新写法）与 v1 残块（历史写法）都要查，
+  # 否则「只留 v1 闸门」会让 v2 的未闭合残块漏检 → init 把区间里的用户行当残块删掉（数据丢失）。
+  grep -qxF "$GATE_SENT_BEGIN_V2" "$f" 2>/dev/null || grep -qxF "$GATE_SENT_BEGIN" "$f" 2>/dev/null || return 1
+  # v2 与 v1 的残块都要查（同一个钩子里可能同时躺着旧 v1 残块与新 v2 块）。
+  if _gate_hook_residue_foreign1 "$f" "$GATE_SENT_BEGIN_V2" "$GATE_SENT_END_V2" "$GATE_BLOCK_CANONICAL_V2"; then
+    return 0
+  fi
   verdict=$(PONYGO_CANON="$GATE_BLOCK_CANONICAL" awk -v b="$GATE_SENT_BEGIN" -v e="$GATE_SENT_END" '
       BEGIN { n = split(ENVIRON["PONYGO_CANON"], C, "\n"); state = 0; idx = 0; bad = 0; foreign = 0 }
       { line = $0; sub(/\r$/, "", line) }
@@ -6689,7 +6779,7 @@ gate_hook_write_block() { # <hook 文件> [purge=1|0] → 0 = 已写
   dir=$(dirname "$f")
   mode=$(file_mode "$f" 2>/dev/null || true)
   tmp=$(mktemp "$dir/.ponygo.hook.XXXXXX" 2>/dev/null) || return 1
-  blk="$GATE_BLOCK_CANONICAL"
+  blk="$GATE_BLOCK_CANONICAL_V2"
   # CRLF 钩子在 bash 下本就不可执行（`then\r` 不是关键字）——整体归一为 LF（一次原子替换），
   # 既避免同一文件内 EOL 混排，也让既有钩子第一次真正可跑；EOL 归一后判据口径不变（F3）。
   if grep -q $'\r' "$f" 2>/dev/null; then
@@ -6701,11 +6791,14 @@ gate_hook_write_block() { # <hook 文件> [purge=1|0] → 0 = 已写
   # status 2.4 的补救「bash ponygo init」成为死循环；纯残块钩子还会被静默清空（无 WARN）。
   # 收口：END 兜底——块外无行时也写出规范块；整文件确实为空时补 shebang（否则文件没有解释器行）。
   # 边界不变：块外字节一律保留（purge 只吞已识别的哨兵段），绝不删除用户行。
-  if ! PONYGO_BLK="$blk" awk -v b="$GATE_SENT_BEGIN" -v e="$GATE_SENT_END" -v purge="$purge" '
+  # 旧块可来自两个版本（v1 迁移 / v2 重建），purge 时两个哨兵对都要识别——否则「v1 块 + 新 v2 块」
+  # 会同时留在文件里（begin_count>1 → 下次 init 又判"多块"）。
+  if ! PONYGO_BLK="$blk" awk -v b="$GATE_SENT_BEGIN" -v e="$GATE_SENT_END" \
+      -v b2="$GATE_SENT_BEGIN_V2" -v e2="$GATE_SENT_END_V2" -v purge="$purge" '
       BEGIN { blk = ENVIRON["PONYGO_BLK"]; if (blk != "") blk = blk "\n" }
       { line = $0; sub(/\r$/, "", line); saw = 1 }
-      purge && line == b { inblk = 1; next }
-      inblk && line == e { inblk = 0; next }
+      purge && (line == b || line == b2) { inblk = 1; next }
+      inblk && (line == e || line == e2) { inblk = 0; next }
       inblk { next }
       !placed {
         placed = 1
@@ -6786,7 +6879,12 @@ githooks_only_init_artifacts() { # → 0 = .githooks 下只有 init 写的 pre-c
   while IFS= read -r f; do
     rel="${f#./}"
     case "$rel" in
-      .githooks/pre-commit) init_artifact_equal "$f" init_hook_template && continue ;;
+      .githooks/pre-commit)
+        init_artifact_equal "$f" init_hook_template && continue
+        # v1 哨兵块（灰度期）：仍是 init 产物——不比对全文（旧实例的钩子字节就是 v1 模板），
+        # 也不据此判「人接手治理」。否则 B020 一发布，所有未升级实例的 audit 自动档会从 S 抬到 M。
+        [ "$(gate_hook_block_version "$f")" = "v1" ] && continue
+        ;;
     esac
     return 1
   done < <(find .githooks -type f 2>/dev/null)
@@ -6909,8 +7007,10 @@ gate_24_probe() {
     G24_FIX="分两步：① chmod +x $hp/pre-commit（恢复执行位——init 不会替你激活沉睡钩子，执行位是人的决定）② ponygo init（幂等补块：块未接线或位置在早退行之后时按规范块前置；已接线则一字不动）"
     return 1
   fi
-  if ! grep -qxF "$GATE_SENT_END" "$hook" 2>/dev/null; then
-    G24_CAUSE="钩子未接 ADR 门（缺哨兵尾行 $GATE_SENT_END）：$hp/pre-commit"
+  # 缺尾行分因：v1/v2 任一版本的 END 在场即不算"缺尾行"（双接受灰度期间两种钩子都合法）。
+  if ! grep -qxF "$GATE_SENT_END_V2" "$hook" 2>/dev/null \
+     && ! grep -qxF "$GATE_SENT_END" "$hook" 2>/dev/null; then
+    G24_CAUSE="钩子未接 ADR 门（缺哨兵尾行 $GATE_SENT_END_V2）：$hp/pre-commit"
     G24_FIX="bash ponygo init（按规范块重建哨兵块并前置到 shebang 之后）"
     return 1
   fi
@@ -6932,6 +7032,14 @@ gate_24_probe() {
     G24_CAUSE="缺门禁本体 $META_DIR/gates/adr-verify.sh"
     G24_FIX="bash ponygo init（A1 资产按规范内容自愈重建）"
     return 1
+  fi
+  # B020 灰度：合规 v1 块仍算接线（2.4 PASS），但必须提醒升级——v1 没有「A1 缺失」的 fail-closed
+  # 分支（删掉 A1 后整块跳过 = 静默放行）。每次进程只打一行（2.4 判定 / status 报告 / audit 共用
+  # 同一个 probe，重复打会把 WARN 变成噪音）。
+  if [ "${G24_V1_WARNED:-0}" = "0" ] \
+     && [ "$(gate_hook_block_version "$hook")" = "v1" ]; then
+    printf 'ponygo: WARN pre-commit 哨兵块为 v1（无「A1 缺失」fail-closed），建议重跑 '\''ponygo init'\'' 升级到 v2\n' >&2
+    G24_V1_WARNED=1
   fi
   G24_OK=1
   return 0
@@ -6996,6 +7104,8 @@ ensure_gate_wiring() {
       info "[dry-run] $hp/pre-commit 含外来内容的哨兵残留（重复/未闭合 BEGIN 区间内有非规范行）—— 先于接线判定保护：零字节删除、只插入规范块（未接线时）+ WARN + 本次 init 非零（需人工清理）"
     elif [ "$(gate_hook_begin_count "$dir/pre-commit")" -gt 1 ]; then
       info "[dry-run] $hp/pre-commit 有多个哨兵块/残块（区间内均无外来内容）→ 将去重为一个规范块（rc=0）"
+    elif [ "$(gate_hook_block_version "$dir/pre-commit")" = "v1" ] && gate_hook_wired "$dir/pre-commit"; then
+      info "[dry-run] $hp/pre-commit 为合规 v1 块 → 将原子替换为 v2 块（A1 缺失也 fail-closed；原字节顺序与位置不动）"
     elif gate_hook_wired "$dir/pre-commit"; then
       info "[dry-run] $hp/pre-commit 已接线（规范块 + 前置位置）—— 不动"
     elif [ -x "$dir/pre-commit" ]; then
@@ -7151,6 +7261,15 @@ ensure_gate_wiring_locked() {
       [ -x "$hook" ] || info "提示：该钩子不可执行（沉睡钩子）——框架不改权限：chmod +x $hp/pre-commit"
     else
       gate_write_fail "$hp/pre-commit" "写入失败（原子替换/grep 失败，目录不可写？）——哨兵块未能去重"
+    fi
+  elif [ "$(gate_hook_block_version "$hook")" = "v1" ] && gate_hook_wired "$hook"; then
+    # B020：合规 **v1** 块（字节 == 冻结的 v1 canonical）→ 原子替换为 v2 块。其余字节顺序/内容
+    # 零改动（写块走「purge 旧哨兵区间 + 在 shebang 后前置」的一次原子替换，位置规则不变）。
+    if gate_hook_write_block "$hook"; then
+      info "$hp/pre-commit 哨兵块 v1 → 已升级为 v2（A1 缺失也 fail-closed）；原字节顺序与权限不动"
+      [ -x "$hook" ] || info "提示：该钩子不可执行（沉睡钩子）——框架不改权限：chmod +x $hp/pre-commit"
+    else
+      gate_write_fail "$hp/pre-commit" "写入失败（原子替换 mktemp/mv 失败，目录不可写？）——v1 哨兵块未能升级为 v2"
     fi
   elif gate_hook_wired "$hook"; then
     if [ -x "$hook" ]; then
