@@ -55,7 +55,7 @@ A1 扩 ACMRD 的删除入册 + 结论行改「已判定部分通过」）。
 W2b（U10/U9→B018）亦已落地（A8 rg/grep 同口径 + 裁决不造空清单）。本提案继续承载
 W3a（U5 剩余 miss_ids → B022）亦已落地（四问 16 个项级稳定 id + `miss_ids` 补全 + 人读「未命中项」行，
 决策见 `implemented/process/2026-11-17-audit-miss-ids.md`）。
-余下三项（U7→B013、U4→B017、B020）的**迁移策略**已冻结在
+W3b（U4→B017 spec 运行时契约）与 W3c（U7→B013 逃生口留痕契约）亦已落地。余下 **B020**（A3 钩子 fail-closed）的迁移策略冻结在
 `.agents/notes/proposed/process/2026-11-17-w3-migration-designs.md`（哨兵块 v1→v2 双接受灰度 /
 逃生口 append-only ledger / spec `##SPEC` 运行时契约灰度），按该设计分三项独立实施。
 

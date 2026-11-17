@@ -751,6 +751,46 @@ bash .meta/gates/ci-verify.sh
 - 挂载：`git config core.hooksPath .githooks` + 在 .githooks/ 放 pre-commit / pre-push；
 - 每门一条"承诺 → 命令"的对应（凡机械可查的承诺必配命令，P2）。
 
+## 逃生口留痕（bypass ledger，**非门禁**）
+
+门禁的逃生口（`env-skip` / 跳过开关 / `--no-verify` 之外的显式放行口）**放行前必须追加一行留痕**。
+这一节只钉死**路径与格式**，不做成门：理由成不成立属语义判断（P6），门只能看到"有没有字"，
+看不到"该不该放"——把留痕做成硬门只会逼人绕开留痕本身（删日志比讲道理省事）。
+
+**路径**：`<git-common-dir>/ponygo-gate/bypass.log`
+
+- 用 `git rev-parse --git-common-dir` 解析（worktree / submodule 下与仓库根不同）；
+  返回相对路径时相对仓库根（`git rev-parse --show-toplevel`）拼接；
+- 非 git 仓 = 不存在；目录需自行 `mkdir -p`（本框架不代建，也不播种空文件——
+  空文件与"没有留痕"是同一件事，多一个空壳只会让人以为"机制在跑"）。
+
+**格式**：JSONL，**一行一个 JSON 对象 = 一次放行事件**，追加-only（不得改写/删除既有行）：
+
+```json
+{"ts":"2026-11-17T21:05:00+0800","gate":"git-flow-gate","why":"热修复直推 master","commit":"abc1234","owner":"dm"}
+```
+
+| 键 | 必填 | 语义 |
+|---|---|---|
+| `ts` | ✅ | 事件时间（ISO8601 或 epoch 秒） |
+| `gate` | ✅ | 逃生口所属门名（如 `git-flow-gate` / `drift-strict`） |
+| `why` | ✅ | 非空理由（为什么这次值得绕过） |
+| `commit` | — | 被放行的提交 sha |
+| `owner` | — | 写者标识（人/会话） |
+
+**多出的键不算错**（向前兼容）；缺任一必填键 = 该行格式不合法。
+
+**可见性**：`ponygo audit` 的人读面在判据明细之后、结论行之前打印一行（`audit --json` / `status --json`
+的字段词表**零改动**，JSON 消费者看不到该行）：
+
+```
+逃生口留痕：2 条（最近 2026-11-17T21:05:00+0800 git-flow-gate：热修复直推 master）
+逃生口留痕：3 条，其中 1 条格式不合法（按 gates/README 的格式修复：ts/gate/why 三键必填）
+```
+
+行不改变任何退出码：留痕是**观察项**，不是判据。核对口径是**形状判据**（该行含非空 `ts`/`gate`/`why`），
+不追求完整 JSON 解析——理由质量靠 review。
+
 ## 负样本 spec 的两种形态（判据 2.3）
 
 | 形态 | 判据强度 | 写法 |
@@ -8383,6 +8423,9 @@ cmd_audit() {
   # audit_done 里另有一道兜底（更早的退出路径也在结论前打印，且由同一旗标保证只打一次）。
   implant_baseline_line
   AUDIT_IMPLANT_TAIL=0
+  # U7（W3c）：逃生口留痕观察行——同一落点（判据明细之后、结论行之前），只追加、不改退出码、
+  # 不进 --json 词表（JSON 模式下人类行随 `exec 3>&1 1>&2` 整体改道 stderr）。
+  bypass_ledger_line
   # ---- 级自洽验证（EXTERNAL-001 P1-1：audit 不再把判据推给 status，直接内嵌）----
   # 有治理根且声明了 level 时，audit 顺手验级：判据不符 → 列 FAIL 项并 exit 1
   # （机器可查缺口 = 非零退出；audit 的"打分"语义不变，只是不再漏掉判据级结论）。
@@ -8740,6 +8783,54 @@ notes_baseline_summary() {
 
 # status / audit 的**同一行**摘要（契约 §1.5：文案同源，禁两套）。四分类计数由 skeleton_drift
 # 顺带累积（同一模板基准、同一判定函数），本函数只做排版——不改任何退出码、不进 JSON 词表。
+# 逃生口留痕（bypass ledger，W3c/U7）：**非门禁**的观察面——只回答"有没有留痕"，
+# 不回答"理由成不成立"（那是语义判断，P6）。
+# 路径：<git-common-dir>/ponygo-gate/bypass.log（`git rev-parse --git-common-dir`；相对路径
+# 相对仓库根拼接）。非 git 仓 / 文件不存在 / 空文件 → 视为"无 ledger"，本行不打印。
+# 格式：JSONL，一行一次放行事件，必填 ts / gate / why（见 .meta/gates/README.md
+# 「逃生口留痕（bypass ledger，非门禁）」）。口径是**形状判据**：该行同时含非空的 ts/gate/why
+# 三键即算合法——不做完整 JSON 解析（值里出现引号等极端形态不追求），语义靠 review。
+bypass_ledger_path() { # → 打印 ledger 路径；无法解析（非 git 仓等）→ 返回 1
+  local gcd="" top=""
+  command -v git >/dev/null 2>&1 || return 1
+  gcd=$(git rev-parse --git-common-dir 2>/dev/null) || return 1
+  [ -n "$gcd" ] || return 1
+  case "$gcd" in
+    /*) ;;
+    *)
+      top=$(git rev-parse --show-toplevel 2>/dev/null) || return 1
+      [ -n "$top" ] || return 1
+      gcd="$top/$gcd"
+      ;;
+  esac
+  printf '%s/ponygo-gate/bypass.log' "${gcd%/}"
+}
+bypass_ledger_line() { # 人读一行（无 ledger / 空文件 → 不打印；不改任何退出码、不进 --json）
+  local p="" ln="" ts="" gate="" why="" n=0 bad=0 lts="" lgate="" lwhy=""
+  p=$(bypass_ledger_path) || return 0
+  [ -f "$p" ] || return 0
+  while IFS= read -r ln || [ -n "$ln" ]; do
+    ln="${ln%$'\r'}"
+    # 跳过空行/纯空白行（追加-only 的 JSONL 末尾留空行不该被算成"一条事件"）
+    case "$ln" in ''|*[![:space:]]*) ;; *) continue ;; esac
+    n=$((n + 1))
+    ts=$(printf '%s' "$ln" | sed -n 's/.*"ts"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    gate=$(printf '%s' "$ln" | sed -n 's/.*"gate"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    why=$(printf '%s' "$ln" | sed -n 's/.*"why"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    if [ -n "$ts" ] && [ -n "$gate" ] && [ -n "$why" ]; then
+      lts="$ts"; lgate="$gate"; lwhy="$why"
+    else
+      bad=$((bad + 1))
+    fi
+  done < "$p"
+  [ "$n" -gt 0 ] || return 0
+  if [ "$bad" -eq 0 ]; then
+    printf '逃生口留痕：%s 条（最近 %s %s：%s）\n' "$n" "$lts" "$lgate" "${lwhy:0:40}"
+  else
+    printf '逃生口留痕：%s 条，其中 %s 条格式不合法（按 gates/README 的格式修复：ts/gate/why 三键必填）\n' "$n" "$bad"
+  fi
+}
+
 implant_baseline_line() {
   local nb="" commit8=""
   [ "${SEED_LOADED:-0}" = "1" ] || seed_read

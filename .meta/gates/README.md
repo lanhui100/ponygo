@@ -262,6 +262,46 @@ bash .meta/gates/ci-verify.sh
 - 挂载：`git config core.hooksPath .githooks` + 在 .githooks/ 放 pre-commit / pre-push；
 - 每门一条"承诺 → 命令"的对应（凡机械可查的承诺必配命令，P2）。
 
+## 逃生口留痕（bypass ledger，**非门禁**）
+
+门禁的逃生口（`env-skip` / 跳过开关 / `--no-verify` 之外的显式放行口）**放行前必须追加一行留痕**。
+这一节只钉死**路径与格式**，不做成门：理由成不成立属语义判断（P6），门只能看到"有没有字"，
+看不到"该不该放"——把留痕做成硬门只会逼人绕开留痕本身（删日志比讲道理省事）。
+
+**路径**：`<git-common-dir>/ponygo-gate/bypass.log`
+
+- 用 `git rev-parse --git-common-dir` 解析（worktree / submodule 下与仓库根不同）；
+  返回相对路径时相对仓库根（`git rev-parse --show-toplevel`）拼接；
+- 非 git 仓 = 不存在；目录需自行 `mkdir -p`（本框架不代建，也不播种空文件——
+  空文件与"没有留痕"是同一件事，多一个空壳只会让人以为"机制在跑"）。
+
+**格式**：JSONL，**一行一个 JSON 对象 = 一次放行事件**，追加-only（不得改写/删除既有行）：
+
+```json
+{"ts":"2026-11-17T21:05:00+0800","gate":"git-flow-gate","why":"热修复直推 master","commit":"abc1234","owner":"dm"}
+```
+
+| 键 | 必填 | 语义 |
+|---|---|---|
+| `ts` | ✅ | 事件时间（ISO8601 或 epoch 秒） |
+| `gate` | ✅ | 逃生口所属门名（如 `git-flow-gate` / `drift-strict`） |
+| `why` | ✅ | 非空理由（为什么这次值得绕过） |
+| `commit` | — | 被放行的提交 sha |
+| `owner` | — | 写者标识（人/会话） |
+
+**多出的键不算错**（向前兼容）；缺任一必填键 = 该行格式不合法。
+
+**可见性**：`ponygo audit` 的人读面在判据明细之后、结论行之前打印一行（`audit --json` / `status --json`
+的字段词表**零改动**，JSON 消费者看不到该行）：
+
+```
+逃生口留痕：2 条（最近 2026-11-17T21:05:00+0800 git-flow-gate：热修复直推 master）
+逃生口留痕：3 条，其中 1 条格式不合法（按 gates/README 的格式修复：ts/gate/why 三键必填）
+```
+
+行不改变任何退出码：留痕是**观察项**，不是判据。核对口径是**形状判据**（该行含非空 `ts`/`gate`/`why`），
+不追求完整 JSON 解析——理由质量靠 review。
+
 ## 负样本 spec 的两种形态（判据 2.3）
 
 | 形态 | 判据强度 | 写法 |
