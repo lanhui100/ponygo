@@ -16,12 +16,14 @@ Status: implemented
 
 | 根 | 内容 | 为什么在这里 |
 |---|---|---|
-| `.meta/` | `constitution/`（宪法，单一真相源）+ `gates/`（门禁 + 负样本 spec）+ `docs-tier/`（文档分层约定）+ `meta.yaml`（状态文件） | 治理的**机器态与真源**：由投影（`ponygo sync`）与钩子（`pre-commit` / CI）消费，不需要 agent 主动发现 |
+| `.meta/` | `constitution/`（宪法，单一真相源）+ `gates/`（门禁 + 负样本 spec）+ `docs-tier/`（文档分层约定）+ `meta.yaml`（状态文件）+ `notes-baseline.json`（存量违例基线）+ `.ponygo-seed`（植入版本 sha 基线） | 治理的**机器态与真源**：由投影（`ponygo sync`）与钩子（`pre-commit` / CI）消费，不需要 agent 主动发现 |
 | `.agents/` | `notes/`（决策记录，lifecycle × class 双轴）+ `skills/`（可复用流程技能） | AI agent **运行时读写**的资产：必须在工具发现路径上（notes 进检索面、skills 进路由面） |
 
 分家原则：能被工具自动加载/发现的资产放 `.agents/`；只能被命令消费的机器态放 `.meta/`。
-决策记录与技能**不在** `.meta/` 下——`ls .meta` 只有上表四项（`constitution/`、`docs-tier/`、
-`gates/`、`meta.yaml`），决策在 `.agents/notes/`、技能在 `.agents/skills/`。
+决策记录与技能**不在** `.meta/` 下——`ls -A .meta` 只有上表项（`constitution/`、`docs-tier/`、
+`gates/`、`meta.yaml`、`notes-baseline.json`、`.ponygo-seed`），决策在 `.agents/notes/`、技能在 `.agents/skills/`。
+后两个文件是**只能被命令消费**的机器态（`upgrade adopt` 写/读基线；`init`/`upgrade apply` 写、`upgrade --check` 读 seed），
+由命令写入、禁止手填；它们不是第二份"状态声明"，故不违反"版本由 git 派生"的铁律。
 
 `meta.yaml` 的合法键恰为三个——`level` / `ai-surface` / `docs-tier`：
 `level` 是成熟度级的唯一真值源，`ai-surface` 与 `docs-tier` 是开关声明（`on`/`off`，不能由目录
@@ -44,4 +46,6 @@ lifecycle 四态 + class 六类封闭集合（classes.local 开放领域扩展�
 ## Consequences
 
 - 骨架完整度、决策数、级判据全部可由 `find`/`grep`/`test` 机械判定（P2 落地）。
+- `.meta` 下的机器态文件由命令独占写入：`notes-baseline.json`（`upgrade adopt`）与 `.ponygo-seed`
+  （`init` / `upgrade apply`），手改会被判定为 `corrupt`（基线）或 `modified`（seed 分类）。
 - meta.yaml 的键白名单写死在 CLI 的 `warn_meta_violations`，是规格的一部分。

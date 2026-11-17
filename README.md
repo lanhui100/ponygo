@@ -84,10 +84,13 @@ git clone https://github.com/lanhui100/ponygo.git && export PATH="$PWD/ponygo:$P
 ### 3.2 命令面（六条核心命令 + observe）
 
 ```bash
-ponygo init      # 新项目：在仓库根生成 .agents/ + .meta/ 治理骨架 + meta.yaml（level: 0）；既有实例上加 --repair-skeleton 只补缺失骨架文件（绝不覆盖已存在文件）
+ponygo init      # 新项目：在仓库根生成 .agents/ + .meta/ 治理骨架 + meta.yaml（level: 0），并写入 .meta/.ponygo-seed（植入版本 sha 基线，已存在不覆盖）；既有实例上加 --repair-skeleton 只补缺失骨架文件（绝不覆盖已存在文件，且不写 seed）
 ponygo audit     [--json]  # 旧项目改造（或随时体检）：按自适应审计打分，输出缺口与最小改进动作；有治理根时内嵌级自洽验证，判据不符 exit 1。加 --run-specs 执行 gates/*.spec.sh 负样本自检（opt-in，默认不执行仓库脚本）；若存在未被真正执行的 spec（0 个 / 自报 SKIPPED（含部分）/ 递归护栏拦截）→ exit 3（证据不足，禁止当"验证通过"）；任一 spec 失败或 spec 无有效内容（去掉空白行与 `#` 注释行后为空）→ exit 1（优先于 3）
 ponygo status    [--json]  # 查看当前成熟度级（L0-L5）与骨架完整性（含骨架文件缺口，与 upgrade 同口径），并对声明级（L0-L2）判据逐项机械验证，不符即非零退出
-ponygo upgrade   # 跟随框架升级：把本仓库新版 ponygo 的命令面/判据同步进已有治理根
+ponygo upgrade   # 跟随框架升级：把本仓库新版 ponygo 的命令面/判据同步进已有治理根；--check 在每条漂移行尾标注 [in-sync|stale|modified|unknown]（对照 .meta/.ponygo-seed 的植入字节，退出码语义不变）；apply 刷新模板并重签 seed
+ponygo upgrade adopt [--expires YYYY-MM-DD] [--dry-run] [--json]
+                 # 存量违例基线棘轮：把当前已存在的 ADR 违例冻结进 .meta/notes-baseline.json（机制判据不变，只有基线内的违例被豁免）
+                 # 到期日缺省 +90 天、硬上限 365 天；过期后基线整体失效、全部违例重回生效；每次运行必打印「存量 N（较上次 +M/-K）」
 ponygo sync      # 把 constitution 投影到根 AGENTS.md / CLAUDE.md（生成物，勿手编；槽位未填的模板态投影初始引导 bootstrap）
 ponygo retire    # 退级 / 整体退场（停止线执行器）：--level <N|off>
   ponygo observe  status|init|audit|upgrade|probe  可观测性治理维度（ob0/ob1/ob2 判定；probe=受控探针，详见 'ponygo observe --help'）

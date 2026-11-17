@@ -2,9 +2,27 @@
 # ============================================================
 # verify-note.sh —— 决策记录机械校验器（write-adr 技能的验证脚本）
 #
-# 用法：bash .agents/skills/write-adr/verify-note.sh [<notes 相对路径>…]
+# 用法：bash .agents/skills/write-adr/verify-note.sh [--json] [<notes 相对路径>…]
 #   无参     = 校验整个 .agents/notes/ 树（推荐；等价 ponygo status 的 L1 判据）
 #   带路径   = 只校验给定文件（如 .agents/notes/proposed/architecture/xxx.md）
+#   --json   = stdout 只留一行机读 JSON（schema=ponygo.verify-note/1；可带路径参数，
+#              用 mode 字段区分 tree / files），人类 FAIL/WARN 行整体改道 stderr；
+#              退出码与不带 --json 完全一致（契约 §1.3 / §4 E-07）。
+#
+# 退出码（契约 §4 冻结）：0 = 全部通过（含「违例全被存量基线豁免」）／
+#   1 = 存在**未被基线覆盖**的违例（逐项打印 FAIL）／
+#   2 = fail-closed：存量基线损坏或无法判定（不猜、不放行；契约 §3.2）。
+#
+# 存量违例基线（.meta/notes-baseline.json，棘轮，机器写入禁止手填）：
+#   状态 ok 的基线条目按 fingerprint 命中 → 该违例标记 baselined:true 并**豁免**（不计 FAIL）；
+#   状态 expired → 全部违例重回生效 + 一行 WARN（到期日按 .meta 文件里的 expires_at）；
+#   状态 absent → 无豁免；状态 corrupt → exit 2（fail-closed，不判违例）。
+#   fingerprint = sha256( criterion "\t" file "\t" detail_key )，detail_key 为违例明细的
+#   规范化（CRLF→LF、首尾空白剥除、连续空白折叠为单空格；纯存在型判据取空串）。
+#   为什么把「判据 + 位置 + 明细」三元组一起哈希：只有明细也参与，才能把「同一文件同一判据
+#   但内容变了」判成**新违例**——否则冻结就变成给该判据开永久后门（契约 §1.1.4）。
+#   指纹由**本脚本**单点计算（P9 一份判据一份实现）：`ponygo upgrade adopt` 只解析本脚本
+#   的 --json 输出，不在 CLI 复刻任何 1.x 判据、也不自己算指纹。
 #
 # 退出码：全部通过 exit 0；任一违例 exit 1（逐项打印 FAIL）。
 # 对应判据：maturity-ladder §5 的 L1 判据 1.1–1.10，外加 1.11（负空间形状，见下），
@@ -50,31 +68,186 @@
 # ============================================================
 set -u
 
-# ---------- W0/U6 空桩：--json 机读违例清单（契约 .dev-team/contract-w0-u6-u8.md §1.3） ----------
-# 空桩纪律：只打印 NOT_IMPLEMENTED 并 exit 2；**无 --json 时本段零副作用**，其后所有输出逐字节不变。
-# U6 实现者就在本段接入：--json → 单行 JSON（schema=ponygo.verify-note/1；字段/排序/退出码见契约 §1.3/§4），
-# 人类 FAIL 行整体改道 stderr、stdout 只留一行 JSON（与 audit/status --json 同款改道纪律）。
-# 违例 fingerprint 由**本脚本**计算（单一口径）：`ponygo adopt` 只解析本脚本输出，不在 CLI 复刻判据（P9）。
-VN_ARGS=(); VN_JSON=0
+# ---------- 参数解析：--json 是**载体开关**（不改判定、不改退出码） ----------
+VN_JSON=0
+VN_ARGS=()
 for vn_a in "$@"; do
   case "$vn_a" in
     --json) VN_JSON=1 ;;
     *) VN_ARGS+=("$vn_a") ;;
   esac
 done
-if [ "$VN_JSON" = "1" ]; then
-  printf '[ponygo] NOT_IMPLEMENTED verify-note.sh --json（W0 空桩；契约 .dev-team/contract-w0-u6-u8.md §1.3）\n' >&2
-  exit 2
-fi
 set -- ${VN_ARGS[@]+"${VN_ARGS[@]}"}
+VN_MODE="tree"
+[ $# -gt 0 ] && VN_MODE="files"
 
 NOTES_DIR=".agents/notes"
+BASELINE_PATH=".meta/notes-baseline.json"
 LIFECYCLES="proposed implemented rejected archived"
 CLASSES="feature bug-fix simplification architecture process testing"
-FAIL=0
-fail() { printf 'FAIL  %s\n' "$*" >&2; FAIL=1; }
+
+# ---------- 违例结构化收集（判据号 / 位置 / 明细 / 指纹 四件套） ----------
+# 收集与渲染分离：基线豁免必须在**判定之后、渲染之前**生效（豁免项不打印 FAIL，
+# 否则「exit 0 + 横幅全部通过」与「上方一行 FAIL」自相矛盾，看输出的人只会更迷惑）。
+V_CRIT=(); V_FILE=(); V_DETAIL=(); V_BASE=(); V_FP=(); V_ORDER=()
+
+# sha256 先探测 sha256sum，再探测 shasum -a 256（零依赖；两者皆无 → 需要指纹时 fail-closed）
+VN_SHA=""
+if command -v sha256sum >/dev/null 2>&1; then
+  VN_SHA=sha256sum
+elif command -v shasum >/dev/null 2>&1; then
+  VN_SHA=shasum
+fi
+vn_sha() { # stdin → 64hex
+  { if [ "$VN_SHA" = "shasum" ]; then shasum -a 256; else sha256sum; fi; } | awk '{print $1}'
+}
+
+# detail_key：契约 §1.1.4 的规范化（CRLF→LF、剥首尾空白、连续空白折叠为单个半角空格）
+vn_detail_key() {
+  printf '%s' "$1" | tr -d '\r' | tr '\n\t' '  ' \
+    | sed -e 's/[[:space:]][[:space:]]*/ /g' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+}
+
+# 判据号排序键：点分字段按**数值**（1.3 < 1.10 < 1.11），每段零填充到 3 位后当字符串比
+vn_crit_key() {
+  local s="$1" out="" seg n=0
+  local IFS='.'
+  for seg in $s; do
+    case "$seg" in
+      ''|*[!0-9]*) out="${out}${out:+.}${seg}" ;;
+      *) n=$((10#$seg)); out="${out}${out:+.}$(printf '%03d' "$n")" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+vfail() { # <判据号> <文件（可空：目录级/实例级判据）> <明细>
+  local i="${#V_CRIT[@]}" c="$1" f="$2" d="$3"
+  V_CRIT[$i]="$c"; V_FILE[$i]="$f"; V_DETAIL[$i]="$d"; V_BASE[$i]=0
+  V_FP[$i]=""
+  if [ -n "$VN_SHA" ]; then
+    V_FP[$i]=$(printf '%s\t%s\t%s' "$c" "$f" "$(vn_detail_key "$d")" | vn_sha)
+  fi
+  return 0
+}
+
+# JSON 字符串转义（零依赖；值经环境变量传入，避免 awk -v 的转义二次解释与 ARGV 当文件名）
+vn_jesc() { # <任意字符串> → JSON 安全内容（不含外层引号）
+  VN_JESC_IN="$1" awk 'BEGIN{
+    s = ENVIRON["VN_JESC_IN"]
+    gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s)
+    gsub(/\t/, "\\t", s); gsub(/\r/, "\\r", s); gsub(/\n/, "\\n", s)
+    printf "%s", s
+  }'
+}
+
+# ---------- 存量基线读取（§2.1 格式 / §3.2 状态机；单点判定，供本脚本与 adopt 共用口径） ----------
+# 解析纪律：
+# - **容忍缩进/换行差异**（有人用 json 工具重排过文件不算损坏——契约只看 schema 语义），
+# - **不容忍**：顶层键集/键序漂移、schema 漂移、version≠1、日期不可解析、entries 对象缺键/多键、
+#   指纹非 64hex。任一命中 → corrupt → 上层 exit 2（fail-closed，绝不猜一份"大概能用"的基线）。
+# 实现取巧：§2.1 的值域里没有空格（路径按 / 分隔且 1.6 限 yyyy-mm-dd-topic.md、判据号是数字、
+# 指纹是 hex、时间戳无空格），故先整体去掉空白再单行严格匹配——零依赖且不会误吞多行对象。
+B_STATE="absent"; B_EXPIRES=""; B_N=0; B_FPSET=" "; B_GEN=""
+baseline_read() {
+  B_STATE="absent"; B_EXPIRES=""; B_N=0; B_FPSET=" "; B_GEN=""
+  [ -f "$BASELINE_PATH" ] || return 0
+  local c="" objs="" obj f cc fp n_obj=0 n_all=0 today=""
+  c=$(tr -d ' \t\r\n' < "$BASELINE_PATH" 2>/dev/null) || c=""
+  [ -n "$c" ] || { B_STATE="corrupt"; return 0; }
+  if ! printf '%s' "$c" | grep -Eq '^\{"schema":"ponygo\.notes-baseline/1","version":1,"generated_at":"[^"]+","expires_at":"[^"]+","framework_ref":"[^"]*","previous":\{"generated_at":(null|"[^"]*"),"entries":[0-9]+\},"delta":\{"added":[0-9]+,"dropped":[0-9]+\},"entries":\[(\]|\{[^{}]*\}(,\{[^{}]*\})*\])\}$'; then
+    B_STATE="corrupt"; return 0
+  fi
+  B_GEN=$(printf '%s' "$c" | sed -e 's/^{"schema":"ponygo\.notes-baseline\/1","version":1,"generated_at":"//' -e 's/","expires_at".*//')
+  B_EXPIRES=$(printf '%s' "$c" | sed -e 's/.*"expires_at":"//' -e 's/","framework_ref".*//')
+  # 无 GNU date ⇒ 无法机械判定到期日 ⇒ 无法判定（fail-closed，不假设基线还有效）
+  [ "$DATE_OK" = "1" ] || { B_STATE="corrupt"; return 0; }
+  case "$B_EXPIRES" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+    *) B_STATE="corrupt"; return 0 ;;
+  esac
+  date -d "$B_EXPIRES" >/dev/null 2>&1 || { B_STATE="corrupt"; return 0; }
+  date -d "$B_GEN" >/dev/null 2>&1 || { B_STATE="corrupt"; return 0; }
+  # entries：每个对象必须恰为 file→criterion→fingerprint 三键（缺键/多键/坏指纹都算损坏）
+  objs=$(printf '%s' "$c" | grep -oE '\{"file":"[^"]*","criterion":"[^"]*","fingerprint":"[0-9a-f]{64}"\}')
+  n_all=$(printf '%s' "$c" | grep -oF '{"file":' | wc -l | tr -d ' \t')
+  n_obj=$(printf '%s' "$objs" | grep -cE '^{"file":' 2>/dev/null || true)
+  n_obj=${n_obj:-0}
+  [ "$n_all" = "$n_obj" ] || { B_STATE="corrupt"; return 0; }
+  while IFS= read -r obj; do
+    [ -n "$obj" ] || continue
+    f=$(printf '%s' "$obj" | sed -e 's/^{"file":"//' -e 's/","criterion":.*//')
+    cc=$(printf '%s' "$obj" | sed -e 's/.*","criterion":"//' -e 's/","fingerprint":.*//')
+    fp=$(printf '%s' "$obj" | sed -e 's/.*","fingerprint":"//' -e 's/"}$//')
+    # 缺键/多键/坏指纹（含上面 sed 未命中导致空值）一律损坏：绝不让空指纹变成"匹配一切"的豁免
+    [ -n "$f" ] && [ -n "$cc" ] || { B_STATE="corrupt"; return 0; }
+    printf '%s' "$fp" | grep -Eq '^[0-9a-f]{64}$' || { B_STATE="corrupt"; return 0; }
+    B_FPSET="$B_FPSET$fp "
+    B_N=$((B_N+1))
+  done <<< "$objs"
+  [ "$B_N" = "$n_all" ] || { B_STATE="corrupt"; return 0; }
+  [ -n "$B_GEN" ] && [ -n "$B_EXPIRES" ] || { B_STATE="corrupt"; return 0; }
+  today=$(date '+%Y-%m-%d')
+  if [ "$B_EXPIRES" \< "$today" ]; then B_STATE="expired"; else B_STATE="ok"; fi
+  return 0
+}
+
+# ---------- 机读出口（§1.3）：单行 JSON；人类行一律已改道 stderr ----------
+vn_json_line() { # <exit 码>
+  local code="$1" i=0 n=${#V_CRIT[@]} nb=0 nn=0 sep="" viol="" bs=""
+  for ((i=0; i<n; i++)); do [ "${V_BASE[$i]}" = "1" ] && nb=$((nb+1)); done
+  nn=$((n - nb))
+  V_ORDER=()
+  if [ "$n" -gt 0 ]; then
+    while IFS= read -r i; do [ -n "$i" ] && V_ORDER+=("$i"); done < <(
+      for ((i=0; i<n; i++)); do
+        printf '%s\t%s\t%s\t%06d\n' "${V_FILE[$i]}" "$(vn_crit_key "${V_CRIT[$i]}")" "${V_FP[$i]}" "$i"
+      done | LC_ALL=C sort | while IFS=$'\t' read -r _vf _vc _vp _vi; do printf '%s\n' "$((10#$_vi))"; done
+    )
+  fi
+  for i in ${V_ORDER[@]+"${V_ORDER[@]}"}; do
+    viol="$viol$sep{\"criterion\":\"$(vn_jesc "${V_CRIT[$i]}")\",\"file\":\"$(vn_jesc "${V_FILE[$i]}")\",\"detail\":\"$(vn_jesc "${V_DETAIL[$i]}")\",\"fingerprint\":\"${V_FP[$i]}\",\"baselined\":$( [ "${V_BASE[$i]}" = "1" ] && echo true || echo false )}"
+    sep=","
+  done
+  case "$B_STATE" in
+    absent) bs="\"expires_at\":null,\"entries\":0" ;;
+    corrupt) bs="\"expires_at\":null,\"entries\":0" ;;
+    *) bs="\"expires_at\":\"$(vn_jesc "$B_EXPIRES")\",\"entries\":$B_N" ;;
+  esac
+  printf '{"schema":"ponygo.verify-note/1","command":"verify-note","mode":"%s","criteria":"1.1-1.11","violations":[%s],"counts":{"total":%d,"baselined":%d,"new":%d},"baseline":{"path":"%s","state":"%s",%s},"exit":%d}\n' \
+    "$VN_MODE" "$viol" "$n" "$nb" "$nn" "$BASELINE_PATH" "$B_STATE" "$bs" "$code"
+}
+
+vn_fail_closed() { # <因由> → 人读 stderr + (--json 时) 一行 JSON + exit 2
+  printf 'verify-note: %s（fail-closed：不猜、不放行）\n' "$1" >&2
+  [ "$VN_JSON" = "1" ] && vn_json_line 2
+  exit 2
+}
+
+# 渲染一条 FAIL（与历史输出逐字节同形：`FAIL  <判据号> <文件>：<明细>`；
+# 目录级/实例级判据无文件位 → `FAIL  <判据号> <明细>`）
+vn_render_fail() { # <下标>
+  local i="$1"
+  if [ -n "${V_FILE[$i]}" ]; then
+    printf 'FAIL  %s %s：%s\n' "${V_CRIT[$i]}" "${V_FILE[$i]}" "${V_DETAIL[$i]}" >&2
+  else
+    printf 'FAIL  %s %s\n' "${V_CRIT[$i]}" "${V_DETAIL[$i]}" >&2
+  fi
+}
 
 [ -d "$NOTES_DIR" ] || { echo "verify-note: 无 $NOTES_DIR（先 ponygo init）" >&2; exit 1; }
+
+# DATE_OK：GNU date 可用才机械判日期，否则降级"靠 review"（与 CLI 同款诚实条款）
+DATE_OK=0
+date -d @0 '+%Y' >/dev/null 2>&1 && DATE_OK=1
+
+# 基线在判定之前读：损坏时**不判违例**（§3.2 fail-closed），避免给出任何"看起来通过"的输出
+baseline_read
+[ "$B_STATE" = "corrupt" ] && vn_fail_closed "存量基线 $BASELINE_PATH 损坏或无法判定（见契约 §2.1）→ 重跑 'ponygo upgrade adopt' 重建，或手工修正后重试"
+# 需要指纹的两种情形（读基线做豁免 / --json 机读面）都必须有 sha256 工具，否则无法保证口径
+if [ "$B_STATE" != "absent" ] || [ "$VN_JSON" = "1" ]; then
+  [ -n "$VN_SHA" ] || vn_fail_closed "缺少 sha256 工具（需要 sha256sum 或 shasum -a 256）"
+fi
 
 # 实例扩展 class（classes.local，与 CLI extra_classes 同构）
 extra_classes() {
@@ -85,19 +258,15 @@ extra_classes() {
 # 1.3 顶层目录 ⊆ 四态封闭集
 while IFS= read -r d; do
   [ -n "$d" ] || continue
-  case " $LIFECYCLES " in *" $d "*) ;; *) fail "1.3 顶层目录越界：$d" ;; esac
+  case " $LIFECYCLES " in *" $d "*) ;; *) vfail "1.3" "" "顶层目录越界：$d" ;; esac
 done < <(find "$NOTES_DIR" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null)
 
 # 1.4 二级目录 ⊆ 六类封闭集 ∪ classes.local
 classes_all=" $CLASSES $(extra_classes | tr '\n' ' ') "
 while IFS= read -r d; do
   [ -n "$d" ] || continue
-  case "$classes_all" in *" $d "*) ;; *) fail "1.4 class 越界：$d" ;; esac
+  case "$classes_all" in *" $d "*) ;; *) vfail "1.4" "" "class 越界：$d" ;; esac
 done < <(find "$NOTES_DIR" -mindepth 2 -maxdepth 2 -type d -exec basename {} \; 2>/dev/null)
-
-# DATE_OK：GNU date 可用才机械判日期，否则降级"靠 review"（与 CLI 同款诚实条款）
-DATE_OK=0
-date -d @0 '+%Y' >/dev/null 2>&1 && DATE_OK=1
 
 # ---------- 判定辅助（CLI 侧有同名同语义实现，两面必须逐项一致） ----------
 # 理由正文归一（判据 1.7）：剥掉 ASCII 空白/标点、em dash、全角空格与 CJK 标点闭集后，剩下的才是"正文"。
@@ -143,15 +312,15 @@ check_one() { # $1 = 决策文件路径
   lc="${rel%%/*}"
   # 1.5 深度：恰好 {lifecycle}/{class}/ 两级
   slashes="${rel//[!\/]/}"
-  [ "${#slashes}" -eq 2 ] || { fail "1.5 $f：未恰好位于 {lifecycle}/{class}/ 两级"; return 0; }
+  [ "${#slashes}" -eq 2 ] || { vfail "1.5" "$f" "未恰好位于 {lifecycle}/{class}/ 两级"; return 0; }
   # 1.6 文件名 + 日期合法性
   if ! printf '%s\n' "$b" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}-.+\.md$'; then
-    fail "1.6 $f：文件名不符 yyyy-mm-dd-topic.md"
+    vfail "1.6" "$f" "文件名不符 yyyy-mm-dd-topic.md"
     return 0
   fi
   if [ "$DATE_OK" = "1" ]; then
     d8="${b:0:10}"
-    date -d "$d8" >/dev/null 2>&1 || fail "1.6 $f：日期不合法（$d8）"
+    date -d "$d8" >/dev/null 2>&1 || vfail "1.6" "$f" "日期不合法（$d8）"
   fi
   # 1.7 Status 首词与所在 lifecycle 一致（archived 允许 implemented/archived）
   # stline = Status: 行剥标记后的原文（供下面的 rejected 理由判据复用，避免二次读文件）
@@ -162,11 +331,11 @@ check_one() { # $1 = 决策文件路径
   # 无空格时仍按 Status 漂移拒绝——fail-closed，不会静默放行）。
   st="${st%:}"
   if [ -z "$st" ]; then
-    fail "1.7 $f：缺 Status: 行"
+    vfail "1.7" "$f" "缺 Status: 行"
   elif [ "$lc" = "archived" ]; then
-    [ "$st" = "implemented" ] || [ "$st" = "archived" ] || fail "1.7 $f：archived 下 Status 应为 implemented/archived，实得 $st"
+    [ "$st" = "implemented" ] || [ "$st" = "archived" ] || vfail "1.7" "$f" "archived 下 Status 应为 implemented/archived，实得 $st"
   elif [ "$st" != "$lc" ]; then
-    fail "1.7 $f：Status($st) 与目录($lc) 不一致"
+    vfail "1.7" "$f" "Status($st) 与目录($lc) 不一致"
   fi
   # 1.7（判据补强）rejected 必须带一行理由：`rejected` 之后须有分隔符（`—` / `-` / `:`）
   # 且剥掉分隔符与空白后**剩余正文**至少 2 个非空白字节。为什么是硬判据：否决理由是这条记录唯一不可再生的信息——
@@ -198,7 +367,7 @@ check_one() { # $1 = 决策文件路径
         # `——` / `--` / `:` / `?!` 之类的"纯分隔符/纯标点"在这里归零 → 缺一行理由。
         reason_body=$(reason_body_of "$rest")
         if [ "$sep" != "1" ] || [ "$(printf '%s' "$reason_body" | wc -c | tr -d ' ')" -lt 2 ]; then
-          fail "1.7 $f：rejected 缺一行理由（Status: rejected — <为何否决>）"
+          vfail "1.7" "$f" "rejected 缺一行理由（Status: rejected — <为何否决>）"
         fi
         ;;
     esac
@@ -217,15 +386,15 @@ check_one() { # $1 = 决策文件路径
   case "$lc" in
     implemented)
       heading_outside_fence "$f" '## Decision([[:space:]]|$)' \
-        || fail "1.8 $f：implemented 缺 ## Decision（迁移即改写：现在时 Decision 必须在场）"
+        || vfail "1.8" "$f" "implemented 缺 ## Decision（迁移即改写：现在时 Decision 必须在场）"
       heading_outside_fence "$f" '## (Proposal|Plan|Migration plan|Acceptance criteria)([[:space:]]|$)' \
-        && fail "1.8 $f：implemented 含提案时代标题（## Proposal/## Plan/## Migration plan/## Acceptance criteria）"
+        && vfail "1.8" "$f" "implemented 含提案时代标题（## Proposal/## Plan/## Migration plan/## Acceptance criteria）"
       heading_outside_fence "$f" '## (提案|计划|迁移计划|验收标准|验收|风险|待办)' \
-        && fail "1.8 $f：implemented 含提案时代标题（中文提案时代标题：## 提案/## 计划/## 迁移计划/## 验收标准/## 验收/## 风险/## 待办，按前缀匹配含复合词）"
+        && vfail "1.8" "$f" "implemented 含提案时代标题（中文提案时代标题：## 提案/## 计划/## 迁移计划/## 验收标准/## 验收/## 风险/## 待办，按前缀匹配含复合词）"
       ;;
     proposed|rejected)
-      heading_outside_fence "$f" '## Proposal([[:space:]]|$)' || fail "1.8 $f：$lc 缺 ## Proposal"
-      heading_outside_fence "$f" '## Decision([[:space:]]|$)' && fail "1.8 $f：$lc 含现在时 ## Decision（提案伪装成决定）" ;;
+      heading_outside_fence "$f" '## Proposal([[:space:]]|$)' || vfail "1.8" "$f" "$lc 缺 ## Proposal"
+      heading_outside_fence "$f" '## Decision([[:space:]]|$)' && vfail "1.8" "$f" "$lc 含现在时 ## Decision（提案伪装成决定）" ;;
   esac
   # 1.10 必含 ## Alternatives considered（2026-10-29 起为硬判据，不是 WARN）
   # 为何是硬判据：备选与落选理由是"非平凡决策"的实质内容——只写 Decision 的 ADR 会退化为
@@ -238,7 +407,7 @@ check_one() { # $1 = 决策文件路径
     *)
       if [ "$lc" != "archived" ]; then
         heading_outside_fence "$f" '## Alternatives considered([[:space:]]|$)' \
-          || fail "1.10 $f：缺 ## Alternatives considered（非平凡决策必须写明被否决的备选与理由）"
+          || vfail "1.10" "$f" "缺 ## Alternatives considered（非平凡决策必须写明被否决的备选与理由）"
       fi
       ;;
   esac
@@ -256,10 +425,10 @@ check_one() { # $1 = 决策文件路径
       case "$rel" in
         implemented/simplification/*)
           heading_outside_fence "$f" '## Reintroduction conditions([[:space:]]|$)' \
-            || fail "1.11 $f：implemented/simplification 缺 ## Reintroduction conditions（写清什么条件下把删掉的东西装回来，别留「以后可能用得上」）"
+            || vfail "1.11" "$f" "implemented/simplification 缺 ## Reintroduction conditions（写清什么条件下把删掉的东西装回来，别留「以后可能用得上」）"
           if heading_outside_fence "$f" '## Removed surface([[:space:]]|$)' \
              && ! grep -Eq '(^|[^[:alnum:]_])(rg|grep)([^[:alnum:]_]|$)' "$f" 2>/dev/null; then
-            fail "1.11 $f：含 ## Removed surface 但缺检索收据行（须有一行 rg / grep / git grep 检索命令，证明「搜索零残留」）"
+            vfail "1.11" "$f" "含 ## Removed surface 但缺检索收据行（须有一行 rg / grep / git grep 检索命令，证明「搜索零残留」）"
           fi
           ;;
       esac
@@ -275,14 +444,46 @@ else
     < <(find "$NOTES_DIR" -type f -name '*.md' -print0 2>/dev/null)
   # 1.9 文档有家（v2.0，整树模式才判）：docs/AGENTS.md 是文档标准的家（agent 自动加载）。
   # 与 1.1-1.8 同属 L1 判据；docs/AGENTS.md 由 ponygo init 骨架播种。
-  [ -f "docs/AGENTS.md" ] || fail "1.9 缺文档标准家 docs/AGENTS.md（agent 自动加载）→ 补 docs/AGENTS.md（tier 分类 + 写作规则 + slop checklist）"
+  [ -f "docs/AGENTS.md" ] || vfail "1.9" "" "缺文档标准家 docs/AGENTS.md（agent 自动加载）→ 补 docs/AGENTS.md（tier 分类 + 写作规则 + slop checklist）"
 fi
 
-if [ "$FAIL" = "0" ]; then
+# ---------- 基线豁免（§3.2）：状态 ok 时按 fingerprint 命中即豁免，不计 FAIL ----------
+BASELINED_N=0; NEW_N=0; VN_CODE=0
+if [ "$B_STATE" = "ok" ]; then
+  for i in ${V_CRIT[@]+"${!V_CRIT[@]}"}; do
+    # 空指纹绝不参与匹配（否则 `*"  "*` 会命中一切 = 假绿豁免）；fprint 缺失时已在读取期 fail-closed
+    [ -n "${V_FP[$i]}" ] || continue
+    case "$B_FPSET" in
+      *" ${V_FP[$i]} "*) V_BASE[$i]=1; BASELINED_N=$((BASELINED_N+1)) ;;
+    esac
+  done
+fi
+NEW_N=$(( ${#V_CRIT[@]} - BASELINED_N ))
+
+# 过期 WARN：即便零违例也要打印（E-05：exit 0 + WARN 照打），否则"基线悄悄失效"没人看得见
+if [ "$B_STATE" = "expired" ]; then
+  printf 'verify-note: [WARN] 存量基线已过期（expires_at=%s）→ 全部违例重回生效；修法：重跑 ponygo upgrade adopt 重新冻结\n' "$B_EXPIRES" >&2
+fi
+
+# FAIL 行按**收集顺序**渲染（与历史输出逐字节同形，仅跳过被豁免项）
+for i in ${V_CRIT[@]+"${!V_CRIT[@]}"}; do
+  [ "${V_BASE[$i]}" = "1" ] && continue
+  vn_render_fail "$i"
+done
+
+if [ "$NEW_N" -eq 0 ]; then VN_CODE=0; else VN_CODE=1; fi
+
+if [ "$VN_JSON" = "1" ]; then
+  vn_json_line "$VN_CODE"
+elif [ "$VN_CODE" -eq 0 ]; then
   # 成功横幅刻意**不写**「1.11」编号串：验收契约要求正例输出不得含该串（否则「本次没报 1.11 违例」
   # 与「横幅里出现 1.11」无法机械区分）。判据名写在括号里，失败时按 `FAIL  1.11 …` 前缀出现。
-  echo "verify-note: 全部通过（机械影子 1.1–1.10 + 负空间形状判据；真实性/分类/备选质量靠 review）"
-  exit 0
+  if [ "$BASELINED_N" -gt 0 ]; then
+    echo "verify-note: 全部通过（机械影子 1.1–1.10 + 负空间形状判据；真实性/分类/备选质量靠 review）（存量基线豁免 ${BASELINED_N} 条）"
+  else
+    echo "verify-note: 全部通过（机械影子 1.1–1.10 + 负空间形状判据；真实性/分类/备选质量靠 review）"
+  fi
+else
+  echo "verify-note: 未通过（见上方 FAIL 项；逐项修复后重跑）" >&2
 fi
-echo "verify-note: 未通过（见上方 FAIL 项；逐项修复后重跑）" >&2
-exit 1
+exit "$VN_CODE"

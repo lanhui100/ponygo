@@ -47,6 +47,20 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 | 删除/收窄后无残留符号 | `bash .meta/gates/no-residue.sh` | A8（清单 pattern 零命中；缺/空清单放行） |
 | 零残留门自己会拒绝非法样本 | `bash .meta/gates/no-residue.spec.sh` | A9（命中→拒 / 无命中→放行 / 空清单→放行 / 未知参数→拒） |
 | 远端层全树兜底 | `bash .meta/gates/ci-verify.sh` | A4（= `verify-note.sh` 整树 + A2 + A6/A7 + A8/A9，四段） |
+| 存量违例只豁免一次、不豁免增量 | `bash ponygo upgrade adopt`（写 `.meta/notes-baseline.json`，到期 ≤365 天） | 基线内违例被豁免；**基线外新增违例仍 exit 1**；过期后基线整体作废 |
+| 植入版本可追溯（不判断、只分类） | `bash ponygo upgrade --check`（读 `.meta/.ponygo-seed`） | 漂移行尾标注 `[stale]`（实例仍是植入字节）/ `[modified]`（实例侧被改）；退出码语义不变 |
+
+### 存量违例基线棘轮（U6）与植入版本基线（U8）
+
+两条**实例侧**的机器态文件，均由命令独占写入、禁止手填：
+
+- `.meta/notes-baseline.json`：`upgrade adopt` 写入的存量违例基线。fingerprint = `sha256(判据 \t 文件 \t
+  规范化明细)`——同一文件同一判据**明细变了就是新违例**，冻结不等于给该判据开永久后门。基线到期日
+  硬上限 365 天；过期后 `verify-note.sh` 把全部违例重新计入（`status`/`audit` 的摘要行会显示条数与到期日）。
+  基线过滤长在判定真源 `verify-note.sh` 里，故 A1（暂存区门）与 A4（全树门）**字节零改动**即获得棘轮语义。
+- `.meta/.ponygo-seed`：`init`/`upgrade apply` 写入的「框架 commit + 十七骨架文件 sha256」。
+  `upgrade --check` 用它把漂移分成 `stale`（实例仍是植入时字节）与 `modified`（实例侧被改）；
+  缺失/损坏只降级为 `unknown` + WARN，**不改变退出码**（provenance 不是判定面，把它变成门会重演 upgrade cliff）。
 
 ### 归档时先 seal（A6 的写路径）
 
