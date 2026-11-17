@@ -622,9 +622,66 @@ expect_reject_with "A6 换成只 exit 0 的假门（无判定标记）→ 同样
 cp "$A6" "$R/.meta/gates/archive-verify.sh"
 expect_accept "A6 清空用例：A6 补回后恢复放行" "$R"
 
+# ---------- 18. W2a/U3：删除决策记录必须同提交入册简化记录 ----------
+# A1 只判「入册事实」（有无同提交的 simplification 记录）；1.11 的形状（复活条件 + 检索收据）
+# 仍由真源 verify-note.sh 判——本 spec 同时证明这两层各自会响、且合法组合会放行。
+COMMIT_AS=(git -c user.name=spec -c user.email=spec@example.invalid)
+spec_commit() { # $1=仓 $2=说明
+  ( cd "$1" && "${COMMIT_AS[@]}" add -A >/dev/null 2>&1 && "${COMMIT_AS[@]}" commit -q -m "$2" >/dev/null 2>&1 )
+}
+write_simpl_note() { # $1=仓 [$2=--no-reintroduce]
+  local d="$1" mode="${2:-}"
+  mkdir -p "$d/.agents/notes/implemented/simplification"
+  {
+    printf '# Agent Note: 移除夹具决策（简化）\n\nStatus: implemented\n\n## Decision\n\n删掉夹具决策，能力由简化 note 接管。\n\n## Alternatives considered\n\n- 保留并标注过时：否决，过时决策会挤掉当前事实。\n\n## Removed surface\n\n- `.agents/notes/implemented/process/2026-10-29-to-remove.md`\n\n- 检索收据：rg --fixed-strings 2026-10-29-to-remove .agents/notes\n'
+    if [ "$mode" != "--no-reintroduce" ]; then
+      printf '\n## Reintroduction conditions\n\n若该决策重新成为当前事实，把它按 implemented 重新入册。\n'
+    fi
+  } > "$d/.agents/notes/implemented/simplification/2026-10-30-remove-sample.md"
+}
+
+# ① 删 ADR 且无同提交简化 note → 拒绝（A1 自己的入册判据）
+R=$(new_repo rm-adr-no-note)
+write_adr "$R" .agents/notes/implemented/process/2026-10-29-to-remove.md "$LEGAL_BODY"
+spec_commit "$R" base
+git -C "$R" rm -q .agents/notes/implemented/process/2026-10-29-to-remove.md >/dev/null 2>&1
+expect_reject_with "删除 ADR 而无简化 note → 拒绝（文案点名 simplification）" "$R" 'simplification'
+if printf '%s' "$(run_gate "$R")" | grep -q '移除本身是一次决策'; then
+  printf 'PASS  删除 ADR 拒绝文案声明「移除本身是一次决策」\n'
+else
+  fail "删除 ADR 拒绝文案缺「移除本身是一次决策」（理由不可见）"
+fi
+
+# ② 删 ADR + 同提交合法简化 note（含复活条件 + 检索收据）→ 放行
+R=$(new_repo rm-adr-with-note)
+write_adr "$R" .agents/notes/implemented/process/2026-10-29-to-remove.md "$LEGAL_BODY"
+spec_commit "$R" base
+git -C "$R" rm -q .agents/notes/implemented/process/2026-10-29-to-remove.md >/dev/null 2>&1
+write_simpl_note "$R"
+git -C "$R" add -A >/dev/null 2>&1
+expect_accept "删除 ADR + 同提交简化 note（含复活条件/检索收据）放行" "$R"
+
+# ③ 删 ADR + 简化 note 缺 ## Reintroduction conditions → 拒绝（由真源 1.11 判，A1 不复刻）
+R=$(new_repo rm-adr-note-no-reintro)
+write_adr "$R" .agents/notes/implemented/process/2026-10-29-to-remove.md "$LEGAL_BODY"
+spec_commit "$R" base
+git -C "$R" rm -q .agents/notes/implemented/process/2026-10-29-to-remove.md >/dev/null 2>&1
+write_simpl_note "$R" --no-reintroduce
+git -C "$R" add -A >/dev/null 2>&1
+expect_reject_with "删除 ADR + 简化 note 缺 ## Reintroduction conditions → 拒绝（1.11）" "$R" '缺 ## Reintroduction conditions'
+
+# ④ 带参模式语义不变：指定路径仍只判给定文件（删除项不参与）
+R=$(new_repo rm-adr-argmode)
+write_adr "$R" .agents/notes/implemented/process/2026-10-29-keep.md "$LEGAL_BODY"
+spec_commit "$R" base
+git -C "$R" rm -q .agents/notes/implemented/process/2026-10-29-keep.md >/dev/null 2>&1
+write_adr "$R" .agents/notes/implemented/process/2026-10-29-other.md "$LEGAL_BODY"
+git -C "$R" add -A >/dev/null 2>&1
+expect_accept "带参模式不受删除入册判据影响（只判给定文件）" "$R" .agents/notes/implemented/process/2026-10-29-other.md
+
 if [ "$FAIL" -ne 0 ]; then
   printf '[%s] 未通过：门禁的拒绝/放行语义与预期不符（见上方 FAIL）\n' "$SPEC" >&2
   exit 1
 fi
-printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节 + 1.7 rejected 理由（含 CJK 标点）+ 1.8 ## Decision/中文提案标题（含复合词）+ 围栏感知（1.8/1.10）+ A6 缺失/被清空/被换成假门 → fail-closed（含 A6 在场正控制与补回反向对照）均已证明（exit 0）\n' "$SPEC"
+printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节 + 1.7 rejected 理由（含 CJK 标点）+ 1.8 ## Decision/中文提案标题（含复合词）+ 围栏感知（1.8/1.10）+ A6 缺失/被清空/被换成假门 → fail-closed（含 A6 在场正控制与补回反向对照）+ 删除 ADR 必须同提交入册简化记录（无 note 拒 / 有合法 note 放 / 缺复活条件由 1.11 拒 / 带参模式不受影响）均已证明（exit 0）\n' "$SPEC"
 exit 0

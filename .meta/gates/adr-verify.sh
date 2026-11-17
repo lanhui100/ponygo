@@ -14,8 +14,9 @@
 #   1) R6 TOCTOU：verify-note 读**工作区**，而 pre-commit 的输入是**暂存区文件名**。
 #      两者不一致时（staged 后又在工作区改过），校验的就不是将要提交的那份字节。
 #      故先做「暂存区 blob vs 工作区」比对，不一致 → 直接拒绝，要求先 git add。
-#   2) R7 覆盖面：用 `--diff-filter=ACMR`（含 R 重命名，`git mv` 不能绕过），
-#      并豁免 README.md / AGENTS.md（治理契约载体，非决策记录）。
+#   2) R7 覆盖面：用 `--diff-filter=ACMRD`（含 R 重命名，`git mv` 不能绕过；含 D 删除，
+#      见 U3：删除必须同提交入册简化记录，否则 `die` 拒绝），并豁免 README.md / AGENTS.md
+#      （治理契约载体，非决策记录）。
 #   3) F9 非普通文件：symlink（120000）/ gitlink（160000）ADR 一律拒绝——否则"被校验的字节"
 #      可以指向工作区外内容，判定面被换掉。此检查必须排在 EOL 归一兜底之前（见 §4a 注释）。
 # 为什么不在本门里重写 1.1–1.10：一份判据两份实现必然漂移（P9），
@@ -140,12 +141,39 @@ if [ "$#" -gt 0 ]; then
     PATHS+=("$p")
   done
 else
-  # 无参模式：暂存区改动的 ADR（ACMR = 新增/复制/修改/重命名；R7）
+  # U3（W2a）：删除决策记录必须**同提交入册**简化记录。
+  # 为什么：删除是不可逆的治理动作；只留一个空 diff 等于把「为什么删/什么条件下装回来」
+  # 丢给后人考古（常载命约 3 + 判据 1.11）。A1 只判**入册事实**，1.11 的形状仍由真源
+  # verify-note.sh 判（P9：一份判据一份实现，本门不复刻）。
+  # 归档件（.agents/notes/archived/**）的删除/移出已由 A6 封印门管，这里不重复判定。
+  DEL_ALL=" "
+  FIRST_DEL=""
   while IFS= read -r p; do
     [ -n "$p" ] || continue
     is_adr "$p" || continue
+    DEL_ALL="$DEL_ALL$p "
+    case "$p" in
+      .agents/notes/archived/*) continue ;;
+    esac
+    [ -n "$FIRST_DEL" ] || FIRST_DEL="$p"
+  done < <(git diff --cached --name-only --diff-filter=D -- '.agents/notes/*.md' 2>/dev/null)
+  if [ -n "$FIRST_DEL" ]; then
+    SIMPL_N=0
+    while IFS= read -r sp; do
+      [ -n "$sp" ] && SIMPL_N=$((SIMPL_N + 1))
+    done < <(git diff --cached --name-only --diff-filter=AM -- '.agents/notes/implemented/simplification/*.md' 2>/dev/null)
+    if [ "$SIMPL_N" -eq 0 ]; then
+      die "拒绝：删除决策记录（$FIRST_DEL）必须同提交入册 implemented/simplification/（含围栏外 ## Reintroduction conditions 与检索收据）——移除本身是一次决策"
+    fi
+  fi
+  # 无参模式：暂存区改动的 ADR（ACMRD = 新增/复制/修改/重命名/删除；R7 + U3）
+  # 删除项不进 PATHS：内容已不在暂存区，没有可校验的字节（删除入册已在上面判过）。
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    is_adr "$p" || continue
+    case "$DEL_ALL" in *" $p "*) continue ;; esac
     PATHS+=("$p")
-  done < <(git diff --cached --name-only --diff-filter=ACMR -- '.agents/notes/*.md' 2>/dev/null)
+  done < <(git diff --cached --name-only --diff-filter=ACMRD -- '.agents/notes/*.md' 2>/dev/null)
 fi
 
 [ "${#PATHS[@]}" -gt 0 ] || skip "无暂存 ADR 变更"
