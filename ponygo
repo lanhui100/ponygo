@@ -507,7 +507,7 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 | A5 | `.github/workflows/ponygo-governance.yml` | GitHub 薄适配器（checkout + A4 + 步骤 ②：`ponygo status`）；步骤 ② 覆盖 A4 看不见的判据面 2.1/2.4/2.5/2.6/1.2/1.9b/1.9c，实例无 CLI 时 `::warning::` + exit 0（如实声明未验证，**不是通过**）；等价形态是主 `ci.yml` 内 `governance` job 直接跑 A4——只有同 workflow 的 job 才能被聚合门 `needs` 消费 | 同 A4（步骤 ② 无 CLI 时不改退出码） |
 | A6 | `.meta/gates/archive-verify.sh` | 归档 SHA-256 封印门：`check`（默认，只读）/ `seal`（追加封印，互斥 + 原子替换），零旗标 | 0 通过 / 1 拒绝 |
 | A7 | `.meta/gates/archive-verify.spec.sh` | A6 的负样本执行判据（篡改/缺条目/孤儿/重复/非追加 → 必须拒；合法样本 → 放行） | 0 = 自检通过 |
-| A8 | `.meta/gates/no-residue.sh` | 零残留门（删除/收窄后的符号检索验收）：读清单 `.meta/gates/no-residue.manifest`（每行 `<pattern><TAB><scope>`），`rg --fixed-strings` 按字面检索（无 `rg` 退化 `grep -rIlF`）；缺清单/空清单 → 放行并打印跳过 | 0 放行（无命中 / 跳过）/ 1 命中、清单格式非法、未知参数 |
+| A8 | `.meta/gates/no-residue.sh` | 零残留门（删除/收窄后的符号检索验收）：读清单 `.meta/gates/no-residue.manifest`（每行 `<pattern><TAB><scope>`），`rg --no-ignore --fixed-strings --hidden` 按字面检索（无 `rg` 退化 `grep -rIlF`；两条路径**检索面同口径**：都不尊重 ignore 规则，含隐藏目录与被忽略文件）；**骨架不播种清单**——清单是**删除发生时**由人登记的判定项，**空清单不构成验证**（补一份空清单只是让门看起来在跑的仪式，判定不了任何东西）；缺清单/空清单 → 放行并打印跳过 | 0 放行（无命中 / 跳过）/ 1 命中、清单格式非法、未知参数 |
 | A9 | `.meta/gates/no-residue.spec.sh` | A8 的负样本执行判据（命中→拒 / 无命中→放行 / 空清单→放行 / 未知参数→拒 / 特殊字符按字面） | 0 = 自检通过 |
 
 **宇宙表只登记 A1/A2/A4/A6/A7/A8/A9**（不可变资产）：A3/A5 是实例可编辑文件（有人会追加自己的钩子逻辑、
@@ -5733,16 +5733,18 @@ PONYGO_EOF
 #   1  命中残留（逐条列出「字面串 ← 命中文件」）；清单格式非法；参数错误（未知参数 / 多余参数）。
 #
 # 判定口径（固定字符串，字面匹配）：
-#   rg --fixed-strings --hidden --no-messages -l -e <字面串> -- <范围>
-#   （`--hidden` + 只排除 .git：检索面 = 当前树的**全部**文件，含 .meta/ .agents/ .github/ 等
-#     隐藏目录；rg 默认跳过隐藏项，漏了它就是假绿——删掉的符号若只在隐藏目录被引用，门会说"零残留"）
+#   rg --no-ignore --fixed-strings --hidden --no-messages -l -e <字面串> -- <范围>
+#   （`--hidden` + `--no-ignore` + 只排除 .git：检索面 = 当前树的**全部**文件——含 .meta/ .agents/
+#     .github/ 等隐藏目录，也含被 .gitignore/.ignore 忽略的文件。rg 默认跳过隐藏项与 ignore 规则，
+#     漏任何一个都是假绿：删掉的符号若只在隐藏目录或被忽略的构建产物里被引用，门会说"零残留"）
 #   本框架的运行时承诺只有 bash，rg 不是保证存在的依赖 → 无 rg 时退化为
 #   grep -rIlF -e <字面串> -- <范围>（同样字面匹配、列文件名、抑制杂音），并在 stderr 声明退化，
 #   不假装「有 rg 的精确度」。两者都：排除 .git/；排除清单文件自身（清单里写着字面串，否则自命中）。
-# 已知边界（诚实条款）：rg 默认尊重 .gitignore/.ignore，grep 退化路径不尊重——被 ignore 的文件在
-#   退化路径下仍会被检索（更严，不放宽）；跨行字符串（一个字面串被换行拆开）两边都查不到。
-#   隐藏目录/文件的检索面**两条分支一致**：rg 分支靠 `--hidden` 纳入（否则 .meta/ .agents/ .github/
-#   会被整片跳过 = 假绿），grep 分支的 `grep -r` 本来就含隐藏项；两边都只排除 .git/。
+# 检索面（两条分支一致，这是判据的一部分而不是"边界"）：**都不尊重 ignore 规则**，检索 = 当前树
+#   全部文件（含隐藏目录与被 .gitignore/.ignore 忽略者），两边都只排除 .git/ 与清单自身。
+#   rg 侧靠 `--hidden --no-ignore` 达成（少任何一个都会比 grep 侧更松 = 假放行）；grep 侧 `grep -r`
+#   本来就含隐藏项且不看 ignore。
+# 已知边界（诚实条款，剩下只有这一条）：跨行字符串（一个字面串被换行拆开）两边都查不到。
 # 测试接缝：NO_RESIDUE_FORCE_GREP=1 强制走退化路径（仅 A9 自检用，正常运行不需要设它）。
 #
 # 约定：本目录脚本一律 `chmod +x`（非可执行门禁会被静默跳过，判据会假达标）。
@@ -5818,7 +5820,7 @@ while IFS= read -r line || [ -n "$line" ]; do
   [ -n "$scope" ] || scope="."
   n=$((n+1))
   if [ "$HAS_RG" = "0" ] && [ "$noted_fallback" = "0" ]; then
-    printf 'no-residue: 注：rg 不可用 → 退化 grep -F（字面匹配语义等价；不尊重 .gitignore，更严）\n' >&2
+    printf 'no-residue: 注：rg 不可用 → 退化 grep -F（字面匹配语义等价；检索面同口径：都不尊重 ignore 规则）\n' >&2
     noted_fallback=1
   fi
   found=""
@@ -5826,7 +5828,11 @@ while IFS= read -r line || [ -n "$line" ]; do
     # `--hidden` 必须有：rg 默认跳过隐藏文件/目录，范围 `.` 时 `.meta/`、`.agents/`、`.github/`
     # 会整个不被检索 → 「删掉的符号只在隐藏目录被引用」时门报零残留 = 假绿（真机复现过）。
     # `.git/` 不是检索面（历史不是当前树），显式排除；清单自身也排除（否则清单里的字面串自命中）。
-    found=$(rg --fixed-strings --hidden --no-messages -l \
+    # `--no-ignore` 必须有：rg 默认尊重 .gitignore/.ignore/.ignore 规则，而 grep 退化路径**不**尊重——
+    # 于是同一个被忽略目录里的残留，rg 路径 exit 0、grep 路径 exit 1（更松的一侧是 rg = 假放行，
+    # 真机复现：`.gitignore` 写 `dist/`，`dist/bundle.js` 含被删字面串）。加 `--no-ignore` 后两条
+    # 路径的检索面一致 = 当前树全部文件（含被忽略者），门才说得出口径同一。
+    found=$(rg --no-ignore --fixed-strings --hidden --no-messages -l \
       --glob '!.git' --glob '!.git/**' --glob "!$MANIFEST_REL" \
       -e "$pat" -- "$scope" 2>/dev/null || true)
   else
@@ -6090,11 +6096,34 @@ if [ -n "$D" ]; then
   fi
 fi
 
+# ---------- ⑫ 被 .gitignore 忽略的目录同样在检索面内（两条路径同口径）----------
+# 复现的假放行：.gitignore 写 dist/，dist/bundle.js 含被删字面串；rg 默认尊重 ignore → exit 0，
+# 而 grep 退化路径不看 ignore → exit 1。更松的一侧是 rg = 假放行（W2b/U10）。
+D=$(new_case) || bad "A9⑫ 样本仓创建失败"
+if [ -n "$D" ]; then
+  printf 'dist/\n' > "$D/.gitignore"
+  mkdir -p "$D/dist"
+  printf 'var x = PonyGoIgnoredProbe7;\n' > "$D/dist/bundle.js"
+  printf 'PonyGoIgnoredProbe7\t.\n' > "$(manifest_of "$D")"
+  run_gate "$D"
+  assert_rc 1 "A9⑫ 命中只在被 .gitignore 忽略的目录 → 必须拒（rg 须 --no-ignore）"
+  assert_out_has "dist/bundle.js" "A9⑫ rg 路径必须点名被忽略目录里的命中文件"
+  run_gate_grep "$D"
+  assert_rc 1 "A9⑫ 退化 grep 路径：被忽略目录命中同样必须拒（两条路径口径一致）"
+  assert_out_has "dist/bundle.js" "A9⑫ 退化路径同样点名该文件"
+  # 正控制：删掉残留 → 两条路径都必须放行（别把 --no-ignore 写成一律拒绝）
+  rm -f "$D/dist/bundle.js"
+  run_gate "$D"
+  assert_rc 0 "A9⑫ 被忽略目录清空后 → rg 路径放行（正控制）"
+  run_gate_grep "$D"
+  assert_rc 0 "A9⑫ 被忽略目录清空后 → grep 路径放行（正控制）"
+fi
+
 if [ "$FAILN" -ne 0 ]; then
   printf '== no-residue.spec：未通过（%s 项不符预期——门要么失效要么误拒）==\n' "$FAILN" >&2
   exit 1
 fi
-printf '== no-residue.spec：通过（负样本必拒 + 正样本放行 + 参数/清单/范围/字面口径全部符合预期）==\n'
+printf '== no-residue.spec：通过（负样本必拒 + 正样本放行 + 参数/清单/范围/字面口径 + rg/grep 检索面同口径（隐藏目录、被 ignore 目录）全部符合预期）==\n'
 exit 0
 PONYGO_EOF
   [ -x "$META_DIR/gates/no-residue.spec.sh" ] || chmod +x "$META_DIR/gates/no-residue.spec.sh" 2>/dev/null || true

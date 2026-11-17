@@ -18,7 +18,7 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
 | A5 | `.github/workflows/ponygo-governance.yml` | GitHub 薄适配器（checkout + A4 + 步骤 ②：`ponygo status`）；步骤 ② 覆盖 A4 看不见的判据面 2.1/2.4/2.5/2.6/1.2/1.9b/1.9c，实例无 CLI 时 `::warning::` + exit 0（如实声明未验证，**不是通过**）；等价形态是主 `ci.yml` 内 `governance` job 直接跑 A4——只有同 workflow 的 job 才能被聚合门 `needs` 消费 | 同 A4（步骤 ② 无 CLI 时不改退出码） |
 | A6 | `.meta/gates/archive-verify.sh` | 归档 SHA-256 封印门：`check`（默认，只读）/ `seal`（追加封印，互斥 + 原子替换），零旗标 | 0 通过 / 1 拒绝 |
 | A7 | `.meta/gates/archive-verify.spec.sh` | A6 的负样本执行判据（篡改/缺条目/孤儿/重复/非追加 → 必须拒；合法样本 → 放行） | 0 = 自检通过 |
-| A8 | `.meta/gates/no-residue.sh` | 零残留门（删除/收窄后的符号检索验收）：读清单 `.meta/gates/no-residue.manifest`（每行 `<pattern><TAB><scope>`），`rg --fixed-strings` 按字面检索（无 `rg` 退化 `grep -rIlF`）；缺清单/空清单 → 放行并打印跳过 | 0 放行（无命中 / 跳过）/ 1 命中、清单格式非法、未知参数 |
+| A8 | `.meta/gates/no-residue.sh` | 零残留门（删除/收窄后的符号检索验收）：读清单 `.meta/gates/no-residue.manifest`（每行 `<pattern><TAB><scope>`），`rg --no-ignore --fixed-strings --hidden` 按字面检索（无 `rg` 退化 `grep -rIlF`；两条路径**检索面同口径**：都不尊重 ignore 规则，含隐藏目录与被忽略文件）；**骨架不播种清单**——清单是**删除发生时**由人登记的判定项，**空清单不构成验证**（补一份空清单只是让门看起来在跑的仪式，判定不了任何东西）；缺清单/空清单 → 放行并打印跳过 | 0 放行（无命中 / 跳过）/ 1 命中、清单格式非法、未知参数 |
 | A9 | `.meta/gates/no-residue.spec.sh` | A8 的负样本执行判据（命中→拒 / 无命中→放行 / 空清单→放行 / 未知参数→拒 / 特殊字符按字面） | 0 = 自检通过 |
 
 **宇宙表只登记 A1/A2/A4/A6/A7/A8/A9**（不可变资产）：A3/A5 是实例可编辑文件（有人会追加自己的钩子逻辑、

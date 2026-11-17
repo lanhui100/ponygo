@@ -22,16 +22,18 @@
 #   1  命中残留（逐条列出「字面串 ← 命中文件」）；清单格式非法；参数错误（未知参数 / 多余参数）。
 #
 # 判定口径（固定字符串，字面匹配）：
-#   rg --fixed-strings --hidden --no-messages -l -e <字面串> -- <范围>
-#   （`--hidden` + 只排除 .git：检索面 = 当前树的**全部**文件，含 .meta/ .agents/ .github/ 等
-#     隐藏目录；rg 默认跳过隐藏项，漏了它就是假绿——删掉的符号若只在隐藏目录被引用，门会说"零残留"）
+#   rg --no-ignore --fixed-strings --hidden --no-messages -l -e <字面串> -- <范围>
+#   （`--hidden` + `--no-ignore` + 只排除 .git：检索面 = 当前树的**全部**文件——含 .meta/ .agents/
+#     .github/ 等隐藏目录，也含被 .gitignore/.ignore 忽略的文件。rg 默认跳过隐藏项与 ignore 规则，
+#     漏任何一个都是假绿：删掉的符号若只在隐藏目录或被忽略的构建产物里被引用，门会说"零残留"）
 #   本框架的运行时承诺只有 bash，rg 不是保证存在的依赖 → 无 rg 时退化为
 #   grep -rIlF -e <字面串> -- <范围>（同样字面匹配、列文件名、抑制杂音），并在 stderr 声明退化，
 #   不假装「有 rg 的精确度」。两者都：排除 .git/；排除清单文件自身（清单里写着字面串，否则自命中）。
-# 已知边界（诚实条款）：rg 默认尊重 .gitignore/.ignore，grep 退化路径不尊重——被 ignore 的文件在
-#   退化路径下仍会被检索（更严，不放宽）；跨行字符串（一个字面串被换行拆开）两边都查不到。
-#   隐藏目录/文件的检索面**两条分支一致**：rg 分支靠 `--hidden` 纳入（否则 .meta/ .agents/ .github/
-#   会被整片跳过 = 假绿），grep 分支的 `grep -r` 本来就含隐藏项；两边都只排除 .git/。
+# 检索面（两条分支一致，这是判据的一部分而不是"边界"）：**都不尊重 ignore 规则**，检索 = 当前树
+#   全部文件（含隐藏目录与被 .gitignore/.ignore 忽略者），两边都只排除 .git/ 与清单自身。
+#   rg 侧靠 `--hidden --no-ignore` 达成（少任何一个都会比 grep 侧更松 = 假放行）；grep 侧 `grep -r`
+#   本来就含隐藏项且不看 ignore。
+# 已知边界（诚实条款，剩下只有这一条）：跨行字符串（一个字面串被换行拆开）两边都查不到。
 # 测试接缝：NO_RESIDUE_FORCE_GREP=1 强制走退化路径（仅 A9 自检用，正常运行不需要设它）。
 #
 # 约定：本目录脚本一律 `chmod +x`（非可执行门禁会被静默跳过，判据会假达标）。
@@ -107,7 +109,7 @@ while IFS= read -r line || [ -n "$line" ]; do
   [ -n "$scope" ] || scope="."
   n=$((n+1))
   if [ "$HAS_RG" = "0" ] && [ "$noted_fallback" = "0" ]; then
-    printf 'no-residue: 注：rg 不可用 → 退化 grep -F（字面匹配语义等价；不尊重 .gitignore，更严）\n' >&2
+    printf 'no-residue: 注：rg 不可用 → 退化 grep -F（字面匹配语义等价；检索面同口径：都不尊重 ignore 规则）\n' >&2
     noted_fallback=1
   fi
   found=""
@@ -115,7 +117,11 @@ while IFS= read -r line || [ -n "$line" ]; do
     # `--hidden` 必须有：rg 默认跳过隐藏文件/目录，范围 `.` 时 `.meta/`、`.agents/`、`.github/`
     # 会整个不被检索 → 「删掉的符号只在隐藏目录被引用」时门报零残留 = 假绿（真机复现过）。
     # `.git/` 不是检索面（历史不是当前树），显式排除；清单自身也排除（否则清单里的字面串自命中）。
-    found=$(rg --fixed-strings --hidden --no-messages -l \
+    # `--no-ignore` 必须有：rg 默认尊重 .gitignore/.ignore/.ignore 规则，而 grep 退化路径**不**尊重——
+    # 于是同一个被忽略目录里的残留，rg 路径 exit 0、grep 路径 exit 1（更松的一侧是 rg = 假放行，
+    # 真机复现：`.gitignore` 写 `dist/`，`dist/bundle.js` 含被删字面串）。加 `--no-ignore` 后两条
+    # 路径的检索面一致 = 当前树全部文件（含被忽略者），门才说得出口径同一。
+    found=$(rg --no-ignore --fixed-strings --hidden --no-messages -l \
       --glob '!.git' --glob '!.git/**' --glob "!$MANIFEST_REL" \
       -e "$pat" -- "$scope" 2>/dev/null || true)
   else

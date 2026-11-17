@@ -227,9 +227,32 @@ if [ -n "$D" ]; then
   fi
 fi
 
+# ---------- ⑫ 被 .gitignore 忽略的目录同样在检索面内（两条路径同口径）----------
+# 复现的假放行：.gitignore 写 dist/，dist/bundle.js 含被删字面串；rg 默认尊重 ignore → exit 0，
+# 而 grep 退化路径不看 ignore → exit 1。更松的一侧是 rg = 假放行（W2b/U10）。
+D=$(new_case) || bad "A9⑫ 样本仓创建失败"
+if [ -n "$D" ]; then
+  printf 'dist/\n' > "$D/.gitignore"
+  mkdir -p "$D/dist"
+  printf 'var x = PonyGoIgnoredProbe7;\n' > "$D/dist/bundle.js"
+  printf 'PonyGoIgnoredProbe7\t.\n' > "$(manifest_of "$D")"
+  run_gate "$D"
+  assert_rc 1 "A9⑫ 命中只在被 .gitignore 忽略的目录 → 必须拒（rg 须 --no-ignore）"
+  assert_out_has "dist/bundle.js" "A9⑫ rg 路径必须点名被忽略目录里的命中文件"
+  run_gate_grep "$D"
+  assert_rc 1 "A9⑫ 退化 grep 路径：被忽略目录命中同样必须拒（两条路径口径一致）"
+  assert_out_has "dist/bundle.js" "A9⑫ 退化路径同样点名该文件"
+  # 正控制：删掉残留 → 两条路径都必须放行（别把 --no-ignore 写成一律拒绝）
+  rm -f "$D/dist/bundle.js"
+  run_gate "$D"
+  assert_rc 0 "A9⑫ 被忽略目录清空后 → rg 路径放行（正控制）"
+  run_gate_grep "$D"
+  assert_rc 0 "A9⑫ 被忽略目录清空后 → grep 路径放行（正控制）"
+fi
+
 if [ "$FAILN" -ne 0 ]; then
   printf '== no-residue.spec：未通过（%s 项不符预期——门要么失效要么误拒）==\n' "$FAILN" >&2
   exit 1
 fi
-printf '== no-residue.spec：通过（负样本必拒 + 正样本放行 + 参数/清单/范围/字面口径全部符合预期）==\n'
+printf '== no-residue.spec：通过（负样本必拒 + 正样本放行 + 参数/清单/范围/字面口径 + rg/grep 检索面同口径（隐藏目录、被 ignore 目录）全部符合预期）==\n'
 exit 0
