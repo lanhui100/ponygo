@@ -1,6 +1,6 @@
-# Agent Note: ponygo 植入效果审计（2026-11-17）与升级接线提案
+# Agent Note: ponygo 植入效果审计（2026-11-17）与升级接线（全部落地）
 
-Status: proposed
+Status: implemented
 
 ## Problem
 
@@ -25,9 +25,9 @@ ponygo 已在 15 个实例仓植入（`.meta` 骨架 + ADR 门 A1/A2 + 全树门
 
 相邻决策（非同源、未取代）：`implemented/process/2026-11-11-p0-anti-entropy-fixes.md`（框架自审的三条断点，已修「门与负样本可被同时掏空而无观测者」；本轮的 U1 是同一病灶在**实例侧 CI** 的残留）、`implemented/process/2026-11-10-gate-negative-evidence-hardening.md`（负样本执行与聚合证据加固；本轮 U4/U5 是它未覆盖的"零断言 spec"与"结论行诚"两面）。两条均无需归档或改写，本提案不取代其任何判据。
 
-## Proposal
+## Decision
 
-分三批，只做"把已有承诺接上线"的最小闭环（完整证据与验收命令见
+按三批实施（W0/W1→W2→W3），只做"把已有承诺接上线"的最小闭环（完整证据与验收命令见
 `docs/dev-team/reviews/2026-11-17-qms-implant-effect-audit.md` §3/§4）：
 
 1. **P0 堵假放行**
@@ -46,13 +46,13 @@ ponygo 已在 15 个实例仓植入（`.meta` 骨架 + ADR 门 A1/A2 + 全树门
    U4（spec 输出机读计数，`rejects≥1` 才算过）、U9（补 `no-residue.manifest`，不让 A8 空转）、
    U10（rg 分支加 `--no-ignore`，与 grep 退化路径同判）。
 
-**落地进度**：W0（U6→B012、U8→B015）、W1（U1→B010、U2→B011）、W2a（U3→B014、U5 判词→B016）
+**落地结果**：W0（U6→B012、U8→B015）、W1（U1→B010、U2→B011）、W2a（U3→B014、U5 判词→B016）
 已于 2026-11-17 落地并闭环，决策记录见
 `.agents/notes/implemented/process/2026-11-17-baseline-ratchet-and-seed-provenance.md`、
 `.../2026-11-17-ci-judge-surface-and-a6-fail-closed.md`、`.../2026-11-17-deletion-gate-and-verdict-honesty.md`
 （`upgrade adopt` 位置模式 + 存量基线 + 植入 seed；A5 判据面步骤 + A6 fail-closed；
 A1 扩 ACMRD 的删除入册 + 结论行改「已判定部分通过」）。
-W2b（U10/U9→B018）亦已落地（A8 rg/grep 同口径 + 裁决不造空清单）。本提案继续承载
+W2b（U10/U9→B018）亦已落地（A8 rg/grep 同口径 + 裁决不造空清单）。本提案已由后续批次全部承接；本提案不再承载
 W3a（U5 剩余 miss_ids → B022）亦已落地（四问 16 个项级稳定 id + `miss_ids` 补全 + 人读「未命中项」行，
 决策见 `implemented/process/2026-11-17-audit-miss-ids.md`）。
 W3b（U4→B017 spec 运行时契约）与 W3c（U7→B013 逃生口留痕契约）亦已落地。余下 **B020**（A3 钩子 fail-closed）的迁移策略冻结在
@@ -79,7 +79,7 @@ backlog 账本已登记对应待办：U1→B010、U2→B011、U6→B012（已闭
 5. **本轮选定方案**：接线优先的小批升级（上文 U1/U2 先做，其余进 backlog 排期），并**同批**修正
    文档口径（ladder:153）与负样本证据，避免用新文档掩盖旧缺口。
 
-## Acceptance criteria
+## Verification（验收复跑记录）
 
 - U1：`cd /tmp/x && ponygo init && grep -q 'ponygo status' .github/workflows/ponygo-governance.yml`；
   删掉该步后 `tests/run.sh` 应红。
