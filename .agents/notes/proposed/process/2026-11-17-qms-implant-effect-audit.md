@@ -53,8 +53,11 @@ ponygo 已在 15 个实例仓植入（`.meta` 骨架 + ADR 门 A1/A2 + 全树门
 （`upgrade adopt` 位置模式 + 存量基线 + 植入 seed；A5 判据面步骤 + A6 fail-closed；
 A1 扩 ACMRD 的删除入册 + 结论行改「已判定部分通过」）。
 W2b（U10/U9→B018）亦已落地（A8 rg/grep 同口径 + 裁决不造空清单）。本提案继续承载
-W3 余项（均已入账本）：U7 逃生口 ledger（B013）、U4 spec 运行时契约（B017）、
-U5 剩余 miss_ids（B022）、B020（A3 钩子删 A1 自身即摘判定）。
+W3a（U5 剩余 miss_ids → B022）亦已落地（四问 16 个项级稳定 id + `miss_ids` 补全 + 人读「未命中项」行，
+决策见 `implemented/process/2026-11-17-audit-miss-ids.md`）。
+余下三项（U7→B013、U4→B017、B020）的**迁移策略**已冻结在
+`.agents/notes/proposed/process/2026-11-17-w3-migration-designs.md`（哨兵块 v1→v2 双接受灰度 /
+逃生口 append-only ledger / spec `##SPEC` 运行时契约灰度），按该设计分三项独立实施。
 
 backlog 账本已登记对应待办：U1→B010、U2→B011、U6→B012（已闭环）、U7→B013、U3→B014、U8→B015（已闭环）、U5→B016、U4→B017、U9/U10→B018。
 

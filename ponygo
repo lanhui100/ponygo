@@ -7591,7 +7591,7 @@ audit_json_line() { # <exit code> → 单行 JSON
     "${AUDIT_LEVEL_INT:--1}" "${VL_VERIFIED_LEVEL:-0}" \
     "${VL_VERDICT:-unverified}" "$(json_id_list "${VL_FAIL_IDS:-}")" \
     "$(gates_local_state)" "$(gates_remote_state)" \
-    "$(json_miss_ids "${AUDIT_HIT:-0}" "${AUDIT_TOTAL:-0}" "${AUDIT_GAP_IDS:-}")" "$(json_exempt_gates)" \
+    "$(json_miss_ids "${AUDIT_HIT:-0}" "${AUDIT_TOTAL:-0}" "${AUDIT_GAP_IDS:-}${AUDIT_MISS_IDS:+ ${AUDIT_MISS_IDS}}")" "$(json_exempt_gates)" \
     "$(json_id_list "${AUDIT_GAP_IDS:-}")" "$(json_coverage)" "$(json_skills)" "$(json_warnings)" \
     "${AUDIT_DRIFT_COUNT:--1}" "$(json_path_list "${AUDIT_DRIFT_FILES:-}")" "$1"
 }
@@ -8047,7 +8047,21 @@ cmd_audit() {
   [ "${LEVEL_CHOICE}" = "M" ] && { info "M 档——机制层判定（判「对不对」）。"; }
 
   # ---- 四问打分（S 档查骨架层，M 档追加机制层；每项一条现成命令，命中+1）----
-  local hit=0 total=0 hook_ok=0
+  local hit=0 total=0 hook_ok=0 it=0
+  # B022（W3a）：每项一个**稳定 id**，未命中即登记进 AUDIT_MISS_IDS（空格分隔，按四问顺序）。
+  # 为什么：`--json` 的 hits<total 时 miss_ids 曾恒为空数组（只有 gap id，混着"事实级"与"项级"），
+  # 机读方拿不到"少的是哪一项"，人读也只能看到一个 15/16 的分数。id 只补机器面，
+  # **不改计分**：total/hit 的算术与顺序逐字不变（同一处代码同时维护两件事容易漂移，故收在
+  # audit_item 一个入口里）。id 词表冻结见 .dev-team/contract-w3a-b022.md §1。
+  AUDIT_MISS_IDS=""
+  audit_item() { # <冻结 id> <命中 0|1>：total++；命中则 hit++，否则登记 id
+    total=$((total + 1))
+    if [ "$2" = "1" ]; then
+      hit=$((hit + 1))
+    else
+      AUDIT_MISS_IDS="$AUDIT_MISS_IDS${AUDIT_MISS_IDS:+ }$1"
+    fi
+  }
   # hook 的评分与 gap 共用 2.4 严格探针；同一次审计不另造「目录/文件存在即接线」口径。
   # **有意设计**（勿再报「一处探针服务两个判据 = 重复计分」）：问①里的 hook 项与 2.4 本地层接线
   # 考察的是**同一个物理事实**——core.hooksPath 指向的 pre-commit 里真有一份可执行、位置正确的
@@ -8056,24 +8070,27 @@ cmd_audit() {
 
   # 问① 决策记在哪：目录与四态是独立结构项；零真实决策不得拿决策数或 vacuous Status 分。
   n_dec=$(count_decisions)
-  total=$((total+1)); [ -d "$DECISIONS_DIR" ] && hit=$((hit+1))
-  total=$((total+1))
+  it=0; [ -d "$DECISIONS_DIR" ] && it=1
+  audit_item q1.decisions_dir "$it"
   found=0; for lc in $LIFECYCLES; do [ -d "$DECISIONS_DIR/$lc" ] && found=$((found+1)); done
-  [ "$found" -eq 4 ] && hit=$((hit+1))
-  total=$((total+1))
-  [ "${n_dec:-0}" -gt 0 ] && hit=$((hit+1))   # 有至少一条决策
-  total=$((total+1))
-  if [ -d "$DECISIONS_DIR/rejected" ] && [ -n "$(ls -A "$DECISIONS_DIR/rejected" 2>/dev/null | grep -vE '^(README\.md|\.gitkeep)$')" ]; then hit=$((hit+1)); fi  # 被否选项留痕（占位文件不计）
-  total=$((total+1))
+  it=0; [ "$found" -eq 4 ] && it=1
+  audit_item q1.lifecycles "$it"
+  it=0; [ "${n_dec:-0}" -gt 0 ] && it=1   # 有至少一条决策
+  audit_item q1.decisions_present "$it"
+  it=0
+  if [ -d "$DECISIONS_DIR/rejected" ] && [ -n "$(ls -A "$DECISIONS_DIR/rejected" 2>/dev/null | grep -vE '^(README\.md|\.gitkeep)$')" ]; then it=1; fi  # 被否选项留痕（占位文件不计）
+  audit_item q1.rejected_trace "$it"
   # 状态与内容一致：必须有真实决策，且所有决策都有 Status 头（README/AGENTS.md 豁免）。
   bad_status=$(find "$DECISIONS_DIR" -name '*.md' ! -name 'README.md' ! -name 'AGENTS.md' -exec grep -L '^Status:' {} + 2>/dev/null | wc -l | tr -d ' ')
-  [ "${n_dec:-0}" -gt 0 ] && [ "${bad_status:-0}" -eq 0 ] && hit=$((hit+1))
+  it=0; [ "${n_dec:-0}" -gt 0 ] && [ "${bad_status:-0}" -eq 0 ] && it=1
+  audit_item q1.status_head "$it"
 
   if [ "$LEVEL_CHOICE" = "M" ]; then
-    total=$((total+1))
     n_alt=$(grep -rl 'Alternatives' "$DECISIONS_DIR" 2>/dev/null | grep -v '/README\.md$' | wc -l | tr -d ' ')
-    [ "${n_alt:-0}" -gt 0 ] && hit=$((hit+1))  # 有 Alternatives 节
-    total=$((total+1)); [ "$hook_ok" = "1" ] && hit=$((hit+1))  # 触发条件/门禁痕迹（与 2.4 同口径）
+    it=0; [ "${n_alt:-0}" -gt 0 ] && it=1  # 有 Alternatives 节
+    audit_item q1.alternatives "$it"
+    it=0; [ "$hook_ok" = "1" ] && it=1  # 触发条件/门禁痕迹（与 2.4 同口径）
+    audit_item q1.hook_trace "$it"
   fi
 
   # 问② 承诺怎么强制
@@ -8087,7 +8104,6 @@ cmd_audit() {
   done < <(find "$META_DIR/gates" -maxdepth 1 -type f \
       \( -name '*.sh' -o -name '*.ps1' \) ! -name '*.spec.*' -print0 2>/dev/null)
   [ "$instance_gate_count" -gt 0 ] || gate_spec_fail=0
-  total=$((total+1))
   # gates/ 有实例自己的实质门禁。README/.gitkeep 占位不计分；框架随 `ponygo init` 交付的
   # ADR 门资产（A1/A2/A4：adr-verify.sh / adr-verify.spec.sh / ci-verify.sh）、归档封印门资产
   # （A6/A7：archive-verify.sh / archive-verify.spec.sh）与引用残留门资产
@@ -8100,23 +8116,23 @@ cmd_audit() {
     if file_has_content "$g2f"; then g2=1; break; fi
   done < <(find "$META_DIR/gates" -maxdepth 1 -type f \
       ! -name 'README.md' ! -name '.gitkeep' -print0 2>/dev/null)
-  [ "$g2" = "1" ] && hit=$((hit+1))
-  total=$((total+1))
+  it=0; [ "$g2" = "1" ] && it=1
+  audit_item q2.instance_gate "$it"
   # 本地钩子已挂：复用上方 gate_24_probe 结果，评分与 gap 不可能互相矛盾。
-  [ "$hook_ok" = "1" ] && hit=$((hit+1))
-  total=$((total+1))
+  it=0; [ "$hook_ok" = "1" ] && it=1
+  audit_item q2.local_hook "$it"
   # CI 存在：跨平台探测（GitHub/GitLab/Bitbucket/Azure/Drone/Jenkins/通用 ci 目录）
   has_ci=0
   for cf in .github/workflows .gitlab-ci.yml bitbucket-pipelines.yml azure-pipelines.yml .drone.yml Jenkinsfile ci; do
     [ -e "$cf" ] && has_ci=1 && break
   done
-  [ "$has_ci" = "1" ] && hit=$((hit+1))
+  it=0; [ "$has_ci" = "1" ] && it=1
+  audit_item q2.ci_present "$it"
 
   if [ "$LEVEL_CHOICE" = "M" ]; then
     # 已删除的重复计分项：M 档原本额外加一项「[ -d .github/workflows ]」，它与问②上层的跨平台
     # has_ci 探测（.github/workflows / .gitlab-ci.yml / … / ci，用 [ -e ] 已覆盖目录）查的是同一件事，
     # 等于给 GitHub 仓库白送一分。删除后 M 档 total=16（S 档 12 不变）；**不要**再加回来。
-    total=$((total+1))
     # 负样本 spec（F5）：只认门禁侧负样本——.meta/gates/ 下的 *.spec.*（与 2.3 同一判定域）。
     # 全仓普通单测（*.spec.ts / *_test.go / test_*.py …）不再计分：它不是「门会拒绝非法样本」
     # 的证据，计进来等于白送一分（P1-6）。总项数不变（仍 14 项）。
@@ -8130,12 +8146,14 @@ cmd_audit() {
       is_framework_gate_asset "${ns1##*/}" && continue   # 框架自带 spec 不计分（名单派生自 UPGRADE_UNIVERSE）
       if file_has_content "$ns1" && [ "$gate_spec_missing" = "0" ]; then negspec="$ns1"; break; fi
     done < <(find "$META_DIR/gates" -type f -name '*.spec.*' -print0 2>/dev/null)
-    [ -n "$negspec" ] && hit=$((hit+1))
+    it=0; [ -n "$negspec" ] && it=1
+    audit_item q2.negative_spec "$it"
     # 配对分与上方「实例门存在分」成对：合法门+spec 得 2；缺 spec 两者皆失，净差 1。
     # **有意设计**（勿再报「两条判据考察同一组文件 = 重复计分」）：两个分量的语义不同——
     # 「实例门存在分」问『有没有门』，「配对分」问『门有没有负样本证据（会拒绝非法样本）』。
     # 只建门不写 spec 得 1 分而非 2；缺 spec 时存在分不扣（门确实在），故两分净差 1、不会双扣。
-    total=$((total+1)); [ "$gate_spec_missing" = "0" ] && [ "$instance_gate_count" -gt 0 ] && hit=$((hit+1))
+    it=0; [ "$gate_spec_missing" = "0" ] && [ "$instance_gate_count" -gt 0 ] && it=1
+    audit_item q2.gate_spec_paired "$it"
     if [ "$gate_spec_missing" = "1" ] && [ -z "$negspec" ]; then
       printf 'ponygo: 2.3 gates/ 无负样本 spec（实例门无有效同名配对）\n' >&2
     fi
@@ -8147,22 +8165,25 @@ cmd_audit() {
   #   3.3 全部技能 frontmatter name 与目录同名（kebab-case）且 description 内联触发词
   #   3.4 全部技能四要素齐（真相源/步骤/校准样例/验证与报告；英文等价允许，围栏内标题不算在场）
   # 零技能不判 3.3/3.4（无技能可判 ≠ 通过）；不齐项另见「技能」段的逐技能修法与 gap id。
-  total=$((total+3))
-  [ "$SK_INSTANCE_N" -gt 0 ] && hit=$((hit+1))
-  [ "${SK_SKILL_N:-0}" -gt 0 ] && [ "$SKILL_SHAPE_BAD_33" = "0" ] && hit=$((hit+1))
-  [ "${SK_SKILL_N:-0}" -gt 0 ] && [ "$SKILL_SHAPE_BAD_34" = "0" ] && hit=$((hit+1))
+  it=0; [ "$SK_INSTANCE_N" -gt 0 ] && it=1
+  audit_item q3.instance_skill "$it"
+  it=0; [ "${SK_SKILL_N:-0}" -gt 0 ] && [ "$SKILL_SHAPE_BAD_33" = "0" ] && it=1
+  audit_item q3.skill_shape_name "$it"
+  it=0; [ "${SK_SKILL_N:-0}" -gt 0 ] && [ "$SKILL_SHAPE_BAD_34" = "0" ] && it=1
+  audit_item q3.skill_shape_four "$it"
 
   # 问④ 过时怎么退场：**形态不是证据**——`archived/` 目录存在（init 就预建）证明不了任何东西。
   # 只认「已封印归档件」：`archived/manifest.sha256` 存在且含 ≥1 条非空登记
   # （行格式 `<64hex><空格><空格><仓库相对路径>`，与 A6 seal 写入口径一致）。
   # 空 archived / 有件但未封印（无 manifest 或全空行）一律不计分——否则「建了个空目录」就白送一分。
   # 只读纪律：这里只判 manifest 文件的形状，**不执行** archive-verify.sh（判定优先只读，见文件头）。
-  total=$((total+1))
+  it=0
   if [ -f "$DECISIONS_DIR/archived/manifest.sha256" ] \
      && sed 's/\r$//' "$DECISIONS_DIR/archived/manifest.sha256" 2>/dev/null \
         | grep -qE '^[0-9a-f]{64}  .+'; then
-    hit=$((hit+1))
+    it=1
   fi
+  audit_item q4.sealed_archive "$it"
 
   # ---- 输出 ----
   # 缺配对是明确硬 FAIL：先让机读面、分数与人读缺口完整落盘，再统一非零收口。
@@ -8171,6 +8192,9 @@ cmd_audit() {
   echo ""
   echo "===== ponygo 审计结果（${LEVEL_CHOICE} 档）====="
   echo "命中 $hit / $total 项"
+  # B022：项级未命中只在**有**未命中时追加一行（零未命中不打印 = 既有输出逐字节不变）。
+  # 顺序 = 四问顺序（AUDIT_MISS_IDS 按 audit_item 调用序追加），不排序、不去重（同一 id 不会重复计分）。
+  [ -n "$AUDIT_MISS_IDS" ] && echo "未命中项：$AUDIT_MISS_IDS"
   info "当前治理级：$(fmt_level "$(read_level)")"
   warn_meta_violations
   warn_governance_hygiene
