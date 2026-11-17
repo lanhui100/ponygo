@@ -248,8 +248,9 @@ run_cli "$ROOT" --help
 CMDS=$(printf '%s\n' "$R_OUT" | sed -n 's/^  ponygo \([a-z][a-z-]*\).*/\1/p' | LC_ALL=C sort -u | tr '\n' ' ')
 assert_eq "T-INV-1 顶层命令词集合恰为 7 词（未新增/未删除）" "audit init observe retire status sync upgrade " "$CMDS"
 assert_not_contains "T-INV-2 usage 不得出现顶层 adopt 行" "$R_OUT" "  ponygo adopt"
-GATES_DIFF=$(git -C "$ROOT" status --porcelain -- .meta/gates 2>/dev/null)
-assert_eq "T-INV-3 A1–A9 门资产字节零改动（工作区无 .meta/gates 变更）" "" "$GATES_DIFF"
+# A1–A9 = 门禁脚本与负样本 spec；`.meta/gates/README.md` 是文档家（W0 同批更新），不属门资产
+GATES_DIFF=$(git -C "$ROOT" status --porcelain -- .meta/gates 2>/dev/null | grep -v 'README\.md' || true)
+assert_eq "T-INV-3 A1–A9 门资产（脚本与 spec）字节零改动" "" "$GATES_DIFF"
 
 T4=$(new_case)
 mk_legacy_repo "$T4"
