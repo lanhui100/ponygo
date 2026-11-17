@@ -670,6 +670,50 @@ write_simpl_note "$R" --no-reintroduce
 git -C "$R" add -A >/dev/null 2>&1
 expect_reject_with "删除 ADR + 简化 note 缺 ## Reintroduction conditions → 拒绝（1.11）" "$R" '缺 ## Reintroduction conditions'
 
+# ⑤ 生命周期迁移（同 basename 的 D+A）**不是删除**：新文件已进 PATHS 由真源校验 → 放行
+R=$(new_repo rm-adr-migration)
+write_adr "$R" .agents/notes/proposed/architecture/2026-10-29-migrate.md '# Agent Note: 待迁移提案
+
+Status: proposed
+
+## Problem
+
+样本。
+
+## Proposal
+
+样本提案。
+
+## Alternatives considered
+
+- 样本。'
+spec_commit "$R" base
+git -C "$R" rm -q .agents/notes/proposed/architecture/2026-10-29-migrate.md >/dev/null 2>&1
+write_adr "$R" .agents/notes/implemented/architecture/2026-10-29-migrate.md '# Agent Note: 迁移后
+
+Status: implemented
+
+## Decision
+
+样本决定。
+
+## Alternatives considered
+
+- 样本。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_accept "生命周期迁移（同 basename 的 D+A）不算删除，不要求入册简化记录" "$R"
+
+# ⑥ 入册载体必须是真决策记录：simplification/README.md 不算
+R=$(new_repo rm-adr-readme-carrier)
+write_adr "$R" .agents/notes/implemented/process/2026-10-29-to-remove.md "$LEGAL_BODY"
+spec_commit "$R" base
+git -C "$R" rm -q .agents/notes/implemented/process/2026-10-29-to-remove.md >/dev/null 2>&1
+write_adr "$R" .agents/notes/implemented/simplification/README.md '# 简化记录目录说明
+
+本目录放简化记录。'
+git -C "$R" add -A >/dev/null 2>&1
+expect_reject_with "simplification/README.md 不是决策记录 → 仍拒绝（目录说明不能充当入册载体）" "$R" 'simplification'
+
 # ④ 带参模式语义不变：指定路径仍只判给定文件（删除项不参与）
 R=$(new_repo rm-adr-argmode)
 write_adr "$R" .agents/notes/implemented/process/2026-10-29-keep.md "$LEGAL_BODY"
@@ -683,5 +727,5 @@ if [ "$FAIL" -ne 0 ]; then
   printf '[%s] 未通过：门禁的拒绝/放行语义与预期不符（见上方 FAIL）\n' "$SPEC" >&2
   exit 1
 fi
-printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节 + 1.7 rejected 理由（含 CJK 标点）+ 1.8 ## Decision/中文提案标题（含复合词）+ 围栏感知（1.8/1.10）+ A6 缺失/被清空/被换成假门 → fail-closed（含 A6 在场正控制与补回反向对照）+ 删除 ADR 必须同提交入册简化记录（无 note 拒 / 有合法 note 放 / 缺复活条件由 1.11 拒 / 带参模式不受影响）均已证明（exit 0）\n' "$SPEC"
+printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节 + 1.7 rejected 理由（含 CJK 标点）+ 1.8 ## Decision/中文提案标题（含复合词）+ 围栏感知（1.8/1.10）+ A6 缺失/被清空/被换成假门 → fail-closed（含 A6 在场正控制与补回反向对照）+ 删除 ADR 必须同提交入册简化记录（无 note 拒 / 有合法 note 放 / 缺复活条件由 1.11 拒 / 带参模式不受影响 / 生命周期迁移不算删除 / README 不算入册载体）均已证明（exit 0）\n' "$SPEC"
 exit 0

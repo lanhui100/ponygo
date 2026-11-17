@@ -145,25 +145,59 @@ else
   # 为什么：删除是不可逆的治理动作；只留一个空 diff 等于把「为什么删/什么条件下装回来」
   # 丢给后人考古（常载命约 3 + 判据 1.11）。A1 只判**入册事实**，1.11 的形状仍由真源
   # verify-note.sh 判（P9：一份判据一份实现，本门不复刻）。
-  # 归档件（.agents/notes/archived/**）的删除/移出已由 A6 封印门管，这里不重复判定。
+  #
+  # 两类**不算删除**（否则就是 FALSE_REJECT）：
+  #   a) 生命周期迁移：proposed→implemented 用 `git rm` + `git add`（或改写后相似度 <50%）时，
+  #      暂存区是 D+A 两个路径，但**同一个 basename** 的新文件已经进 PATHS、照常由真源校验——
+  #      "搬了一次家"不是删除（真仓 8edd7cf 就是这种形态）。
+  #   b) `*.zh.md` 译文：与 1.7/1.10/1.11 的 zh 口径一致（译文随母语版同批补齐，不独立判）。
+  # 归档件（.agents/notes/archived/**）的删除/移出由 A6 封印门（含 manifest 孤儿检测）承担，
+  # 本判据只管**非 archived** 的删除，不重复判定。
+  # rename 检测兜一层 `--find-renames=50%`：实例侧 diff.renames=false / renameLimit 很小时，
+  # 改写幅度大的迁移会被表示成 D+A 而不是 R，上面的 basename 规则就是第二道网。
   DEL_ALL=" "
+  ADD_BASE=" "
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    is_adr "$p" || continue
+    ADD_BASE="$ADD_BASE${p##*/} "
+  done < <(git diff --cached --name-only --find-renames=50% --diff-filter=A -- '.agents/notes/*.md' 2>/dev/null)
   FIRST_DEL=""
+  DEL_NEEDED=0
   while IFS= read -r p; do
     [ -n "$p" ] || continue
     is_adr "$p" || continue
     DEL_ALL="$DEL_ALL$p "
     case "$p" in
-      .agents/notes/archived/*) continue ;;
+      .agents/notes/archived/*) continue ;;   # 归档件由 A6 封印门管（含 manifest 孤儿检测）
+      *.zh.md) continue ;;                    # 译文不独立判（与 1.7/1.10/1.11 同口径）
     esac
+    case "$ADD_BASE" in
+      *" ${p##*/} "*) continue ;;             # 同 basename 的新增 = 生命周期迁移，不是删除
+    esac
+    DEL_NEEDED=$((DEL_NEEDED + 1))
     [ -n "$FIRST_DEL" ] || FIRST_DEL="$p"
-  done < <(git diff --cached --name-only --diff-filter=D -- '.agents/notes/*.md' 2>/dev/null)
-  if [ -n "$FIRST_DEL" ]; then
-    SIMPL_N=0
+  done < <(git diff --cached --name-only --find-renames=50% --diff-filter=D -- '.agents/notes/*.md' 2>/dev/null)
+  if [ "$DEL_NEEDED" -gt 0 ]; then
+    # 入册载体必须是**真决策记录**：`is_adr` 已排除 README.md/AGENTS.md，另按 zh 口径排除译文
+    # （否则往 simplification/ 丢一个 README.md 就能"入册"——那是把门槛换成了目录存在性）。
+    SIMPL_NOTE=""
     while IFS= read -r sp; do
-      [ -n "$sp" ] && SIMPL_N=$((SIMPL_N + 1))
-    done < <(git diff --cached --name-only --diff-filter=AM -- '.agents/notes/implemented/simplification/*.md' 2>/dev/null)
-    if [ "$SIMPL_N" -eq 0 ]; then
-      die "拒绝：删除决策记录（$FIRST_DEL）必须同提交入册 implemented/simplification/（含围栏外 ## Reintroduction conditions 与检索收据）——移除本身是一次决策"
+      [ -n "$sp" ] || continue
+      is_adr "$sp" || continue
+      case "$sp" in *.zh.md) continue ;; esac
+      SIMPL_NOTE="$sp"
+      break
+    done < <(git diff --cached --name-only --find-renames=50% --diff-filter=AM -- '.agents/notes/implemented/simplification/*.md' 2>/dev/null)
+    if [ -z "$SIMPL_NOTE" ]; then
+      die "拒绝：删除决策记录（$FIRST_DEL）必须同提交入册 implemented/simplification/（须含围栏外 ## Reintroduction conditions；若写了 ## Removed surface 还须给一行 rg/grep 检索收据）——移除本身是一次决策"
+    fi
+    # 语义关联（"这条简化记录讲的是不是这次移除"）不做硬判（P6）：只打一行可复核提示，
+    # 让 review 有落点。未提及被删路径时把提示写得更具体（这是最常被漏的那类）。
+    if grep -Fq "${FIRST_DEL##*/}" "$SIMPL_NOTE" 2>/dev/null; then
+      printf '[%s] WARN 删除决策记录（%s）已入册 %s——语义关联靠 review，建议复核：该记录是否写清了移除范围与复活条件\n' "$PROG" "$FIRST_DEL" "$SIMPL_NOTE" >&2
+    else
+      printf '[%s] WARN 删除决策记录（%s）已入册 %s，但该记录**未提及**被删路径 %s——建议复核：它是否真是这次移除的简化记录\n' "$PROG" "$FIRST_DEL" "$SIMPL_NOTE" "${FIRST_DEL##*/}" >&2
     fi
   fi
   # 无参模式：暂存区改动的 ADR（ACMRD = 新增/复制/修改/重命名/删除；R7 + U3）
@@ -173,7 +207,7 @@ else
     is_adr "$p" || continue
     case "$DEL_ALL" in *" $p "*) continue ;; esac
     PATHS+=("$p")
-  done < <(git diff --cached --name-only --diff-filter=ACMRD -- '.agents/notes/*.md' 2>/dev/null)
+  done < <(git diff --cached --name-only --find-renames=50% --diff-filter=ACMRD -- '.agents/notes/*.md' 2>/dev/null)
 fi
 
 [ "${#PATHS[@]}" -gt 0 ] || skip "无暂存 ADR 变更"

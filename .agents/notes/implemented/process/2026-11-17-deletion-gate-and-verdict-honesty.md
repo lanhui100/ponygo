@@ -30,6 +30,26 @@ Status: implemented
    `wave13/f4_coverage_honesty.sh` 的 `FROZEN_L1` / `FROZEN_L2_BASE` / COV-2 期望串与 NOGO 断言同步；
    COV-4 的 L0 逐字断言保持原样。
 
+## 审核修正（2026-11-17 独立对抗审核，verdict=FAIL / 1 BLOCKING / 10 ADVISORY）
+
+- **BLOCKING（生命周期迁移被误判成删除）**：`proposed → implemented` 的迁移若被 git 表示成 `D + A`
+  （不用 `git mv`，或改写后相似度 <50%），会被判成"删除决策记录"而拒绝提交（重放真仓提交 `8edd7cf`
+  即复现，而同一新文件单独跑真源是 0）。修法：删除项的 **basename 在同一次暂存里被新增 ADR 再次出现
+  → 视为迁移**，不要求简化记录（新文件照常进 PATHS 由真源校验）；同时给 `git diff --cached` 加
+  `--find-renames=50%`（默认阈值）兜 rename 表示法。
+  **为何不是更激进的 1%**：实测 1% 会把"删除一条 ADR + 新增一条不相干 note"配对成重命名，
+  真删除被整个掩盖——阈值越松，判据越容易被绕过。
+- **ADVISORY 同批修**：入册载体必须是真决策记录（`simplification/README.md`、`AGENTS.md`、`*.zh.md`
+  不能充当）；只删 `*.zh.md` 译文视为随母语版同批补齐、不要求入册（与 1.7/1.10/1.11 同口径）；
+  简化 note 未提及被删路径时打一行「建议复核」WARN（语义关联不做硬判，P6）。
+- **措辞修正**：`die` 文案不再笼统称"必须含检索收据"——准确口径是"复活条件必须有；写了
+  `## Removed surface` 时还须一行 `rg`/`grep` 检索收据"；ADR 关于 `archived/` 的归属改写为
+  "归档件的删除/移出由 A6 封印门承担（含 manifest 孤儿检测）；归档件与其 manifest 行被同时改写
+  属 A6 已声明的 review 边界"。
+- **残留风险（诚实登记）**：当"删除 A + 新增 B"被 git 判成 rename（相似度 ≥50%）时按迁移处理、
+  不要求入册——真 mv 不是删除，这是有意设计；代价是"内容相近的大幅改写式删除+新增"可借此绕开入册判据。
+  若未来要封死，方向是对 `--find-renames` 用更高阈值并只对"同 basename"认迁移（留下一批）。
+
 ## Alternatives considered
 
 - **把 1.10/1.11 搬进 CLI 让 status 全判**：否决——`maturity-ladder.md` 已按 P9 明确拒绝"一份判据两份实现"，
@@ -53,7 +73,8 @@ Status: implemented
   `stale`/`modified` 分类提示）。
 - 实现边界（写死，防再议）：删除项**不进** `verify-note.sh` 的入参——暂存区已无字节，交给真源只会
   制造 TOCTOU 假红；A1 只判"同提交有没有入册"，被删记录的历史形状由 1.11 在同提交的简化 note 上判。
-  `archived/**` 下的删除归 A6 封印门；而**把归档件 `git mv` 出 `archived/`** 仍会触发本判据
-  （移动出归档 = 改动归档语义，需入册，属预期行为，不豁免）。
+  `archived/**` 的删除/移出由 A6 封印门承担（含 manifest 孤儿检测——归档件的条目删了、manifest 行还在，
+  A6 自己就会拒）；本判据只管**非 archived** 的删除。归档件与其 manifest 行被**同时**改写属 A6 已声明的
+  review 边界（没有 git 历史真值可对，纯内容校验分辨不出来），不在本判据的兜底范围内。
 - 残留风险（诚实登记）：A4 仍不知道"历史删除"，只在本地层拦；直接 `--no-verify` 或删钩子的绕过面
   由 B020 与 U7 承接。
