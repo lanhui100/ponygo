@@ -46,10 +46,11 @@ ponygo 已在 15 个实例仓植入（`.meta` 骨架 + ADR 门 A1/A2 + 全树门
    U4（spec 输出机读计数，`rejects≥1` 才算过）、U9（补 `no-residue.manifest`，不让 A8 空转）、
    U10（rg 分支加 `--no-ignore`，与 grep 退化路径同判）。
 
-**落地进度**：U6（B012）与 U8（B015）已于 2026-11-17 落地并闭环，决策记录见
-`.agents/notes/implemented/process/2026-11-17-baseline-ratchet-and-seed-provenance.md`
-（`upgrade adopt` 位置模式 + `.meta/notes-baseline.json` + `.meta/.ponygo-seed`）；本提案继续承载
-W1/W2/W3 余项（U1/U2/U3/U4/U5/U7/U9/U10）。
+**落地进度**：W0（U6→B012、U8→B015）与 W1（U1→B010、U2→B011）已于 2026-11-17 落地并闭环，决策记录见
+`.agents/notes/implemented/process/2026-11-17-baseline-ratchet-and-seed-provenance.md` 与
+`.agents/notes/implemented/process/2026-11-17-ci-judge-surface-and-a6-fail-closed.md`
+（`upgrade adopt` 位置模式 + `.meta/notes-baseline.json` + `.meta/.ponygo-seed`；A5 判据面步骤 + A6 缺失 fail-closed）；
+本提案继续承载 W2/W3 余项（U3/U4/U5/U7/U9/U10）。
 
 backlog 账本已登记对应待办：U1→B010、U2→B011、U6→B012（已闭环）、U7→B013、U3→B014、U8→B015（已闭环）、U5→B016、U4→B017、U9/U10→B018。
 
