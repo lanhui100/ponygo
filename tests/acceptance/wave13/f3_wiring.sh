@@ -57,15 +57,20 @@ assert_eq "W-2 [C] 合法归档 + 合法 ADR → A1 exit 0" 0 "$S_RC"
 assert_contains "W-2 [C] 原有「通过：N 条 ADR 经 … 校验」行仍在" "$S_OUT" "条 ADR"
 assert_contains "W-2 [C] 原有「通过」结论词仍在" "$S_OUT" "通过"
 
-# ============ W-3：A1 缺 A6 时优雅回退 ============
+# ============ W-3：A1 缺 A6 时 fail-closed 拒绝（U2，2026-11-17 语义变更） ============
+# 旧语义（缺 A6 → 静默跳过归档段、exit 0）是审计抓到的 P0 fail-open：删一个文件即可把归档封印
+# 从提交窗口里摘掉。现行语义：A1 必须非零拒绝并点名 A6（见 implemented/process/
+# 2026-11-17-ci-judge-surface-and-a6-fail-closed.md）。
 T=$(new_case); gov_repo "$T" 2 || finish
 write_adr "$T" "implemented/feature/2026-01-02-w3.md"
 rm -f "$T/$A6_REL"
 assert_missing "W-3 夹具：A6 已删除" "$T/$A6_REL"
 git_at "$T" add -A >/dev/null 2>&1
 run_script "$T" .meta/gates/adr-verify.sh
-assert_eq "W-3 [GO] 缺 A6 → A1 exit 0（静默跳过归档检查）" 0 "$S_RC"
-assert_not_contains "W-3 [NOGO] 缺 A6 时不得出现「归档封印」段" "$S_OUT" "归档封印"
+assert_nonzero "W-3 [GO] 缺 A6 → A1 非零拒绝（fail-closed；旧的「优雅回退」已废止）" "$S_RC"
+assert_contains "W-3 [GO] 拒绝文案点名 A6" "$S_OUT" "A6"
+assert_contains "W-3 [GO] 拒绝文案声明 fail-closed" "$S_OUT" "fail-closed"
+assert_not_contains "W-3 [NOGO] 缺 A6 时不得静默跳过（旧文案必须消失）" "$S_OUT" "跳过：无暂存 ADR 变更"
 assert_no_crash "W-3 [NOGO] 缺 A6 时不得崩溃" "$S_OUT"
 
 # ============ W-4 / W-5 / W-6：A4 四段门 ============
