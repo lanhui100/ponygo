@@ -38,6 +38,40 @@ run_cli "$T2" status
 assert_zero "T-U1-4 篡改门资产后 A4（ci-verify）仍 exit 0（A4 不含资产字节比对）" "$CIV_RC"
 assert_nonzero "T-U1-4b 同一棵树 status 判 2.1 红（判据面只能由 CLI 看见）" "$R_RC"
 
+# 判据面步骤必须真的会跑（审核 ADVISORY#5：子串断言抓不到「空壳步骤」）
+# 从生成物里抽出步骤 ② 的 run 块并真执行三种 CLI 状态。
+STEP_SH=$(mktemp)
+awk '/^ *- name: ponygo 判据面/{f=1} f&&/^ *run: \|$/{b=1;next} b&&/^          /{sub(/^          /,"");print}' "$T/$A5_REL" > "$STEP_SH"
+assert_nonzero "T-U1-6 已抽出判据面步骤脚本（非空）" "$(wc -c < "$STEP_SH" | tr -d ' ')"
+mkdir -p "$T/bin"
+printf '#!/usr/bin/env bash\necho GH8-FAKE-STATUS-OK\nexit 0\n' > "$T/ponygo"
+chmod +x "$T/ponygo"
+(cd "$T" && bash "$STEP_SH" > "$T/.s1" 2>&1); echo $? > "$T/.s1rc"
+assert_zero "T-U1-6b CLI 在场且 status 绿 → 步骤 exit 0" "$(cat "$T/.s1rc")"
+assert_contains "T-U1-6c 步骤确实调用了 CLI（而不是只打 WARN）" "$(cat "$T/.s1")" "GH8-FAKE-STATUS-OK"
+printf '#!/usr/bin/env bash\necho GH8-FAKE-STATUS-RED\nexit 1\n' > "$T/ponygo"
+(cd "$T" && bash "$STEP_SH" > "$T/.s2" 2>&1); echo $? > "$T/.s2rc"
+assert_nonzero "T-U1-6d CLI 判据红 → 步骤非零（判据面能拦 CI）" "$(cat "$T/.s2rc")"
+rm -f "$T/ponygo"
+(cd "$T" && bash "$STEP_SH" > "$T/.s3" 2>&1); echo $? > "$T/.s3rc"
+assert_zero "T-U1-6e 无 CLI → 步骤 exit 0（如实 WARN，不是失败）" "$(cat "$T/.s3rc")"
+assert_contains "T-U1-6f 无 CLI 时输出 ::warning::" "$(cat "$T/.s3")" "::warning::"
+printf 'garbage' > "$T/junk-cli"
+PONYGO_BIN="$T/junk-cli" bash -c "cd '$T' && bash '$STEP_SH'" > "$T/.s4" 2>&1
+assert_contains "T-U1-6g PONYGO_BIN 指向不可执行文件 → 单独 WARN 提示「不可执行」（手误可见）" "$(cat "$T/.s4")" "不可执行"
+assert_contains "T-U1-6h 该 WARN 点名实际取值（可诊断）" "$(cat "$T/.s4")" "junk-cli"
+rm -f "$STEP_SH"
+
+# A5 是实例可编辑文件：内容改动不得被误判为「人接手治理」而抬高 audit 自动档
+T5=$(new_case)
+mkdir -p "$T5/.github/workflows"
+make_gov_repo "$T5" 1
+run_cli "$T5" audit
+assert_contains "T-U1-7 前置：仅 init 产物时 audit 走 S 档（12 项）" "$R_OUT" "12 项"
+printf '\n# 实例自定义行（A5 可编辑）\n' >> "$T5/$A5_REL"
+run_cli "$T5" audit
+assert_contains "T-U1-7b A5 被实例编辑后 audit 仍走 S 档（A5 不构成「人接手」证据）" "$R_OUT" "12 项"
+
 # 文档口径：不再声称「CI 侧实际有看守」
 assert_not_contains "T-U1-5 maturity-ladder 不再声称「故 CI 侧实际有看守」" "$(cat "$LADDER")" "故 CI 侧实际有看守"
 assert_contains "T-U1-5b maturity-ladder 写明未携带 CLI 时的诚实口径" "$(cat "$LADDER")" "未携带"
@@ -67,6 +101,14 @@ printf '\n<!-- staged edit by gh8 -->\n' >> "$T4/.agents/notes/implemented/archi
 rm -f "$T4/$A6_REL"
 (cd "$T4" && bash .meta/gates/adr-verify.sh >/dev/null 2>&1); echo $? > "$T4/.rc2"
 assert_nonzero "T-U2-4 删 A6 + 暂存改动 ADR → 非零（封印不可判定即拒绝）" "$(cat "$T4/.rc2")"
+
+# A6 被清空（0 字节）而不是删除：同样不可判定 → 必须 fail-closed
+T6=$(new_case)
+make_gov_repo "$T6" 1
+: > "$T6/$A6_REL"
+(cd "$T6" && bash .meta/gates/adr-verify.sh > "$T6/.out" 2>&1); echo $? > "$T6/.rc3"
+assert_nonzero "T-U2-7 A6 被清空（0 字节）→ A1 仍非零（不可判定 = fail-closed）" "$(cat "$T6/.rc3")"
+assert_contains "T-U2-7b 文案声明不可判定 / fail-closed" "$(cat "$T6/.out")" "fail-closed"
 
 # A2 负样本自检必须覆盖新分支
 (cd "$ROOT" && bash "$A2_REL" >/dev/null 2>&1); echo $? > /tmp/gh8_a2.$$
