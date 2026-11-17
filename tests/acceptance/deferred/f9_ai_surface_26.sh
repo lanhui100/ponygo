@@ -48,7 +48,7 @@ assert_contains "F9-③ 夹具：sync 后出现 END 哨兵" "$AG_TXT" "<!-- END 
 
 run_in "$T" audit
 assert_zero "F9-③ ai-surface: on 且已投影 → exit 0（2.6 PASS）" "$R_RC"
-assert_contains "F9-③ GO：结论行为「级自洽验证：通过」" "$R_OUT" "级自洽验证：通过"
+assert_contains "F9-③ GO：结论行为「级自洽验证：已判定部分通过」" "$R_OUT" "级自洽验证：已判定部分通过"
 # 2.6 PASS 是「无 FAIL 项」；成功态不要求回显判据编号（与 2.1–2.5 同口径）
 assert_not_matches "F9-③ NOGO：不得把 2.6 判成 FAIL/未投影" "$R_OUT" '^[[:space:]]*-[[:space:]]*2\.6'
 assert_not_contains "F9-③ NOGO：不得出现正文漂移文案" "$R_OUT" "投影正文漂移"
@@ -145,7 +145,7 @@ run_in "$T" sync
 assert_zero "F9-⑦b 夹具：sync 生成 canonical 正文" "$R_RC"
 run_in "$T" audit
 assert_zero "F9-⑦b 反向对照：正常一对 BEGIN/END → exit 0（2.6 PASS）" "$R_RC"
-assert_contains "F9-⑦b GO：结论行为「级自洽验证：通过」" "$R_OUT" "级自洽验证：通过"
+assert_contains "F9-⑦b GO：结论行为「级自洽验证：已判定部分通过」" "$R_OUT" "级自洽验证：已判定部分通过"
 assert_not_matches "F9-⑦b NOGO：不得把 2.6 判成 FAIL" "$R_OUT" '^[[:space:]]*-[[:space:]]*2\.6'
 
 # ================= ⑦c 2.6 重复 END（Wave-11 回归缺口）=================

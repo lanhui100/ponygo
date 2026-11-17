@@ -35,8 +35,8 @@ FORBIDDEN='机械判据全部 PASS'
 # 「判据 1.1–1.8 PASS；1.9b SKIPPED——…，不计入 PASS」（不得静默 PASS；同一契约由
 # tests/run.sh 场景 s79 的 C3⑦/C3⑨/C3⑩ 看守）。已声明 ai-surface: on 的态（COV-1 的本仓副本）
 # 仍为「1.1–1.9 PASS」——见 FROZEN_L2_BASE，不得顺手改掉正向影子。
-FROZEN_L1='级自洽验证：通过（L0-L1 判据 1.1–1.8 PASS；1.9b SKIPPED——根 AGENTS.md 索引链未判定（未声明 ai-surface），不计入 PASS；1.10 未由本命令验证——由 A1/A4 门把关）'
-FROZEN_L2_BASE='级自洽验证：通过（L0-L2 判据 1.1–1.9 PASS；1.10 未由本命令验证——由 A1/A4 门把关'
+FROZEN_L1='级自洽验证：已判定部分通过（L0-L1 判据 1.1–1.8 PASS；1.9b SKIPPED——根 AGENTS.md 索引链未判定（未声明 ai-surface），不计入 PASS；1.10 未由本命令验证——由 A1/A4 门把关）'
+FROZEN_L2_BASE='级自洽验证：已判定部分通过（L0-L2 判据 1.1–1.9 PASS；1.10 未由本命令验证——由 A1/A4 门把关'
 conc_of() { printf '%s\n' "$1" | grep '^级自洽验证：' ; }
 
 # ---------- COV-1b：lv=1 态 1 结论行**逐字**（无 2.x 条件子句，可做全串精确断言）----------
@@ -96,7 +96,7 @@ run_split "$T" status
 # 期望迁移（同上，§C3）：本夹具未声明 ai-surface → 1.9b SKIPPED 子句并入结论行；
 # 「无门禁载体」尾句不变（coverage 诚实化语义未被改写）。
 assert_eq "COV-2 [GO] 态 2 结论行逐字" \
-  '级自洽验证：通过（L0-L1 判据 1.1–1.8 PASS；1.9b SKIPPED——根 AGENTS.md 索引链未判定（未声明 ai-surface），不计入 PASS；1.10 未由本命令验证——无门禁载体）' "$(conc_of "$R_OUT")"
+  '级自洽验证：已判定部分通过（L0-L1 判据 1.1–1.8 PASS；1.9b SKIPPED——根 AGENTS.md 索引链未判定（未声明 ai-surface），不计入 PASS；1.10 未由本命令验证——无门禁载体）' "$(conc_of "$R_OUT")"
 assert_eq "COV-2 [GO] 独立行「1.10 无门禁载体（见接线）」恰 1 次" 1 \
   "$(printf '%s\n' "$R_OUT" | grep -c '^1\.10 无门禁载体（见接线）$')"
 assert_matches "COV-2 [GO] stderr 出现 WARN" "$R_ERR" 'WARN|警告'
@@ -114,7 +114,7 @@ run_in "$T" status
 assert_nonzero "COV-3 [C] 违例仓 status 非零" "$R_RC"
 assert_contains "COV-3 [C] 既有失败行逐字出现" "$R_OUT" "级自洽验证：未通过（声明"
 assert_contains "COV-3 [C] FAIL 列表非空（FAIL 关键词）" "$R_OUT" "FAIL"
-assert_not_contains "COV-3 [NOGO] 失败不得被新文案洗成「通过」" "$(conc_of "$R_OUT")" "级自洽验证：通过（"
+assert_not_contains "COV-3 [NOGO] 失败不得被新文案洗成「通过」" "$(conc_of "$R_OUT")" "级自洽验证：已判定部分通过（"
 
 # ---------- COV-4：lv=0 原样（逐字节），禁 1.1–1.9 / 1.10 措辞 ----------
 # 夹具口径（可达成性取证）：契约 FXW-COV-L0 写「空仓 + .meta/meta.yaml」→ 骨架缺口会 exit 1，

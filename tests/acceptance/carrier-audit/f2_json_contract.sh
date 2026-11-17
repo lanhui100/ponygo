@@ -96,7 +96,7 @@ if lad.get('verdict') != 'fail': fail.append(lad)
 if '2.4' not in lad.get('fails', []): fail.append(lad)
 "
 assert_contains "CA-11 GO：人读列出 2.4 硬失败" "$R_ERR" "2.4 本地层未接 ADR 门"
-assert_not_contains "CA-11 NOGO：硬失败不得被洗成通过" "$R_ERR" "级自洽验证：通过"
+assert_not_contains "CA-11 NOGO：硬失败不得被洗成通过" "$R_ERR" "级自洽验证：已判定部分通过"
 
 # ---------- CA-12/13：drift unknown=-1；已判定 0/1 正向对照 ----------
 T=$(new_case); make_gov_repo "$T" 1 || finish
@@ -200,7 +200,7 @@ if c.get('skipped') != ['1.9b']: fail.append(c)
 if c.get('reason') != 'readonly-no-repo-exec': fail.append(c)
 if d.get('ladder', {}).get('verdict') != 'pass': fail.append(d.get('ladder'))
 "
-assert_contains "CA-16 正对照：人读级自洽通过" "$R_ERR" "级自洽验证：通过"
+assert_contains "CA-16 正对照：人读级自洽通过" "$R_ERR" "级自洽验证：已判定部分通过"
 
 # CA-16：L1 真跑但 FAIL 也算已判，coverage 不得退回 l1-not-run。
 T=$(new_case); make_gov_repo "$T" 1 || finish

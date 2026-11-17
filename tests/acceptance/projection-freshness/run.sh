@@ -176,7 +176,7 @@ assert_block_bytes "PF-01 AGENTS.md 块正文逐字节等于 canonical" "$T/AGEN
 assert_block_bytes "PF-01 CLAUDE.md 块正文逐字节等于 canonical" "$T/CLAUDE.md" "$T/$CONST"
 run_in "$T" status
 assert_rc "PF-01 已 sync 的 on/L2 仓 status" 0 "$R_RC"
-assert_contains "PF-01 结论行为「级自洽验证：通过」" "$R_OUT" "级自洽验证：通过"
+assert_contains "PF-01 结论行为「级自洽验证：已判定部分通过」" "$R_OUT" "级自洽验证：已判定部分通过"
 assert_not_matches "PF-01 NOGO：2.6 不得进 FAIL 列表" "$R_OUT$R_ERR" '^[[:space:]]*-[[:space:]]*2\.6'
 
 # ============================================================
@@ -192,7 +192,7 @@ assert_rc "PF-02 AGENTS.md 正文漂移 → exit 1" 1 "$R_RC"
 assert_contains "PF-02 GO：判定点是 2.6" "$REG" "2.6"
 assert_contains "PF-02 GO：失败文案点名 AGENTS.md" "$REG" "AGENTS.md"
 assert_contains "PF-02 GO：漂移文案给补救 bash ponygo sync" "$REG" "ponygo sync"
-assert_not_contains "PF-02 NOGO：不得写「级自洽验证：通过」" "$R_OUT" "级自洽验证：通过"
+assert_not_contains "PF-02 NOGO：不得写「级自洽验证：已判定部分通过」" "$R_OUT" "级自洽验证：已判定部分通过"
 
 # ============================================================
 # PF-03 仅改 CLAUDE.md（独立普通文件）→ CLAUDE 正文漂移 = 2.6 FAIL
@@ -225,7 +225,7 @@ assert_block_bytes "PF-04 sync 后 AGENTS.md 块正文 = canonical" "$T/AGENTS.m
 assert_block_bytes "PF-04 sync 后 CLAUDE.md 块正文 = canonical" "$T/CLAUDE.md" "$T/$CONST"
 run_in "$T" status
 assert_rc "PF-04 resync 后 status 回到 exit 0" 0 "$R_RC"
-assert_contains "PF-04 结论行为「级自洽验证：通过」" "$R_OUT" "级自洽验证：通过"
+assert_contains "PF-04 结论行为「级自洽验证：已判定部分通过」" "$R_OUT" "级自洽验证：已判定部分通过"
 
 # ============================================================
 # PF-05 块外用户内容改动 / 追加 → 不得误报（2.6 只比哨兵块内）
@@ -401,7 +401,7 @@ assert_matches "PF-16 夹具：AGENTS.md 确有 CR 字节" "$(count_cr "$T/AGENT
 run_in "$T" status
 assert_rc "PF-16 CRLF 投影 → status exit 0（\r 归一后无漂移）" 0 "$R_RC"
 assert_not_matches "PF-16 NOGO：CRLF 不得触发 2.6 FAIL" "$R_OUT$R_ERR" '^[[:space:]]*-[[:space:]]*2\.6'
-assert_contains "PF-16 GO：结论行为「级自洽验证：通过」" "$R_OUT" "级自洽验证：通过"
+assert_contains "PF-16 GO：结论行为「级自洽验证：已判定部分通过」" "$R_OUT" "级自洽验证：已判定部分通过"
 
 # ============================================================
 # PF-17 末尾空行（哨兵块之后）→ 不得误漂移
@@ -441,7 +441,7 @@ assert_contains "PF-19 夹具：constitution 仍是模板态（含 TODO:）" "$(
 assert_contains "PF-19 夹具：AGENTS.md 投影的是 bootstrap 引导" "$(cat "$T/AGENTS.md")" "初始引导（bootstrap）"
 run_in "$T" status
 assert_rc "PF-19 模板态 bootstrap 投影 → status exit 0" 0 "$R_RC"
-assert_contains "PF-19 GO：结论行为「级自洽验证：通过」" "$R_OUT" "级自洽验证：通过"
+assert_contains "PF-19 GO：结论行为「级自洽验证：已判定部分通过」" "$R_OUT" "级自洽验证：已判定部分通过"
 assert_not_matches "PF-19 NOGO：bootstrap 不得判 2.6 FAIL" "$R_OUT$R_ERR" '^[[:space:]]*-[[:space:]]*2\.6'
 
 # ============================================================
