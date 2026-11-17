@@ -686,7 +686,8 @@ s03_status() {
   run_cli "$T" status
   assert_eq "新 init 后 status exit 0" 0 "$R_RC"
   assert_contains "骨架完整" "$R_OUT" "骨架完整"
-  assert_contains "级自洽验证通过" "$R_OUT" "级自洽验证：已判定部分通过"
+  # 本夹具是 fresh init（lv=0）：L0 纯长驻行的判词按契约 §2 保持「通过」，不参与 W2a 判词迁移。
+  assert_contains "级自洽验证通过（L0 纯长驻）" "$R_OUT" "级自洽验证：通过（纯 L0 长驻"
   scn_end
 }
 
