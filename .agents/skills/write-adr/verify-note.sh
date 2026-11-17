@@ -179,8 +179,10 @@ baseline_read() {
     f=$(printf '%s' "$obj" | sed -e 's/^{"file":"//' -e 's/","criterion":.*//')
     cc=$(printf '%s' "$obj" | sed -e 's/.*","criterion":"//' -e 's/","fingerprint":.*//')
     fp=$(printf '%s' "$obj" | sed -e 's/.*","fingerprint":"//' -e 's/"}$//')
-    # 缺键/多键/坏指纹（含上面 sed 未命中导致空值）一律损坏：绝不让空指纹变成"匹配一切"的豁免
-    [ -n "$f" ] && [ -n "$cc" ] || { B_STATE="corrupt"; return 0; }
+    # 缺键/多键/坏指纹（含上面 sed 未命中导致空值）一律损坏：绝不让空指纹变成"匹配一切"的豁免。
+    # 注意：`file` **允许为空串**——1.3/1.4/1.9 是目录级/实例级判据，没有文件位（契约 §1.3 的
+    # file 字段同步为空串），这类存量违例必须能入册，否则整树类违例永远冻结不进基线。
+    [ -n "$cc" ] || { B_STATE="corrupt"; return 0; }
     printf '%s' "$fp" | grep -Eq '^[0-9a-f]{64}$' || { B_STATE="corrupt"; return 0; }
     B_FPSET="$B_FPSET$fp "
     B_N=$((B_N+1))
@@ -199,10 +201,14 @@ vn_json_line() { # <exit 码>
   nn=$((n - nb))
   V_ORDER=()
   if [ "$n" -gt 0 ]; then
+    # 分隔符刻意用 **US（0x1F，非 IFS 空白）**而不是 TAB：TAB 属 bash 的 IFS-whitespace，
+    # `IFS=$'\t' read` 会把**前导**分隔符折叠成空 → `file` 为空的违例（1.3/1.4/1.9 这类
+    # 目录级/实例级判据）首列被吞、`$((10#))` 得空串直接打死管道 → 整条违例从 violations[]
+    # 里消失，而 counts.total 仍按收集数报 → 恒等式破裂（对抗审核 BLOCKING#1）。
     while IFS= read -r i; do [ -n "$i" ] && V_ORDER+=("$i"); done < <(
       for ((i=0; i<n; i++)); do
-        printf '%s\t%s\t%s\t%06d\n' "${V_FILE[$i]}" "$(vn_crit_key "${V_CRIT[$i]}")" "${V_FP[$i]}" "$i"
-      done | LC_ALL=C sort | while IFS=$'\t' read -r _vf _vc _vp _vi; do printf '%s\n' "$((10#$_vi))"; done
+        printf '%s\037%s\037%s\037%06d\n' "${V_FILE[$i]}" "$(vn_crit_key "${V_CRIT[$i]}")" "${V_FP[$i]}" "$i"
+      done | LC_ALL=C sort | while IFS=$'\037' read -r _vf _vc _vp _vi; do printf '%s\n' "$((10#$_vi))"; done
     )
   fi
   for i in ${V_ORDER[@]+"${V_ORDER[@]}"}; do
@@ -218,9 +224,12 @@ vn_json_line() { # <exit 码>
     "$VN_MODE" "$viol" "$n" "$nb" "$nn" "$BASELINE_PATH" "$B_STATE" "$bs" "$code"
 }
 
-vn_fail_closed() { # <因由> → 人读 stderr + (--json 时) 一行 JSON + exit 2
-  printf 'verify-note: %s（fail-closed：不猜、不放行）\n' "$1" >&2
-  [ "$VN_JSON" = "1" ] && vn_json_line 2
+vn_fail_closed() { # <因由> → 人读 stderr（--json 时改由 JSON 承载）+ exit 2
+  if [ "$VN_JSON" = "1" ]; then
+    vn_json_line 2
+  else
+    printf 'verify-note: %s（fail-closed：不猜、不放行）\n' "$1" >&2
+  fi
   exit 2
 }
 
@@ -460,16 +469,21 @@ if [ "$B_STATE" = "ok" ]; then
 fi
 NEW_N=$(( ${#V_CRIT[@]} - BASELINED_N ))
 
-# 过期 WARN：即便零违例也要打印（E-05：exit 0 + WARN 照打），否则"基线悄悄失效"没人看得见
-if [ "$B_STATE" = "expired" ]; then
-  printf 'verify-note: [WARN] 存量基线已过期（expires_at=%s）→ 全部违例重回生效；修法：重跑 ponygo upgrade adopt 重新冻结\n' "$B_EXPIRES" >&2
+# 人类行只在**非 --json** 时输出：--json 的契约是「stdout 只有一行 JSON」，而冻结验收
+# （T-U6-19b：整树违例 + --json → 直接 json.load 合并流）进一步要求 stderr 也不得掺人类行——
+# 否则两种载体在同一进程里各说一遍，机读方必须先把 JSON 从散文里挖出来（正是 --json 要消灭的事）。
+# 违例与基线状态在 JSON 里各自有字段（violations[] / baseline.state），不靠散文承载事实。
+if [ "$VN_JSON" != "1" ]; then
+  # 过期 WARN：即便零违例也要打印（E-05：exit 0 + WARN 照打），否则"基线悄悄失效"没人看得见
+  if [ "$B_STATE" = "expired" ]; then
+    printf 'verify-note: [WARN] 存量基线已过期（expires_at=%s）→ 全部违例重回生效；修法：重跑 ponygo upgrade adopt 重新冻结\n' "$B_EXPIRES" >&2
+  fi
+  # FAIL 行按**收集顺序**渲染（与历史输出逐字节同形，仅跳过被豁免项）
+  for i in ${V_CRIT[@]+"${!V_CRIT[@]}"}; do
+    [ "${V_BASE[$i]}" = "1" ] && continue
+    vn_render_fail "$i"
+  done
 fi
-
-# FAIL 行按**收集顺序**渲染（与历史输出逐字节同形，仅跳过被豁免项）
-for i in ${V_CRIT[@]+"${!V_CRIT[@]}"}; do
-  [ "${V_BASE[$i]}" = "1" ] && continue
-  vn_render_fail "$i"
-done
 
 if [ "$NEW_N" -eq 0 ]; then VN_CODE=0; else VN_CODE=1; fi
 

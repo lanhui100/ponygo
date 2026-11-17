@@ -1228,8 +1228,10 @@ baseline_read() {
     f=$(printf '%s' "$obj" | sed -e 's/^{"file":"//' -e 's/","criterion":.*//')
     cc=$(printf '%s' "$obj" | sed -e 's/.*","criterion":"//' -e 's/","fingerprint":.*//')
     fp=$(printf '%s' "$obj" | sed -e 's/.*","fingerprint":"//' -e 's/"}$//')
-    # 缺键/多键/坏指纹（含上面 sed 未命中导致空值）一律损坏：绝不让空指纹变成"匹配一切"的豁免
-    [ -n "$f" ] && [ -n "$cc" ] || { B_STATE="corrupt"; return 0; }
+    # 缺键/多键/坏指纹（含上面 sed 未命中导致空值）一律损坏：绝不让空指纹变成"匹配一切"的豁免。
+    # 注意：`file` **允许为空串**——1.3/1.4/1.9 是目录级/实例级判据，没有文件位（契约 §1.3 的
+    # file 字段同步为空串），这类存量违例必须能入册，否则整树类违例永远冻结不进基线。
+    [ -n "$cc" ] || { B_STATE="corrupt"; return 0; }
     printf '%s' "$fp" | grep -Eq '^[0-9a-f]{64}$' || { B_STATE="corrupt"; return 0; }
     B_FPSET="$B_FPSET$fp "
     B_N=$((B_N+1))
@@ -1248,10 +1250,14 @@ vn_json_line() { # <exit 码>
   nn=$((n - nb))
   V_ORDER=()
   if [ "$n" -gt 0 ]; then
+    # 分隔符刻意用 **US（0x1F，非 IFS 空白）**而不是 TAB：TAB 属 bash 的 IFS-whitespace，
+    # `IFS=$'\t' read` 会把**前导**分隔符折叠成空 → `file` 为空的违例（1.3/1.4/1.9 这类
+    # 目录级/实例级判据）首列被吞、`$((10#))` 得空串直接打死管道 → 整条违例从 violations[]
+    # 里消失，而 counts.total 仍按收集数报 → 恒等式破裂（对抗审核 BLOCKING#1）。
     while IFS= read -r i; do [ -n "$i" ] && V_ORDER+=("$i"); done < <(
       for ((i=0; i<n; i++)); do
-        printf '%s\t%s\t%s\t%06d\n' "${V_FILE[$i]}" "$(vn_crit_key "${V_CRIT[$i]}")" "${V_FP[$i]}" "$i"
-      done | LC_ALL=C sort | while IFS=$'\t' read -r _vf _vc _vp _vi; do printf '%s\n' "$((10#$_vi))"; done
+        printf '%s\037%s\037%s\037%06d\n' "${V_FILE[$i]}" "$(vn_crit_key "${V_CRIT[$i]}")" "${V_FP[$i]}" "$i"
+      done | LC_ALL=C sort | while IFS=$'\037' read -r _vf _vc _vp _vi; do printf '%s\n' "$((10#$_vi))"; done
     )
   fi
   for i in ${V_ORDER[@]+"${V_ORDER[@]}"}; do
@@ -1267,9 +1273,12 @@ vn_json_line() { # <exit 码>
     "$VN_MODE" "$viol" "$n" "$nb" "$nn" "$BASELINE_PATH" "$B_STATE" "$bs" "$code"
 }
 
-vn_fail_closed() { # <因由> → 人读 stderr + (--json 时) 一行 JSON + exit 2
-  printf 'verify-note: %s（fail-closed：不猜、不放行）\n' "$1" >&2
-  [ "$VN_JSON" = "1" ] && vn_json_line 2
+vn_fail_closed() { # <因由> → 人读 stderr（--json 时改由 JSON 承载）+ exit 2
+  if [ "$VN_JSON" = "1" ]; then
+    vn_json_line 2
+  else
+    printf 'verify-note: %s（fail-closed：不猜、不放行）\n' "$1" >&2
+  fi
   exit 2
 }
 
@@ -1509,16 +1518,21 @@ if [ "$B_STATE" = "ok" ]; then
 fi
 NEW_N=$(( ${#V_CRIT[@]} - BASELINED_N ))
 
-# 过期 WARN：即便零违例也要打印（E-05：exit 0 + WARN 照打），否则"基线悄悄失效"没人看得见
-if [ "$B_STATE" = "expired" ]; then
-  printf 'verify-note: [WARN] 存量基线已过期（expires_at=%s）→ 全部违例重回生效；修法：重跑 ponygo upgrade adopt 重新冻结\n' "$B_EXPIRES" >&2
+# 人类行只在**非 --json** 时输出：--json 的契约是「stdout 只有一行 JSON」，而冻结验收
+# （T-U6-19b：整树违例 + --json → 直接 json.load 合并流）进一步要求 stderr 也不得掺人类行——
+# 否则两种载体在同一进程里各说一遍，机读方必须先把 JSON 从散文里挖出来（正是 --json 要消灭的事）。
+# 违例与基线状态在 JSON 里各自有字段（violations[] / baseline.state），不靠散文承载事实。
+if [ "$VN_JSON" != "1" ]; then
+  # 过期 WARN：即便零违例也要打印（E-05：exit 0 + WARN 照打），否则"基线悄悄失效"没人看得见
+  if [ "$B_STATE" = "expired" ]; then
+    printf 'verify-note: [WARN] 存量基线已过期（expires_at=%s）→ 全部违例重回生效；修法：重跑 ponygo upgrade adopt 重新冻结\n' "$B_EXPIRES" >&2
+  fi
+  # FAIL 行按**收集顺序**渲染（与历史输出逐字节同形，仅跳过被豁免项）
+  for i in ${V_CRIT[@]+"${!V_CRIT[@]}"}; do
+    [ "${V_BASE[$i]}" = "1" ] && continue
+    vn_render_fail "$i"
+  done
 fi
-
-# FAIL 行按**收集顺序**渲染（与历史输出逐字节同形，仅跳过被豁免项）
-for i in ${V_CRIT[@]+"${!V_CRIT[@]}"}; do
-  [ "${V_BASE[$i]}" = "1" ] && continue
-  vn_render_fail "$i"
-done
 
 if [ "$NEW_N" -eq 0 ]; then VN_CODE=0; else VN_CODE=1; fi
 
@@ -8308,15 +8322,25 @@ seed_classify() { # <仓库相对路径> <当前 EOL 归一 sha> <模板 EOL 归
 # 存量基线（U6 `upgrade adopt` 的产物 .meta/notes-baseline.json）的人类摘要片段。
 # **只读解析、不执行任何仓库脚本**（status 的只读边界不变；也绝不复刻 verify-note 的判据）。
 notes_baseline_summary() {
-  local p="$META_DIR/notes-baseline.json" txt="" exp="" add="" drop="" n=0
+  local p="$META_DIR/notes-baseline.json" c="" exp="" add="" drop="" n=0
   [ -f "$p" ] || { printf '无'; return 0; }
-  txt=$(tr -d '\r' < "$p" 2>/dev/null) || txt=""
-  exp=$(printf '%s\n' "$txt" | sed -n 's/^  "expires_at": "\([0-9-]*\)",\{0,1\}$/\1/p' | head -n1)
-  add=$(printf '%s\n' "$txt" | sed -n 's/.*"delta": {"added": \([0-9][0-9]*\), "dropped": \([0-9][0-9]*\)}.*/\1/p' | head -n1)
-  drop=$(printf '%s\n' "$txt" | sed -n 's/.*"delta": {"added": \([0-9][0-9]*\), "dropped": \([0-9][0-9]*\)}.*/\2/p' | head -n1)
-  n=$(printf '%s\n' "$txt" | grep -cE '^    \{"file": "' 2>/dev/null || true)
-  if [ -z "$exp" ] || [ -z "$add" ] || [ -z "$drop" ]; then
-    printf '文件损坏（重跑 '\''ponygo upgrade adopt'\'' 重建）'
+  # 与判定真源 verify-note.sh **同口径**：先去掉全部空白再抽字段——容忍 json 工具重排
+  # （indent=2、entries 对象跨行都不改变语义），不依赖固定缩进与单行 regex。
+  # 为什么必须同口径：verify-note 用宽容解析豁免了基线条目（门禁 rc=0），人读面若用窄 regex
+  # 改口"文件损坏"，同一份文件在两处给出互相打脸的结论（对抗审核 A6）。
+  c=$(tr -d ' \t\r\n' < "$p" 2>/dev/null) || c=""
+  [ -n "$c" ] || { printf '无法汇总（空文件；修法：重跑 '\''ponygo upgrade adopt'\'' 重写基线）'; return 0; }
+  exp=$(printf '%s' "$c" | sed -e 's/.*"expires_at":"//' -e 's/","framework_ref".*//')
+  add=$(printf '%s' "$c" | sed -e 's/.*"delta":{"added":\([0-9][0-9]*\),"dropped":[0-9][0-9]*\}.*/\1/')
+  drop=$(printf '%s' "$c" | sed -e 's/.*"delta":{"added":[0-9][0-9]*,"dropped":\([0-9][0-9]*\)\}.*/\1/')
+  n=$(printf '%s' "$c" | grep -oF '{"file":' | wc -l | tr -d ' \t')
+  case "$exp" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+    # 解析不出 ≠ 文件损坏：人读面只陈述「汇总不了」，判定归 verify-note（它才 exit 2）
+    *) printf '无法汇总（解析不出 expires_at；修法：重跑 '\''ponygo upgrade adopt'\'' 重写基线）'; return 0 ;;
+  esac
+  if [ -z "$add" ] || [ -z "$drop" ]; then
+    printf '无法汇总（解析不出 delta；修法：重跑 '\''ponygo upgrade adopt'\'' 重写基线）'
     return 0
   fi
   printf '%s 条（到期 %s；较上次 +%s/-%s）' "${n:-0}" "$exp" "$add" "$drop"
@@ -8969,7 +8993,8 @@ adopt_read_entries() { # <基线路径> → 全局 ADOPT_OLD（"file\tcriterion\
     f=$(printf '%s' "$obj" | sed -e 's/^{"file":"//' -e 's/","criterion":.*//')
     c=$(printf '%s' "$obj" | sed -e 's/.*","criterion":"//' -e 's/","fingerprint":.*//')
     p=$(printf '%s' "$obj" | sed -e 's/.*","fingerprint":"//' -e 's/"}$//')
-    [ -n "$f" ] && [ -n "$c" ] || continue
+    # 同上：file 可空（整树级判据），只要求 criterion 非空 + 指纹 64hex
+    [ -n "$c" ] || continue
     printf '%s' "$p" | grep -Eq '^[0-9a-f]{64}$' || continue
     ADOPT_OLD="$ADOPT_OLD$f"$'\t'"$c"$'\t'"$p"$'\n'
     ADOPT_OLD_N=$((ADOPT_OLD_N+1))
@@ -9046,7 +9071,11 @@ cmd_upgrade_adopt() {
       cc=$(printf '%s' "$obj" | sed -e 's/^{"criterion":"//' -e 's/","file".*//')
       cf=$(printf '%s' "$obj" | sed -e 's/.*","file":"//' -e 's/","detail".*//')
       cp=$(printf '%s' "$obj" | sed -e 's/.*","fingerprint":"//' -e 's/".*//')
-      [ -n "$cf" ] || continue
+      # `file` 允许为空串：1.3/1.4/1.9 是目录级/实例级判据（没有文件位），这类存量违例
+      # 必须能入册，否则「冻结全部存量」对整树类判据永久失效（对抗审核 BLOCKING#2）。
+      # 有效性判据改为 criterion 非空 + 指纹 64hex（空 file 不得被当成解析失败丢掉）。
+      [ -n "$cc" ] || continue
+      printf '%s' "$cp" | grep -Eq '^[0-9a-f]{64}$' || continue
       cur="$cur$cf"$'\t'"$cc"$'\t'"$cp"$'\n'
       n_cur=$((n_cur+1))
     done < <(printf '%s\n' "$viol" | sed 's/},{"criterion":/}\n{"criterion":/g')
@@ -10578,7 +10607,7 @@ ponygo —— 项目工程化治理元框架命令行（单文件、零依赖）
   ponygo init     [--dry-run] [--repair-skeleton]  建立/注入 .agents/ + .meta/ 治理骨架（自判新/旧项目；既有 .meta 下按 UPGRADE_UNIVERSE 只补缺失骨架文件；无 .meta/.ponygo-seed 时写入植入基线——已存在不覆盖）
   ponygo audit    [--level S|M] [--run-specs] [--json]  自适应体检：打分 + 缺口 + 最小改进动作（判据不符 exit 1）
   ponygo status   [--json]               查看成熟度级与骨架完整度（骨架缺口或声明级判据不符 exit 1）
-  ponygo upgrade  [--check] [apply|adopt]  骨架漂移报告（宇宙=UPGRADE_UNIVERSE 十七文件；默认 exit 0；--check 漂移非零供 CI；apply 刷新为内嵌模板；adopt 冻结存量 ADR 违例基线——U6 位置模式，W0 空桩未实现）
+  ponygo upgrade  [--check] [apply|adopt]  骨架漂移报告（宇宙=UPGRADE_UNIVERSE 十七文件；默认 exit 0；--check 漂移非零供 CI；apply 刷新为内嵌模板；adopt 冻结存量 ADR 违例基线——U6 位置模式，写 .meta/notes-baseline.json、到期 ≤365 天，详见 'ponygo upgrade adopt' 段）
   ponygo sync                            把 constitution 投影到 AGENTS.md / CLAUDE.md（模板态投影初始引导）
   ponygo retire   --level <N|off>        退级 / 整体退场（停止线执行器）
   ponygo observe  status|init|audit|upgrade|probe  可观测性治理维度（ob0/ob1/ob2 判定；详见 'ponygo observe --help'）
@@ -10587,7 +10616,7 @@ ponygo —— 项目工程化治理元框架命令行（单文件、零依赖）
   --dry-run   只打印将执行的动作，不落盘（唯一预览手段）
   --level S|M 强制指定审计深度档（默认按项目特征自适应）
   --run-specs 执行 gates/ 下 *.spec.sh 负样本自检（opt-in；默认不执行仓库脚本）
-  --json      固定词表单行 JSON（接受面：audit / status / observe status|audit / upgrade adopt（W0 空桩）；其余命令拒绝）
+  --json      固定词表单行 JSON（接受面：audit / status / observe status|audit / upgrade adopt；其余命令拒绝）
               人类报告改走 stderr，stdout 只留一行 JSON；exit 字段 == 真实退出码
   --expires YYYY-MM-DD  'ponygo upgrade adopt' 专用：存量基线到期日（缺省 = 生成日 + 90 天；上限 365 天）
   --repair-skeleton  ponygo init 专用：按 UPGRADE_UNIVERSE 十七文件只补缺失骨架文件
@@ -10708,7 +10737,8 @@ while [ $# -gt 0 ]; do
       ;;
     adopt)
       # U6：`upgrade adopt` 的**位置模式**（与 apply 同款先例；命令面仍 7 词、零新增行为开关）。
-      # 它是写路径（冻结存量违例进基线），W0 只落空桩；语义见契约 .dev-team/contract-w0-u6-u8.md §1.1。
+      # 它是写路径（冻结存量违例进基线）：违例来源 = verify-note.sh --json，本命令只做集合运算与
+      # 原子落盘；语义见契约 .dev-team/contract-w0-u6-u8.md §1.1，实现见 cmd_upgrade_adopt。
       if [ "${CMD:-}" = "upgrade" ]; then
         # 位置模式只能有一个：'upgrade apply adopt' 不得在 apply 之后悄悄变成写基线
         if [ -n "${UPGRADE_SUB:-}" ] && [ "${UPGRADE_SUB}" != "adopt" ]; then
