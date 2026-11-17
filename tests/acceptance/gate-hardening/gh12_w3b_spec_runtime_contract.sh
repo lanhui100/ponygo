@@ -10,7 +10,7 @@ for s in $SPECS; do
 done
 
 # 本仓：5 个 spec 都有计数 → 无 legacy 告警，整体仍绿
-(cd "$ROOT" && bash ponygo audit --run-specs > /tmp/gh12_self.$$ 2>&1); echo $? > /tmp/gh12_rc.$$
+(cd "$ROOT" && bash "$CLI_BIN" audit --run-specs > /tmp/gh12_self.$$ 2>&1); echo $? > /tmp/gh12_rc.$$
 assert_zero "T-U4-2 本仓 audit --run-specs exit 0" "$(cat /tmp/gh12_rc.$$)"
 assert_contains "T-U4-2b 仍打「全部自检通过」" "$(cat /tmp/gh12_self.$$)" "全部自检通过"
 assert_not_contains "T-U4-2c 5 个 spec 都有计数行 → 无 legacy 告警" "$(cat /tmp/gh12_self.$$)" "legacy spec"
@@ -32,8 +32,8 @@ exit 0
 S
 chmod +x "$TA/.meta/gates/fake-zero.sh" "$TA/.meta/gates/fake-zero.spec.sh"
 TA0=$(new_case); make_gov_repo "$TA0" 2
-(cd "$TA0" && bash ponygo audit --run-specs > /tmp/gh12_ctl.$$ 2>&1); echo $? > /tmp/gh12_ctlrc.$$
-(cd "$TA" && bash ponygo audit --run-specs > /tmp/gh12_a.$$ 2>&1); echo $? > /tmp/gh12_arc.$$
+(cd "$TA0" && bash "$CLI_BIN" audit --run-specs > /tmp/gh12_ctl.$$ 2>&1); echo $? > /tmp/gh12_ctlrc.$$
+(cd "$TA" && bash "$CLI_BIN" audit --run-specs > /tmp/gh12_a.$$ 2>&1); echo $? > /tmp/gh12_arc.$$
 assert_nonzero "T-U4-3 自报 rejects=0 的 spec → audit --run-specs 非零" "$(cat /tmp/gh12_arc.$$)"
 assert_not_contains "T-U4-3a 对照组（无该 spec）不出现 rejects=0 判词" "$(cat /tmp/gh12_ctl.$$)" "rejects=0"
 assert_contains "T-U4-3b 文案点名 rejects=0 且点名该 spec" "$(cat /tmp/gh12_a.$$)" "fake-zero.spec.sh 自报 rejects=0"
@@ -58,8 +58,8 @@ exit 0
 S
 chmod +x "$TB/.meta/gates/fake-legacy.sh" "$TB/.meta/gates/fake-legacy.spec.sh"
 TB0=$(new_case); make_gov_repo "$TB0" 2
-(cd "$TB0" && bash ponygo audit --run-specs >/dev/null 2>&1); RB0=$?
-(cd "$TB" && bash ponygo audit --run-specs > /tmp/gh12_b.$$ 2>&1); RB1=$?
+(cd "$TB0" && bash "$CLI_BIN" audit --run-specs >/dev/null 2>&1); RB0=$?
+(cd "$TB" && bash "$CLI_BIN" audit --run-specs > /tmp/gh12_b.$$ 2>&1); RB1=$?
 assert_eq "T-U4-4 legacy spec 不改变退出码（与对照组一致）" "$RB0" "$RB1"
 assert_contains "T-U4-4b 逐 spec 打出 legacy 告警并点名该 spec" "$(cat /tmp/gh12_b.$$)" "fake-legacy.spec.sh 未提供 ##SPEC"
 assert_contains "T-U4-4c 告警写明 v3 起转硬" "$(cat /tmp/gh12_b.$$)" "v3"
