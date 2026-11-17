@@ -53,6 +53,51 @@ assert_nonzero "T-U3-3 简化 note 缺复活条件 → A1 非零（真源 1.11�
 assert_zero "T-U3-4 A2 负样本自检 exit 0（新增删除用例后仍自洽）" "$(cat /tmp/gh9_a2.$$)"
 rm -f /tmp/gh9_a2.$$
 
+# ---------- 审核 BLOCKING/ADVISORY 的机器看守（W2a 对抗审核 2026-11-17）----------
+# T-U3-5：生命周期迁移（proposed → implemented）被 git 表示成 D+A 时不得误判为「删除」
+T6=$(new_case)
+make_gov_repo "$T6" 1
+mkdir -p "$T6/.agents/notes/proposed/architecture"
+printf '# 迁移中的提案\n\nStatus: proposed\n\n## Problem\n\np\n\n## Proposal\n\npp\n\n## Alternatives considered\n\n- a\n\n## Acceptance criteria\n\nac\n\n## Risks\n\nr\n' > "$T6/.agents/notes/proposed/architecture/2026-02-01-migrate-me.md"
+git_base "$T6"
+git -C "$T6" rm -q .agents/notes/proposed/architecture/2026-02-01-migrate-me.md >/dev/null 2>&1
+mkdir -p "$T6/.agents/notes/implemented/architecture"
+printf '# 迁移后的决策\n\nStatus: implemented\n\n## Decision\n\nd\n\n## Alternatives considered\n\n- a\n' > "$T6/.agents/notes/implemented/architecture/2026-02-01-migrate-me.md"
+git -C "$T6" add -A >/dev/null 2>&1
+(cd "$T6" && bash .meta/gates/adr-verify.sh > "$T6/.o6" 2>&1); echo $? > "$T6/.rc6"
+assert_zero "T-U3-5 生命周期迁移（同 basename 的 D+A）不得被判成删除决策记录" "$(cat "$T6/.rc6")"
+
+# T-U3-6：只删 *.zh.md 译文（母语版仍在）→ 与 1.7/1.10/1.11 的 zh 豁免同口径，不要求入册
+T7=$(new_case)
+make_gov_repo "$T7" 1
+printf '# 译文\n\nStatus: implemented\n\n## Decision\n\nd\n\n## Alternatives considered\n\n- a\n' > "$T7/.agents/notes/implemented/architecture/2026-01-01-fixture.zh.md"
+git_base "$T7"
+git -C "$T7" rm -q .agents/notes/implemented/architecture/2026-01-01-fixture.zh.md >/dev/null 2>&1
+(cd "$T7" && bash .meta/gates/adr-verify.sh > "$T7/.o7" 2>&1); echo $? > "$T7/.rc7"
+assert_zero "T-U3-6 只删 *.zh.md 译文 → A1 放行（zh 随母语版同批补齐，不独立判）" "$(cat "$T7/.rc7")"
+
+# T-U3-7：简化 note 必须是真 note——README.md 不能充当入册载体
+T8=$(new_case)
+make_gov_repo "$T8" 1
+git_base "$T8"
+git -C "$T8" rm -q .agents/notes/implemented/architecture/2026-01-01-fixture.md >/dev/null 2>&1
+mkdir -p "$T8/.agents/notes/implemented/simplification"
+printf '# simplification 目录说明\n\n本目录放简化记录。\n' > "$T8/.agents/notes/implemented/simplification/README.md"
+git -C "$T8" add -A >/dev/null 2>&1
+(cd "$T8" && bash .meta/gates/adr-verify.sh > "$T8/.o8" 2>&1); echo $? > "$T8/.rc8"
+assert_nonzero "T-U3-7 仅塞 simplification/README.md → A1 仍非零（README 不是决策记录）" "$(cat "$T8/.rc8")"
+
+# T-U3-8：简化 note 未提及被删路径 → 放行但打可复核 WARN（不做语义硬判）
+T9=$(new_case)
+make_gov_repo "$T9" 1
+git_base "$T9"
+git -C "$T9" rm -q .agents/notes/implemented/architecture/2026-01-01-fixture.md >/dev/null 2>&1
+write_simpl_note "$T9"
+git -C "$T9" add -A >/dev/null 2>&1
+(cd "$T9" && bash .meta/gates/adr-verify.sh > "$T9/.o9" 2>&1); echo $? > "$T9/.rc9"
+assert_zero "T-U3-8 简化 note 存在 → A1 放行（语义关联靠 review）" "$(cat "$T9/.rc9")"
+assert_contains "T-U3-8b 未提及被删路径时打可复核 WARN" "$(cat "$T9/.o9")" "建议复核"
+
 # ============================================================
 # U5：结论行诚实化（通过 → 已判定部分通过）
 # ============================================================
