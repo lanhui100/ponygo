@@ -24,7 +24,9 @@ disable-model-invocation: true
 
 - **文档分层漂移全量（L2 doc-sync 门）**：tier 放置语义 / slop 清单逐项 / 词数预算——本技能查"家是否存在且自动加载"（0.5/1.9/2.5），不查"内容是否放对家"（doc-sync 门，靠 review）；
 - **methodology 界外项**：供应链安全（audit/SBOM/许可证）、可观测性（遥测/告警/oncall）、发布与版本治理、开发环境可复现、API 契约演进治理——这些不在 ponygo 门禁语料内，需另行专项；
-- **语义真实性终审**：本技能对语义判断只列疑点 + 附原文，结论归用户（P6 形意分离）。
+- **语义真实性终审**：本技能对语义判断只列疑点 + 附原文，结论归用户（P6 形意分离）；
+- **仓库卫生的完整面**：文档分层语义、构建产物一致性、依赖供应链、临时产物的语义分类与清理策略——
+  见框架仓 `audit/hygiene-design.md` §4（本技能只跑三条粗筛与记录核对）。
 
 ## 步骤
 
@@ -51,11 +53,11 @@ disable-model-invocation: true
      - **文档与代码同提交吗？**（dsh same-commit 规则）`git log` 对照：改行为/契约的提交是否带了对应文档更新？文档家是不是空壳（有文件无内容/无索引）？
      - **新鲜度抽查（v2.1）**：取近 5 个功能提交，逐个对照有无对应文档更新（计数排除 `.agents/notes/`——ADR 不算用户文档更新）；用户可见行为（新命令/新端点/新配置项/新面板）必须在 README 或包 README 可寻，否则记"新鲜度欠账"。
      - 分层激活了吗？`.meta/docs-tier/README.md` 是模板态还是已激活清单？（判据 2.5）
-   - **卫生面（体检 + 设计两步，指引不在本技能内）**：按 `audit/hygiene-design.md` 走——
-     ①**体检**：逐项跑其 §1 的锚定命令，产出事实清单（不评判）；②**设计**：按 §2 的 level 映射选定
-     "机械门 / 实例门+负样本 / 靠 review / 明确不做"，并核对 §3 的卫生基线记录是否存在且四节齐
-     （L2 升级与 `upgrade adopt` 之前必须核对；内容真实性靠 review）。粗筛三条仍可先跑：
-     游离过程文档？`.gitignore/.rgignore` 有效性？构建产物入版本库？
+   - **卫生面（三条粗筛 + 引用完整程序）**：先跑粗筛——游离过程文档？`.gitignore/.rgignore` 有效性？
+     构建产物入版本库？完整程序（12 项体检面 + 设计菜单 + 门/spec 骨架 + 交付物骨架）在框架仓：
+     <https://github.com/lanhui100/ponygo/blob/main/audit/hygiene-design.md>（`audit/` 不随 `init` 播种，
+     **实例侧没有该文件，别写成相对路径**）。若该仓有 `hygiene-baseline` 决策记录（`.agents/notes/*/process/`），
+     核对"四节齐 + ADR 骨架合规"；**这是 review 核对项，不产生退出码**（不接 `status`、不接 `upgrade adopt`）。
    - **负空间面（语义 + 初筛机械）**：语料是否开始腐烂——
      - 初筛：`find .agents/notes/implemented -name '*.md' -mtime +180`（半年未动的 implemented note 清单，仅作候选，不作结论）；
      - supersession 检查：近 90 天新增的决策是否覆盖了旧决策却未处理旧条（`git log --since='90 days ago' --name-only .agents/notes/` 对照）；

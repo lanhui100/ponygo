@@ -35,6 +35,31 @@ Status: implemented
 4. **本仓 dogfood 体检一次**（记录在本文 §Consequences 下方）：验证清单可执行、并暴露 HY-12 的口径问题
    （单文件源码/native 大文件会被误报），据此把 HY-12 收窄为"大二进制/非源码文件"。
 
+## 两路独立审核（2026-11-18，opencode / antigravity，互不可见）
+
+两路均给 **FAIL**（同一份审阅任务、同一提交 `a2a56e3`），合并去重后 **6 条 BLOCKING + 7 条 ADVISORY**，
+全部已核对并修复，逐条如下（两路独立命中同一问题的，标"共同"）：
+
+| # | 严重度 | 问题（合并后） | 来源 | 修复 |
+|---|---|---|---|---|
+| 1 | BLOCKING | §2.2 spec 骨架是**假绿**：夹具从不拷入被测门 → `bash` 127 被当作"拒绝"；`REJECTS` 先加后判；无正控制 | 共同 | 骨架内 `cp "$GATE"`、`REJECTS` 按真实 `$?` 累加、加正控制；用"恒拒门"做变异测试（正控制必红，实测 rc=1） |
+| 2 | BLOCKING | §1 表格命令含字面 `\\.` → HY-3 **恒假**、HY-5 **恒真**（都标"机械"） | 共同 | 改单反斜杠；HY-5 用 `grep -lF`；表前写明"`\|` 是表格转义，复制时还原 `\|`"；本仓实跑：HY-3 exit 0、HY-5 = 0 |
+| 3 | BLOCKING | `governance-review` 随 `init` 进入实例，却以**实例不存在的相对路径**引用本页（`audit/` 不播种）→ 悬空引用 | 共同 | 技能改为**框架仓 URL** 引用，并明写"实例侧没有该文件"；本页新增「在场范围」段 |
+| 4 | BLOCKING | 骨架 spec 代码里没有代码位置的 `exit/return [1-9]` → 照抄即撞本仓 2.3 静态判据 | opencode | 末尾 `[ "$FAIL_N" -eq 0 ] \|\| exit 1` + `exit 0` |
+| 5 | BLOCKING | §3 记录"必含四节"与 ADR 门冲突（缺 `## Decision` / `## Alternatives considered` 会被 1.8/1.10 拒） | opencode | §3 改为**标准 ADR 骨架**，四节作为 `## Decision` 子节；给出可过门的完整模板 |
+| 6 | BLOCKING | "L2 升级与 `upgrade adopt` 之前必须有"是**虚构强制前置**：ladder 无此项、`adopt` 与卫生无关 | antigravity | 全文降级为"**review 层核对项**，不产生退出码、不接 `status`/`adopt`"；`checklists/audit.md` 同批改 |
+| 7 | ADVISORY | `audit/checklist.md` 新增指针漏行首 `>`，切断口径声明块 | 共同 | 三行补 `>` |
+| 8 | ADVISORY | HY-5 与 `docs/AGENTS.md:40` / `scratch-hygiene.sh` 的 E3 **口径不一致**（宽 vs 窄） | opencode | HY-5 收窄到 home 的 `release.yml`/`install.sh`，其余 workflow/scripts 标"宽筛属 review" |
+| 9 | ADVISORY | dogfood 表静默漏 HY-1/HY-10（违反本页"不适用要写进记录"） | 共同 | 补两行；并注明 HY-3/HY-5 需按修正后命令复跑 |
+| 10 | ADVISORY | §2.1 门骨架注释声称 4 项判据、实现只有 3 项；③ 在路径全缺时"恒真" | opencode | 注释改"三项判据"；③ 无可检索面时打印「不适用」而非静默通过 |
+| 11 | ADVISORY | §4"报告必须原文复述"在 `governance-review` 的「本审查不覆盖」清单里无载体 | opencode | 技能的不覆盖清单登记本页 §4 |
+| 12 | ADVISORY | 成果物路径缺 `{class}` 轴 → 照抄触发判据 1.3/1.4 | antigravity | 路径补 `.../process/yyyy-mm-dd-hygiene-baseline.md` |
+| 13 | ADVISORY | "不设门"与"可机械核对"自相矛盾（同一句自述可判） | opencode | 与 #6 合并处理：**明确标 review 核对项**，不伪装成门、也不留"必须有"的硬承诺 |
+
+**未采纳**：无（13 条全部处理；其中 #13 与 #6 合并为同一修复）。
+**审核方法论收益**：两路独立审核在 #3/#4/#5/#12 上分别只命中一路——单路审核会漏；且 #1/#2 的"命令跑不出结论"
+是本轮最有价值的发现（指引页自己的锚定命令必须先对本仓实跑）。
+
 ## Alternatives considered
 
 - **把 DSH 的 `clean.ts` 并入 `scratch-hygiene.sh`（或新增清洁器）**：否决——它的语义绑 TS workspace 产物
@@ -68,6 +93,7 @@ Status: implemented
 
 | ID | 结果 |
 |---|---|
+| HY-1 | `ls -d .scratch` 在场；`.scratch/` 约定锚点在 `docs/AGENTS.md`（临时产物统一下沉）✓ |
 | HY-2 | `git ls-files .scratch` = 0 ✓ |
 | HY-3 | `.gitignore` 声明 `.scratch/` ✓ |
 | HY-4 | 构建产物入库 = 0 ✓ |
@@ -77,4 +103,8 @@ Status: implemented
 | HY-8 | 根目录仅 4 个契约 md（AGENTS/CLAUDE/README/maturity-ladder），无游离过程文档 ✓ |
 | HY-9 | 无生成物文件（模板双写在 `ponygo` 单文件内，不产文件）→ **不适用** |
 | HY-11 | **不适用**：零依赖，无 lockfile |
+| HY-10 | `find .agents/notes/implemented -mtime +180` 有历史候选，属 L3 语义判断 → 记为**候选，不作结论** |
 | HY-12 | 唯一 >512KB 跟踪文件是 `ponygo` 本体（单文件 CLI = 有意的源码），**经点名排除**；无大二进制 ✓ |
+
+> 表中 HY-3 / HY-5 的 ✓ 是**按审查修正后的命令**复跑所得（修正前表格里的 `\\.` 会分别造成恒假/恒真）；
+> 命令以 `audit/hygiene-design.md` §1 现行正文为准。
