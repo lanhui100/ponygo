@@ -36,7 +36,11 @@ jobs:
   # 预算依据：CORE-27 在 Linux 实测 155s × Windows 慢 10.3x + 装机 ≈ 28min → 60min 留余量。
   windows-core:
     runs-on: windows-latest
-    timeout-minutes: 60
+    # 60 → 90（2026-11-18，B026）：CORE 层含折叠的 gate-hardening（s90，gh1–gh14），
+    # 在 Windows 上 s90 单项 ~40 分钟、s90 之前 ~32 分钟；60 分钟会被 job 级 timeout 取消（实测 cancelled）。
+    # 目标：后续把 s90 的 Windows 成本降下来再把预算收回 60；理由与时间线见
+    # .agents/notes/implemented/process/2026-11-18-windows-core-budget.md
+    timeout-minutes: 90
     env:
       PONYGO_TEST_LAYER: core
     steps:

@@ -1220,10 +1220,12 @@ try:
             ok("GH6/D2 windows-core env: PONYGO_TEST_LAYER=core（core 层 27 场景）")
         else:
             fail("GH6/D2 windows-core env: PONYGO_TEST_LAYER=core", repr(layer))
-        if extra(core, "timeout-minutes") == 60:
-            ok("GH6/D2 windows-core timeout-minutes: 60（rev3 预算）")
+        # 2026-11-18（B026）：60 → 90——CORE 层含 s90 折叠套件，Windows 实测 60 分钟被 job timeout 取消；
+        # 预算调整的裁决见 .agents/notes/implemented/process/2026-11-18-windows-core-budget.md
+        if extra(core, "timeout-minutes") == 90:
+            ok("GH6/D2 windows-core timeout-minutes: 90（rev4 预算）")
         else:
-            fail("GH6/D2 windows-core timeout-minutes: 60（rev3 预算）", repr(core.get("timeout-minutes")))
+            fail("GH6/D2 windows-core timeout-minutes: 90（rev4 预算）", repr(core.get("timeout-minutes")))
         runs = runs_of(core)
         if any("bash tests/run.sh" in r for r in runs):
             ok("GH6/D2 windows-core 跑 `bash tests/run.sh`")
