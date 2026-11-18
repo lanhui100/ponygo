@@ -5,7 +5,7 @@
 # 契约（.meta/gates/README.md「负样本 spec 的两种形态」）：
 #   - 自包含：从自身路径解析仓库根，不依赖调用者 cwd；
 #   - 只读仓库：样本一律建在 `mktemp -d` 临时目录，退出时清理；不改仓库任何文件；
-#   - 秒级：自包裹上限 = `PONYGO_GATE_SPEC_TIMEOUT`（由 ponygo 派生下传，未设默认 30s），
+#   - 秒级：自包裹上限 = `PONYGO_GATE_SPEC_TIMEOUT`（由 ponygo 派生下传，未设默认 90s），
 #     KILL 兜底 `-k 5`；无 timeout 或 ponygo 报告守卫不可用（`PONYGO_SPEC_NO_GUARD=1`）时不加包裹；
 #   - `PONYGO_IN_SPEC` 仅为旧环境信息，不作为本 spec 的跳过开关；
 #   - exit 0 = 自检通过（"门确实会拒绝非法样本，且会放行合法样本"）。
@@ -18,9 +18,9 @@ set -u
 
 SPEC=adr-verify.spec
 
-# 自包裹上限：PONYGO_GATE_SPEC_TIMEOUT（由 ponygo 派生下传，未设默认 30s）；KILL 兜底恒 5s。
+# 自包裹上限：PONYGO_GATE_SPEC_TIMEOUT（由 ponygo 派生下传，未设默认 90s）；KILL 兜底恒 5s。
 # spec 内**不做平台判定**（平台真值只留在 ponygo 一处），只读 env + 校验格式。
-GT=${PONYGO_GATE_SPEC_TIMEOUT:-30}
+GT=${PONYGO_GATE_SPEC_TIMEOUT:-90}
 case "$GT" in
   *[!0-9]*|0*)
     printf '[%s] FAIL 非法 PONYGO_GATE_SPEC_TIMEOUT=%s（须为 1..86400 的正整数秒）\n' "$SPEC" "$GT" >&2

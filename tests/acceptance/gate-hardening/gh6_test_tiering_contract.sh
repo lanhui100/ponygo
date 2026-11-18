@@ -1054,13 +1054,14 @@ assert_contains "GH6/C14 spec 侧越界值在 stderr 点名变量" "$GSPE_TXT" "
 # ============================================================
 # 契约 C13（rev4 收窄闭包）：3 个出厂 spec 自包裹**只读** PONYGO_GATE_SPEC_TIMEOUT
 #   —— 平台判定只允许存在于 ponygo 一处（spec 内不得再做 OSTYPE/uname 探测）；
-#      未设默认 30s、KILL 兜底恒 5s（timeout -k 5）、非法值 exit 2；repo↔heredoc 逐字节一致。
+#      未设默认 90s、KILL 兜底恒 5s（timeout -k 5）、非法值 exit 2；repo↔heredoc 逐字节一致。
+#   （2026-11-18 决策：默认 30 → 90；理由见 .agents/notes/implemented/testing/2026-11-18-spec-default-timeout.md）
 # ============================================================
 for spec in adr-verify scratch-hygiene archive-verify; do
   SPEC_F="$ROOT/.meta/gates/$spec.spec.sh"
   assert_file "GH6/C13 出厂 spec 存在：$spec.spec.sh" "$SPEC_F"
   assert_file_matches "GH6/C13($spec) 自包裹只读 PONYGO_GATE_SPEC_TIMEOUT（env 单一来源）" "$SPEC_F" 'PONYGO_GATE_SPEC_TIMEOUT'
-  assert_file_matches "GH6/C13($spec) 未设时默认 30s" "$SPEC_F" '(PONYGO_GATE_SPEC_TIMEOUT:?-?[[:space:]]*30|=30([^0-9]|$))'
+  assert_file_matches "GH6/C13($spec) 未设时默认 90s" "$SPEC_F" '(PONYGO_GATE_SPEC_TIMEOUT:?-?[[:space:]]*90|=90([^0-9]|$))'
   assert_file_matches "GH6/C13($spec) KILL 兜底仍为字面 5s（timeout -k 5）" "$SPEC_F" 'timeout -k 5'
   assert_file_matches "GH6/C13($spec) 非法值报错含变量名" "$SPEC_F" '非法 PONYGO_GATE_SPEC_TIMEOUT'
   assert_file_matches "GH6/C13($spec) 非法值 exit 2（不静默回落默认）" "$SPEC_F" 'exit 2'

@@ -345,7 +345,10 @@ bash .meta/gates/<name>.spec.sh   # CI / pre-push 层的等价写法
 - **秒级**：有 `timeout` 时施加**分档软超时 + KILL 兜底 5s**（KILL 窗口恒 5s，不随预算/平台变）：
   **平台真值只在 `ponygo` 一处**（`PONYGO_SPEC_TIMEOUT` 优先，未设时 Windows 180 / 其他 90；值域 1..86400），
   并在结论区打印 `spec 预算=<N>s（来源：…）`；同一派生值经 `PONYGO_GATE_SPEC_TIMEOUT` **下传**给
-  spec 的自包裹上限（`GT=${PONYGO_GATE_SPEC_TIMEOUT:-30}`，**spec 内零平台判定**；非法/越界（1..86400）→ `exit 2`）；
+  spec 的自包裹上限（`GT=${PONYGO_GATE_SPEC_TIMEOUT:-90}`，**spec 内零平台判定**；非法/越界（1..86400）→ `exit 2`；
+  默认 90s 的理由：Windows Git Bash 的进程启动开销使 A2 这类含数十条 git 断言的自检超过 30s——内建 spec
+  在"未设 env"的直接调用（测试/人工）下不得被自身默认值误杀；决策见
+  `.agents/notes/implemented/testing/2026-11-18-spec-default-timeout.md`）；
   调用侧判定护栏不可用时置 `PONYGO_SPEC_NO_GUARD=1`，spec 也不自包裹（端到端如实降级，不假红）；
   无视 TERM 的挂死 spec 会被强杀，不会拖死体检；
 - **exit 0 = 自检通过**（"门确实会拒绝非法样本"）；非零 → 报 FAIL 并回显该 spec 输出尾部；

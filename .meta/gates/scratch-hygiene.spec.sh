@@ -12,9 +12,9 @@ SPEC=scratch-hygiene.spec
 
 # `PONYGO_IN_SPEC` 是旧环境信息，不是自我跳过开关；本 spec 恒完整执行。
 
-# 自包裹上限：PONYGO_GATE_SPEC_TIMEOUT（由 ponygo 派生下传，未设默认 30s）；KILL 兜底恒 5s。
+# 自包裹上限：PONYGO_GATE_SPEC_TIMEOUT（由 ponygo 派生下传，未设默认 90s）；KILL 兜底恒 5s。
 # spec 内**不做平台判定**（平台真值只留在 ponygo 一处），只读 env + 校验格式。
-GT=${PONYGO_GATE_SPEC_TIMEOUT:-30}
+GT=${PONYGO_GATE_SPEC_TIMEOUT:-90}
 case "$GT" in
   *[!0-9]*|0*)
     printf '[%s] FAIL 非法 PONYGO_GATE_SPEC_TIMEOUT=%s（须为 1..86400 的正整数秒）\n' "$SPEC" "$GT" >&2

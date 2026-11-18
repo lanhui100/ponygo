@@ -5,7 +5,7 @@
 # 契约（与 .meta/gates/README.md「负样本 spec 的两种形态」一致）：
 #   - 自包含：从自身路径解析仓库根，不依赖调用者 cwd；
 #   - 只读仓库：样本一律建在 mktemp -d 夹具目录，退出时清理；
-#   - 秒级：有 timeout 时施加 30s 上限；
+#   - 秒级：有 timeout 时施加 90s 上限；
 #   - exit 0 = 门禁在非法样本上拒绝、在合法样本上放行（自检通过）。
 #
 # 断言面：
@@ -29,9 +29,9 @@ set -u
 
 SPEC=backlog-gate.spec
 
-# 自包裹上限：PONYGO_GATE_SPEC_TIMEOUT（由 ponygo 派生下传，未设默认 30s）；KILL 兜底恒 5s。
+# 自包裹上限：PONYGO_GATE_SPEC_TIMEOUT（由 ponygo 派生下传，未设默认 90s）；KILL 兜底恒 5s。
 # spec 内**不做平台判定**（平台真值只留在 ponygo 一处），只读 env + 校验格式。
-GT=${PONYGO_GATE_SPEC_TIMEOUT:-30}
+GT=${PONYGO_GATE_SPEC_TIMEOUT:-90}
 case "$GT" in
   *[!0-9]*|0*)
     printf '[%s] FAIL 非法 PONYGO_GATE_SPEC_TIMEOUT=%s（须为 1..86400 的正整数秒）\n' "$SPEC" "$GT" >&2
