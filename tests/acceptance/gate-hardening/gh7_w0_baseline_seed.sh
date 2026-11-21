@@ -281,4 +281,63 @@ vnote "$T4"
 assert_nonzero "T-INV-4 无 --json 时反例仍 exit 1（默认面不变）" "$R_RC"
 assert_contains "T-INV-4b 无 --json 时失败横幅逐字不变" "$R_OUT" "verify-note: 未通过（见上方 FAIL 项；逐项修复后重跑）"
 
+# ============================================================
+# B023（W4）：存量基线进入 CLI 判据面——status 的 1.8 对已 adopt 的实例不再恒红
+# 契约源：.dev-team/contract-w4-b023.md §2（T-B023-*）
+# ============================================================
+mk18() { # <dir>：合法治理仓 + 1 条缺 ## Decision 的 implemented 记录（1.8 违例）
+  local dir="$1"
+  make_gov_repo "$dir" 1 || return 1
+  mkdir -p "$dir/.agents/notes/implemented/process"
+  printf '# legacy\n\nStatus: implemented\n\n## Proposal\n\np\n' \
+    > "$dir/.agents/notes/implemented/process/2026-03-01-legacy18.md"
+}
+
+T7=$(new_case)
+mk18 "$T7"
+run_cli "$T7" status
+assert_nonzero "T-B023-1 缺 ## Decision 的 implemented 记录 → status 非零" "$R_RC"
+assert_contains "T-B023-1b FAIL 列表点名判据 1.8" "$R_OUT" "1.8"
+
+run_cli "$T7" upgrade adopt
+assert_zero "T-B023-2 前置：adopt 成功" "$R_RC"
+run_cli "$T7" status
+assert_zero "T-B023-2b adopt 后 status exit 0（存量 1.8 被豁免）" "$R_RC"
+assert_contains "T-B023-2c 输出声明「存量基线覆盖」" "$R_OUT" "存量基线覆盖"
+assert_not_contains "T-B023-2d 不再出现 1.8 FAIL 行" "$R_OUT" "1.8 implemented 缺"
+
+# 新增一条未入基线的 1.8 违例 → 只点名新文件
+printf '# new\n\nStatus: implemented\n\n## Proposal\n\np\n' \
+  > "$T7/.agents/notes/implemented/process/2026-03-02-new18.md"
+run_cli "$T7" status
+assert_nonzero "T-B023-3 基线外新增 1.8 违例仍被拦（exit 非零）" "$R_RC"
+assert_contains "T-B023-3b FAIL 点名新文件" "$R_OUT" "2026-03-02-new18.md"
+assert_not_contains "T-B023-3c 已豁免的老文件不再出现在 FAIL 里" "$R_OUT" "2026-03-01-legacy18.md"
+
+# 过期基线 → 按全量判
+python3 - "$T7/$BASE_REL" <<'PYEOF'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p, encoding="utf-8"))
+d["expires_at"] = "2020-01-01"
+json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+PYEOF
+run_cli "$T7" status
+assert_nonzero "T-B023-4 基线过期 → status 非零（按全量判）" "$R_RC"
+assert_contains "T-B023-4b 输出声明基线已过期" "$R_OUT" "存量基线已过期"
+
+# JSON 面：豁免态 exit/fails/miss_ids 一致
+T8=$(new_case)
+mk18 "$T8"
+run_cli "$T8" upgrade adopt
+run_json "$T8" status --json
+assert_zero "T-B023-5 豁免态 status --json exit 0" "$R_RC"
+json_assert "T-B023-5b JSON 的 fails 不含 1.8、exit==0" "$R_OUT" '
+fail = []
+ladder = d.get("ladder") or {}
+if ladder.get("fails"): fail.append("fails=%r" % ladder.get("fails"))
+if "1.8" in (d.get("miss_ids") or []): fail.append("miss_ids 含 1.8")
+if d.get("exit") != 0: fail.append("exit=%r" % d.get("exit"))
+'
+
 finish
