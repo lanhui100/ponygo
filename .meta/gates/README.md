@@ -58,6 +58,14 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
   规范化明细)`——同一文件同一判据**明细变了就是新违例**，冻结不等于给该判据开永久后门。基线到期日
   硬上限 365 天；过期后 `verify-note.sh` 把全部违例重新计入（`status`/`audit` 的摘要行会显示条数与到期日）。
   基线过滤长在判定真源 `verify-note.sh` 里，故 A1（暂存区门）与 A4（全树门）**字节零改动**即获得棘轮语义。
+  **CLI 判据面也读它（B023）**：`ponygo status` / `audit` 的 `verify_ladder` 自己复刻了 1.1–1.9，
+  早先不读基线 → ponylm 实机（48 条存量冻结、门禁面全绿）`status` 仍 `exit 1`，判据面与门禁面结论相反。
+  现在 1.8 段按基线做**逐文件**豁免（条件：基线存在、`expires_at` 可解析且未过期；过期则按全量判定并打
+  `ponygo: WARN 存量基线已过期（…）→ 判据 1.8 按全量判定；跑 'ponygo upgrade adopt' 重签`）。
+  **粒度诚实条款**：CLI 面按 **(file, criterion)** 豁免，比真源的 **(criterion, file, 明细) 指纹**更粗——
+  同一文件"换了一种 1.8 违例"在 CLI 摘要视图里会被一并豁免；真源（A1/A4 与 CI 全树门）仍按指纹拒绝，
+  且 `status` 会打一行 `判据 1.8：N 条存量违例由存量基线覆盖（…）` 明示"这是被基线吃掉的，不是修好的"。
+  CLI 面**不替代**真源：假绿的风险留给真源兜底，别把 `status` 的绿当作"存量债已清"。
 - `.meta/.ponygo-seed`：`init`/`upgrade apply` 写入的「框架 commit + 十七骨架文件 sha256」。
   `upgrade --check` 用它把漂移分成 `stale`（实例仍是植入时字节）与 `modified`（实例侧被改）；
   缺失/损坏只降级为 `unknown` + WARN，**不改变退出码**（provenance 不是判定面，把它变成门会重演 upgrade cliff）。

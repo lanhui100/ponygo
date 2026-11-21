@@ -547,6 +547,14 @@ repo 模板文件与 `ponygo` 内 heredoc 双写，EOL 归一后逐字节一致�
   规范化明细)`——同一文件同一判据**明细变了就是新违例**，冻结不等于给该判据开永久后门。基线到期日
   硬上限 365 天；过期后 `verify-note.sh` 把全部违例重新计入（`status`/`audit` 的摘要行会显示条数与到期日）。
   基线过滤长在判定真源 `verify-note.sh` 里，故 A1（暂存区门）与 A4（全树门）**字节零改动**即获得棘轮语义。
+  **CLI 判据面也读它（B023）**：`ponygo status` / `audit` 的 `verify_ladder` 自己复刻了 1.1–1.9，
+  早先不读基线 → ponylm 实机（48 条存量冻结、门禁面全绿）`status` 仍 `exit 1`，判据面与门禁面结论相反。
+  现在 1.8 段按基线做**逐文件**豁免（条件：基线存在、`expires_at` 可解析且未过期；过期则按全量判定并打
+  `ponygo: WARN 存量基线已过期（…）→ 判据 1.8 按全量判定；跑 'ponygo upgrade adopt' 重签`）。
+  **粒度诚实条款**：CLI 面按 **(file, criterion)** 豁免，比真源的 **(criterion, file, 明细) 指纹**更粗——
+  同一文件"换了一种 1.8 违例"在 CLI 摘要视图里会被一并豁免；真源（A1/A4 与 CI 全树门）仍按指纹拒绝，
+  且 `status` 会打一行 `判据 1.8：N 条存量违例由存量基线覆盖（…）` 明示"这是被基线吃掉的，不是修好的"。
+  CLI 面**不替代**真源：假绿的风险留给真源兜底，别把 `status` 的绿当作"存量债已清"。
 - `.meta/.ponygo-seed`：`init`/`upgrade apply` 写入的「框架 commit + 十七骨架文件 sha256」。
   `upgrade --check` 用它把漂移分成 `stale`（实例仍是植入时字节）与 `modified`（实例侧被改）；
   缺失/损坏只降级为 `unknown` + WARN，**不改变退出码**（provenance 不是判定面，把它变成门会重演 upgrade cliff）。
@@ -3431,12 +3439,24 @@ verify_ladder() {
       # 围栏口径（Wave-2 §D2）：全部标题判定走 heading_outside_fence——**围栏内的标题不算在场**，
       # 否则把 `## Decision` 塞进示例代码块即可骗过影子（与真源同一实现口径）。
       # 与真源 verify-note.sh 同文案关键字：「缺 ## Decision」「提案时代标题」。
-      local n18=0 n18d=0 names18="" names18d=""
+      local n18=0 n18d=0 names18="" names18d=
+      # B023：存量基线进入判据面（**逐文件**豁免 criterion=1.8 的存量条目）。
+      # 只在基线可用（存在、未过期、expires_at 可解析）时生效；否则按全量判定并打一行 WARN。
+      # 粒度诚实：本命令按 (file, criterion) 豁免，比真源 verify-note.sh 的 (criterion,file,明细)
+      # 指纹更粗——同一文件换一种 1.8 违例在这里会被一并豁免，但 A1/A4 仍按指纹拒绝。
+      local bl_ok=0 bl_skip=0 bl_set=" " bl_rel18=""
+      if baseline_18_files; then bl_ok=1; bl_set="$BASELINE_18_SET"; fi
       while IFS= read -r -d '' f; do
         b="${f##*/}"
         [ "$b" = "README.md" ] || [ "$b" = "AGENTS.md" ] && continue
         rel="${f#"$DECISIONS_DIR"/}"
         lc="${rel%%/*}"
+        if [ "$bl_ok" = "1" ]; then
+          bl_rel18="$DECISIONS_DIR/$rel"
+          case "$bl_set" in
+            *" $bl_rel18 "*) bl_skip=$((bl_skip+1)); continue ;;
+          esac
+        fi
         case "$lc" in
           implemented)
             if ! heading_outside_fence "$f" '## Decision([[:space:]]|$)'; then
@@ -3455,6 +3475,10 @@ verify_ladder() {
         esac
       done < <(find "$DECISIONS_DIR" -type f -name '*.md' ! -name 'README.md' -print0 2>/dev/null)
       [ "$n18d" -eq 0 ] || vl_fail "1.8 implemented 缺 ## Decision（迁移即改写：现在时 Decision 必须在场，如：${names18d%;}）→ proposed→implemented 迁移时把 ## Proposal 改写为 ## Decision"
+      if [ "$bl_skip" -gt 0 ]; then
+        printf 'ponygo: WARN 判据 1.8：%s 条存量违例由存量基线覆盖（.meta/notes-baseline.json，到期 %s）——本命令按文件豁免，真源 verify-note.sh 仍按指纹校验（A1/A4）\n' \
+          "$bl_skip" "$BASELINE_18_EXPIRES" >&2
+      fi
       [ "$n18" -eq 0 ] || vl_fail "1.8 正文骨架与 lifecycle 不匹配（如：${names18%;}）→ proposed/rejected 用 ## Proposal（将来时），implemented 用现在时 ## Decision；implemented 含提案时代标题（英文或中文等价）即 FAIL"
       # 1.9 文档有家（v2.0）：docs/AGENTS.md 存在（文档标准的家）+ 根 AGENTS.md 含 docs/AGENTS.md 索引链
       # + 包/模块文档覆盖（每个包目录有 AGENTS.md 或 README.md，或列入 .meta/docs-tier/exemptions 豁免）
@@ -8880,6 +8904,50 @@ seed_classify() { # <仓库相对路径> <当前 EOL 归一 sha> <模板 EOL 归
   ss=$(seed_map_get "$rel")
   [ -n "$ss" ] || { printf 'unknown'; return 0; }
   if [ "$cur" = "$ss" ]; then printf 'stale'; else printf 'modified'; fi
+}
+
+# 存量基线的**判据面**读取（B023）：把 criterion=="1.8" 的条目 file 收成集合，
+# 供 verify_ladder 的 1.8 循环做**逐文件豁免**。为什么需要它：基线豁免原先只长在判定真源
+# verify-note.sh 里，而 CLI 的 verify_ladder 自己复刻了 1.1–1.9 却不读基线 → 同一实例
+# 「verify-note/A1/A4/ci-verify 全绿，status 却 exit 1」的相反结论（ponylm 实机 48 条存量冻结后复现）。
+# 三态：不存在 → 不豁免；expires_at 不可解析或已过期 → 不豁免 + 一行 WARN；可用 → 生效。
+# **粒度诚实条款**（写在这里也写进 .meta/gates/README.md）：CLI 面按 (file, criterion) 豁免，
+# 比真源的 (criterion, file, 明细) **指纹**更粗——同一文件"换了一种 1.8 违例"在 CLI 面会被一并豁免，
+# 但真源（A1/A4 及 CI 全树门）仍会按指纹拒绝。故 CLI 面只是摘要视图，不替代真源。
+# 零依赖解析：先去掉全部空白再匹配——同时容错紧凑 `{"file":"x","criterion":"1.8"}` 与
+# pretty-print `{"file": "x", "criterion": "1.8"}` 两种写法（不引入 jq/python）。
+BASELINE_18_SET=" "
+BASELINE_18_EXPIRES=""
+baseline_18_files() { # → 全局 BASELINE_18_SET（" p1 p2 "）/ BASELINE_18_EXPIRES；返回 0=可用豁免
+  local p="$META_DIR/notes-baseline.json" c="" exp="" objs="" obj f cr
+  BASELINE_18_SET=" "; BASELINE_18_EXPIRES=""
+  [ -f "$p" ] || return 1
+  c=$(tr -d ' \t\r\n' < "$p" 2>/dev/null) || c=""
+  [ -n "$c" ] || return 1
+  exp=$(printf '%s' "$c" | sed -e 's/.*"expires_at":"//' -e 's/","framework_ref".*//')
+  case "$exp" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+    *)  printf 'ponygo: WARN 存量基线已过期（expires_at=%s）→ 判据 1.8 按全量判定；跑 '\''ponygo upgrade adopt'\'' 重签\n' "${exp:-无法解析}" >&2
+        return 1 ;;
+  esac
+  if ! date -d "$exp" >/dev/null 2>&1; then
+    printf 'ponygo: WARN 存量基线已过期（expires_at=%s）→ 判据 1.8 按全量判定；跑 '\''ponygo upgrade adopt'\'' 重签\n' "$exp" >&2
+    return 1
+  fi
+  if [ "$exp" \< "$(date '+%Y-%m-%d')" ]; then
+    printf 'ponygo: WARN 存量基线已过期（expires_at=%s）→ 判据 1.8 按全量判定；跑 '\''ponygo upgrade adopt'\'' 重签\n' "$exp" >&2
+    return 1
+  fi
+  BASELINE_18_EXPIRES="$exp"
+  objs=$(printf '%s' "$c" | grep -oE '\{"file":"[^"]*","criterion":"1\.8","fingerprint":"[0-9a-f]{64}"\}')
+  while IFS= read -r obj; do
+    [ -n "$obj" ] || continue
+    f=$(printf '%s' "$obj" | sed -e 's/^{"file":"//' -e 's/","criterion":.*//')
+    cr=$(printf '%s' "$obj" | sed -e 's/.*","criterion":"//' -e 's/","fingerprint":.*//')
+    [ -n "$f" ] && [ "$cr" = "1.8" ] || continue
+    case "$BASELINE_18_SET" in *" $f "*) ;; *) BASELINE_18_SET="$BASELINE_18_SET$f " ;; esac
+  done <<< "$objs"
+  return 0
 }
 
 # 存量基线（U6 `upgrade adopt` 的产物 .meta/notes-baseline.json）的人类摘要片段。
