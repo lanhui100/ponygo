@@ -6036,12 +6036,34 @@ PONYGO_EOF
 #   ⑪ 隐藏目录（.agents/ .meta/ .github/ …）同样在检索面内——两条检索路径都必须命中
 #      （防「rg 默认跳过隐藏项 → 范围 . 时 .meta/ 与 .agents/ 整片不检索」的假绿回归）
 #
+# 自包裹（B025）：上限 = PONYGO_GATE_SPEC_TIMEOUT（由 ponygo 派生下传，未设默认 90s），KILL 兜底 -k 5；
+# 非法/越界（1..86400）→ exit 2；PONYGO_SPEC_NO_GUARD=1 或环境无 timeout 时不加包裹（如实降级，不假红）。
+# 文件末尾有对这段包裹**自身**的形状断言（读自身源码；断言串分段拼接 = 防「断言看见自己」的自指假护栏）。
+#
 # 用法：bash .meta/gates/no-residue.spec.sh
 # 退出码：0 = 全部样本符合预期；1 = 有样本不符预期（逐项 [FAIL]）。
 # 依赖：bash + coreutils/mktemp + grep（rg 可选——缺 rg 时 A8 走 grep 退化路径）。
 # 只读：只在 mktemp 目录里造样本，不写仓库任何文件。
 # ============================================================
 set -u
+
+# 自包裹上限：PONYGO_GATE_SPEC_TIMEOUT（由 ponygo 派生下传，未设默认 90s）；KILL 兜底恒 5s。
+# spec 内**不做平台判定**（平台真值只留在 ponygo 一处），只读 env + 校验格式。
+GT=${PONYGO_GATE_SPEC_TIMEOUT:-90}
+case "$GT" in
+  *[!0-9]*|0*)
+    printf 'no-residue.spec: FAIL 非法 PONYGO_GATE_SPEC_TIMEOUT=%s（须为 1..86400 的正整数秒）\n' "$GT" >&2
+    exit 2 ;;
+esac
+# 值域上界（1..86400）：超长整数会让 GNU timeout 接受并视为「不设上限」，而预算行照打 = 假护栏。
+if [ "${#GT}" -gt 5 ] || { [ "${#GT}" -eq 5 ] && [ "$GT" -gt 86400 ]; }; then
+  printf 'no-residue.spec: FAIL 非法 PONYGO_GATE_SPEC_TIMEOUT=%s（须为 1..86400 的正整数秒）\n' "$GT" >&2
+  exit 2
+fi
+if [ "${PONYGO_SPEC_SELFRUN:-0}" != "1" ] && [ "${PONYGO_SPEC_NO_GUARD:-0}" != "1" ] && command -v timeout >/dev/null 2>&1; then
+  export PONYGO_SPEC_SELFRUN=1
+  exec timeout -k 5 "$GT" bash "$0" "$@"
+fi
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd) || {
   printf 'no-residue.spec: 无法解析脚本目录\n' >&2
@@ -6272,6 +6294,26 @@ if [ -n "$D" ]; then
   assert_rc 0 "A9⑫ 被忽略目录清空后 → rg 路径放行（正控制）"
   run_gate_grep "$D"
   assert_rc 0 "A9⑫ 被忽略目录清空后 → grep 路径放行（正控制）"
+fi
+
+# ---------- 附：自包裹在场（形状断言，B025）----------
+# 为什么需要它：A9 长期缺自包裹——真挂死时只能拖到 CI job 的 timeout-minutes，日志里不点名。
+# 这里直接读**自身源码**断言包裹层未丢：删掉包裹层 → 本 spec 自己先红，而不是等下一次真挂死。
+# 断言串一律**分段拼接**：整串写出来就会被自身源码"看见"，删掉真包裹后断言依旧绿 = 自指假护栏。
+SELF_SRC=$(cat "$HERE/no-residue.spec.sh" 2>/dev/null || true)
+shape_self() { # <拼好的字面串> <描述>
+  if printf '%s\n' "$SELF_SRC" | grep -qF -- "$1"; then ok "$2"
+  else bad "$2（自身源码未见该包裹标志：$1 → 自包裹已失效）"; fi
+}
+if [ -n "$SELF_SRC" ]; then
+  shape_self 'GT=${PONYGO_GATE_SPEC_'"TIMEOUT"':-90}' \
+    "A9⑬ 自包裹读 PONYGO_GATE_SPEC_TIMEOUT（未设默认 90s）"
+  shape_self 'exec timeout -k '"5"' "$GT" bash "$0" "$@"' \
+    "A9⑬ 自包裹 exec 形态与 A2/A7 同款（KILL 兜底 timeout -k 5）"
+  shape_self 'PONYGO_SPEC_SEL'"FRUN" \
+    "A9⑬ 重入判据在场（SELFRUN 防无限自包裹）"
+else
+  bad "A9⑬ 读不到自身源码 $HERE/no-residue.spec.sh（形状断言无从判定 → fail-closed）"
 fi
 
 if [ "$FAILN" -ne 0 ]; then
@@ -10225,7 +10267,7 @@ observe_mount_hit() {
   if [ -d "$target" ]; then
     hits=$(grep -rIn --binary-files=without-match -F 'audit-diff' "$target" 2>/dev/null || true)
   else
-    hits=$(grep -In --binary-files=without-match -F 'audit-diff' "$target" 2>/dev/null || true)
+    hits=$(grep -HIn --binary-files=without-match -F 'audit-diff' "$target" 2>/dev/null || true)
   fi
   [ -n "$hits" ] || return 1
   printf '%s\n' "$hits" | grep -qvE ':[0-9]+:[[:space:]]*(#|//|/\*|\*|<!--)'
