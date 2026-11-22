@@ -2,6 +2,10 @@
 
 Status: implemented
 
+Superseded (载体形状)：2026-11-22 本仓迁至 backlog v3 批次日志（fold 现算 + 按批归档封存），
+见 `.agents/notes/implemented/process/2026-11-22-backlog-v3-batch-log-migration.md`。
+本记录保留 v2 单文件载体期的取舍与本地差量，作为历史事实；现行契约以 `backlog/README.md` 为准。
+
 ## Problem
 
 本仓的任务载体是 `docs/dev-team/tasks/TASK-NNN.md`（md 任务单），它有三个结构性缺口：

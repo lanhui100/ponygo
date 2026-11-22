@@ -15,3 +15,6 @@ backlog/.locks/
 # target/         # Rust
 # node_modules/   # Node
 # __pycache__/    # Python
+
+# backlog v3 当前工作区活动批次（本地运行时，不入仓）
+backlog/.state/

@@ -87,7 +87,9 @@ jobs:
           fetch-depth: 0
       - run: bash .meta/gates/ci-verify.sh
       - run: bash .meta/gates/scratch-hygiene.sh && bash .meta/gates/scratch-hygiene.spec.sh
-      - run: bash .meta/gates/backlog-gate.sh && bash .meta/gates/backlog-gate.spec.sh
+      # backlog v3 门：门本体与负样本自检各占一个独立 step（任一步红都不被 && 短路成笼统失败）
+      - run: bash .meta/gates/backlog-gate.sh
+      - run: bash .meta/gates/backlog-gate.spec.sh
       - run: bash tests/acceptance/observe-b027/run-all.sh
       - run: |
           git config core.hooksPath .githooks

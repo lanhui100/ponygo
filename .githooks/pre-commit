@@ -12,9 +12,10 @@ if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/adr-verify.sh" ]; then
 fi
 # <<< ponygo-gate: adr-verify v1 <<<
 
-# L1 追加：backlog 账本门（lint + doctor 对账，统一实现见 .meta/gates/backlog-gate.sh）。
+# L1 追加：backlog 账本门（v3：lint + doctor + verify-archive，统一实现见 .meta/gates/backlog-gate.sh）。
 # 放在 ponygo-gate 哨兵块之外——判据 2.4 要求 BEGIN..END 段逐字节等于规范块，块内新增会被 init 抹掉。
-# 迁移期语义：账本未启用（无 tasks.jsonl）→ 门自身提示跳过；账本存在但非法 / 有孤儿租约 → 拒绝。
+# 语义：账本未启用（无 MODEL 且无 tasks.jsonl）→ 门自身提示跳过；布局不一致 / 非法事件 / 孤儿租约 /
+#       归档封存被改 → 拒绝；门缺失 → 本块 fail-closed 拒绝。
 if [ -f "$(git rev-parse --show-toplevel)/.meta/gates/backlog-gate.sh" ]; then
   bash "$(git rev-parse --show-toplevel)/.meta/gates/backlog-gate.sh" || exit 1
 else
