@@ -1,6 +1,6 @@
 # ponygo 自测门禁：tests/run.sh 是唯一回归入口，按平台 × 分层看守
 #   - ubuntu：全量（full 层，94 场景）
-#   - windows-latest：Git Bash，PR 只跑 core 层（27 场景）；夜间/手动才跑全量
+#   - windows-latest：Git Bash，PR 只跑 core 层（26 场景）；夜间/手动才跑全量
 # 聚合门 all-checks-passed 是分支保护唯一依赖（名字不可改）。
 name: ci
 
@@ -32,15 +32,15 @@ jobs:
       - name: bash tests/run.sh
         run: bash tests/run.sh
 
-  # PR 必跑：Windows 只跑 core 层（PONYGO_TEST_LAYER=core → 27 场景）。
-  # 预算依据：CORE-27 在 Linux 实测 155s × Windows 慢 10.3x + 装机 ≈ 28min → 60min 留余量。
+  # PR 必跑：Windows 只跑 core 层（PONYGO_TEST_LAYER=core → 26 场景）。
+  # 预算依据：CORE-26（s90 已移出）在 Windows 实测推算 ≈37.6m → 60min 留约 22m 余量（见下方 timeout 注释）。
   windows-core:
     runs-on: windows-latest
-    # 60 → 90（2026-11-18，B026）：CORE 层含折叠的 gate-hardening（s90，gh1–gh14），
-    # 在 Windows 上 s90 单项 ~40 分钟、s90 之前 ~32 分钟；60 分钟会被 job 级 timeout 取消（实测 cancelled）。
-    # 目标：后续把 s90 的 Windows 成本降下来再把预算收回 60；理由与时间线见
-    # .agents/notes/implemented/process/2026-11-18-windows-core-budget.md
-    timeout-minutes: 90
+    # B026（2026-11-22 裁决 ③）：s90（gate-hardening 折叠，gh1–gh14）已移出 CORE → NONCORE，
+    # 94 场景字面不变（Linux full 层照跑，keeper 面不减）；Windows CORE-26 = 总 62m17s − s90 24.7m ≈ 37.6m，
+    # → 60m 留约 22m 余量。补偿判据：gh6 断言「s90 ∈ NONCORE-SET 且本预算 == 60」，防 s90 被塞回 CORE 又把预算撑爆。
+    # 决策、量化依据与落选方案见 .agents/notes/ 下 B026 决策记录 + .dev-team/plan-wave15.md §6.1
+    timeout-minutes: 60
     env:
       PONYGO_TEST_LAYER: core
     steps:
@@ -88,6 +88,7 @@ jobs:
       - run: bash .meta/gates/ci-verify.sh
       - run: bash .meta/gates/scratch-hygiene.sh && bash .meta/gates/scratch-hygiene.spec.sh
       - run: bash .meta/gates/backlog-gate.sh && bash .meta/gates/backlog-gate.spec.sh
+      - run: bash tests/acceptance/observe-b027/run-all.sh
       - run: |
           git config core.hooksPath .githooks
           bash ponygo audit --run-specs

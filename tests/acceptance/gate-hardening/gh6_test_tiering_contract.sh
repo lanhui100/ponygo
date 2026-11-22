@@ -60,6 +60,19 @@ for f in "$RUN_SH" "$CI_YML" "$CLI_SRC" "$AT2"; do
   assert_file "GH6 契约被测文件存在：${f#"$ROOT"/}" "$f"
 done
 
+# ---------- 折叠前缀解析（B005-b 唯一真源） ----------
+# 输入一行 `#FOLD-PREFIX|<前缀>|`；输出去掉**尾随回车**与定界 `|` 的前缀（保留前导两空格）。
+# 为什么必须剥回车：Windows 上 python3 文本模式 stdout 出 CRLF → 行尾多一个 \r，前缀尾带 CR
+# （len 9）→ `awk index($0,p)==1` 全不匹配 → A16 的 fold 计数恒 0（Windows run 44431917796）。
+# 解析只此一处：A16 的实测解析与 CRLF 回归样本都调它，禁止再各自 inline 复刻（否则修复会被
+# 任一处遗漏打回）。平台判定不在这里（本 spec 零平台判定）。
+fold_prefix_of() {
+  local raw="${1:13}"
+  raw="${raw%$'\r'}"
+  raw="${raw%|}"
+  printf '%s' "$raw"
+}
+
 if ! command -v python3 >/dev/null 2>&1; then
   bad "GH6 需要 python3 做结构化解析（缺失即失败，不跳过契约断言）"
   finish
@@ -245,14 +258,14 @@ try:
     # ---------- B4/B5：分区大小与互斥/并集 ----------
     core = parsed.get("CORE", [])
     noncore = parsed.get("NONCORE", [])
-    if len(core) == 27:
-        ok("GH6/B4 CORE-SET 恰 27 项（core 层 scenarios=27）")
+    if len(core) == 26:
+        ok("GH6/B4 CORE-SET 恰 26 项（core 层 scenarios=26；s90 已移出 CORE，plan §6.1）")
     else:
-        fail("GH6/B4 CORE-SET 恰 27 项", "%d" % len(core))
-    if len(noncore) == 67:
-        ok("GH6/B4 NONCORE-SET 恰 67 项（core 层 skipped=67）")
+        fail("GH6/B4 CORE-SET 恰 26 项", "%d" % len(core))
+    if len(noncore) == 68:
+        ok("GH6/B4 NONCORE-SET 恰 68 项（core 层 skipped=68）")
     else:
-        fail("GH6/B4 NONCORE-SET 恰 67 项", "%d" % len(noncore))
+        fail("GH6/B4 NONCORE-SET 恰 68 项", "%d" % len(noncore))
     overlap = sorted(set(core) & set(noncore))
     if overlap:
         fail("GH6/B5 CORE 与 NONCORE 互斥", ",".join(overlap[:3]))
@@ -268,6 +281,16 @@ try:
         fail("GH6/B5 两集合并集 = 94 个场景（不重不漏）",
              "未分类=%s 不存在=%s" % (miss[:3], extra[:3]))
 
+    # ---------- D2b（plan §6.1 机械固化）：s90 必须留在 NONCORE-SET ----------
+    # 防「回塞」：把 s90 塞回 CORE 会让 windows-core 重新背上 ~24.7m 的 Windows 开销，
+    # 60 分钟预算立刻不够用——这正是本决策最可能被无声回退的形态，必须由机器判据守。
+    s90_name = "s90_gate_hardening_acceptance"
+    if (s90_name in noncore) and (s90_name not in core):
+        ok("GH6/D2b s90 ∈ NONCORE-SET（s90 已移出 CORE，防回塞）")
+    else:
+        fail("GH6/D2b s90 ∈ NONCORE-SET（s90 已移出 CORE，防回塞）",
+             "in_core=%s in_noncore=%s" % (s90_name in core, s90_name in noncore))
+
     # ---------- §2.1 权威 CORE-SET 逐名比对 ----------
     expected_core = [
         "s02_init", "s11_l1_criteria", "s13_meta_violations", "s24_gate_layers",
@@ -280,15 +303,15 @@ try:
         "s65_f9_f10_symlink_and_selfheal", "s66_f1_bare_exit_position",
         "s67_f2_foreign_lines_not_truncated", "s68_f_hookspath_escape",
         "s69_f_trailing_sentinel_no_user_loss", "s70_f_function_body_exit_not_early_exit",
-        "s79_wave1_contract_c1_c2_c3_c6", "s90_gate_hardening_acceptance",
+        "s79_wave1_contract_c1_c2_c3_c6",
         "s92_p0_fixes_acceptance",
     ]
     got = set(core)
     want = set(expected_core)
     if got == want:
-        ok("GH6/§2.1 CORE-SET 与契约权威 27 名逐名一致（含 s90 本套件、s92 硬数字）")
+        ok("GH6/§2.1 CORE-SET 与契约权威 26 名逐名一致（s90 已移出 CORE；含 s92 硬数字）")
     else:
-        fail("GH6/§2.1 CORE-SET 与契约权威 27 名逐名一致",
+        fail("GH6/§2.1 CORE-SET 与契约权威 26 名逐名一致",
              "缺=%s 多=%s" % (sorted(want - got)[:3], sorted(got - want)[:3]))
     # ---------- A8：checks 必须是「leaf + nested + folded」三类之和恒等式（Lead rev2 裁决） ----------
     summary_line = summary[0] if summary else ""
@@ -507,7 +530,7 @@ while IFS= read -r line; do
   case "$line" in
     'CHECK OK '*) ok "${line#CHECK OK }" ;;
     'CHECK FAIL '*) bad "${line#CHECK FAIL }" ;;
-    '#FOLD-PREFIX|'*) FOLD_PREFIX="${line:13}"; FOLD_PREFIX="${FOLD_PREFIX%|}" ;;
+    '#FOLD-PREFIX|'*) FOLD_PREFIX=$(fold_prefix_of "$line") ;;
     '#PARSE-END') : ;;
     '') : ;;
     *) printf '  [gh6-parse] %s\n' "$line" ;;
@@ -635,7 +658,7 @@ if [ "$PROBE_BUILD" -eq 0 ]; then
   PRC=$?
   POUT_TXT=$(cat "$POUT" 2>/dev/null)
   assert_nonzero "GH6/A12 动态实验：子套件 rc=1 而解析出 fail=0 → 汇总必须非零退出（rc 不得假绿）" "$PRC"
-  assert_matches "GH6/A12 动态实验：探针 core 层计数由集合推导（scenarios=2 skipped=92，非硬编码 27）" \
+  assert_matches "GH6/A12 动态实验：探针 core 层计数由集合推导（scenarios=2 skipped=92，非硬编码层大小）" \
     "$POUT_TXT" '^==== 测试结果：scenarios=2 pass=[0-9]+ fail=[0-9]+ checks=[0-9]+ skipped=92 ====$'
   # ---------- 契约 A18（rev4）：SKIP 行必须在**真实运行**上钉死 ----------
   # 只查 run.sh 里的 printf 形态是可以被绕过的（把 s78_wave13_acceptance 整体塞进第一个 %s 也能绿），
@@ -816,6 +839,33 @@ if [ "$FOLD_BUILD" -eq 0 ]; then
   assert_eq "GH6/A16 折叠判据行不变量：fold + RED 合计 == 7（红/绿差异不影响计数）" \
     "$FOLD_MIX_N" "$(( FOLD_LINE_N + FOLD_RED_N ))"
   assert_eq "GH6/A16 折叠判据行合计恰为 7（7 个折叠场景各一行）" 7 "$FOLD_MIX_N"
+
+  # CRLF 回归样本（B005-b，2026-11-22）：Windows 上 python3 文本模式 stdout 出 CRLF，前缀行变成
+  # `#FOLD-PREFIX|<前缀>|\r`。解析侧若不剥回车：前缀尾带 CR（len 9）→ awk index 全不匹配 → 计 0，
+  # 派生副本全绿时 fold+RED 合计得 0 ≠ 7（实测 Windows run 44431917796 恒红）。
+  # 此处把「不剥必红（0）」与「剥后必绿（7）」同时钉住：修复一旦被回退，本组断言立刻翻红。
+  FOLD_CRLF_PY=$(printf '#FOLD-PREFIX|%s|\r\n' "$FOLD_PREFIX")
+  FOLD_CRLF_TXT=""
+  FOLD_CRLF_I=0
+  while [ "$FOLD_CRLF_I" -lt 7 ]; do
+    FOLD_CRLF_TXT="${FOLD_CRLF_TXT}${FOLD_PREFIX}crlf-sample-${FOLD_CRLF_I}"$'\n'
+    FOLD_CRLF_I=$((FOLD_CRLF_I + 1))
+  done
+  FOLD_CRLF_RAW=""
+  while IFS= read -r line; do
+    case "$line" in
+      '#FOLD-PREFIX|'*) FOLD_CRLF_RAW="${line:13}" ;;
+    esac
+  done <<< "$FOLD_CRLF_PY"
+  # 样本有效性：**故意复刻不剥回车的旧实现**，证明这条样本在旧解析下确实计 0（否则样本空转）。
+  FOLD_CRLF_UNFIXED="${FOLD_CRLF_RAW%|}"
+  # 修复路径：走与 A16 实测解析**同一个** fold_prefix_of（解析只有一处真源）。
+  FOLD_CRLF_FIXED=$(fold_prefix_of "$FOLD_CRLF_PY")
+  FOLD_CRLF_N_UNFIXED=$(printf '%s' "$FOLD_CRLF_TXT" | awk -v p="$FOLD_CRLF_UNFIXED" 'index($0, p) == 1 { n++ } END { print n + 0 }')
+  FOLD_CRLF_N_FIXED=$(printf '%s' "$FOLD_CRLF_TXT" | awk -v p="$FOLD_CRLF_FIXED" 'index($0, p) == 1 { n++ } END { print n + 0 }')
+  assert_eq "GH6/A16 CRLF 回归样本有效：不剥回车时前缀尾带 CR → 必然计 0" 0 "$FOLD_CRLF_N_UNFIXED"
+  assert_eq "GH6/A16 CRLF 回归样本：解析侧剥回车后仍数到 7 行（B005-b 修复不被回退）" 7 "$FOLD_CRLF_N_FIXED"
+  assert_eq "GH6/A16 CRLF 回归样本：剥回车后前缀与实测前缀逐字节一致" "$FOLD_PREFIX" "$FOLD_CRLF_FIXED"
 else
   bad "GH6/A16 无法构造折叠派生存根（tests/run.sh 缺 CORE/NONCORE 数据块或折叠场景名不符，构造 rc=$FOLD_BUILD）"
 fi
@@ -998,7 +1048,11 @@ assert_matches "GH6/C2 非法值报错语义可识别（非法/FAIL）" "$SERR_T
 # AT2 外层兜底：与 CLI 同源推导（内层 + 30），禁止字面量 120（C8/C9）
 assert_file_matches "GH6/C8 AT2 外层兜底由内层预算推导（+30）" "$AT2" '\+[[:space:]]*30'
 assert_file_matches "GH6/C8 AT2 与 CLI 同源读取 PONYGO_SPEC_TIMEOUT" "$AT2" 'PONYGO_SPEC_TIMEOUT'
-assert_file_matches "GH6/C8 AT2 平台分档判定与 CLI 同源" "$AT2" 'msys|cygwin|MINGW|MSYS|CYGWIN|uname'
+# B008（2026-11-22）改写「同源」的载体：AT2 不再自带平台判定（那是第二份真值，曾与 CLI 各推一套
+# 180/90），改为从 SUT 结论区打印的 `spec 预算=<N>s（来源：…）` 反向解析。同源关系不变——
+# 从「两份实现各推一次」变成「读 SUT 那唯一一份」。故断言改为：必须读预算行 + 不得出现平台判定符号。
+assert_file_matches "GH6/C8 AT2 从 SUT 预算行反向解析（spec 预算=<N>s）" "$AT2" 'spec 预算='
+assert_file_not_matches "GH6/C8 AT2 不得自带平台分档判定（零平台真值副本；平台真值只在 ponygo 一处）" "$AT2" 'msys|cygwin|MINGW|MSYS|CYGWIN|uname'
 AT2_CODE=$(sed -e 's/#.*$//' "$AT2")
 if printf '%s\n' "$AT2_CODE" | grep -Eq '(^|[^0-9])120([^0-9]|$)'; then
   bad "GH6/C8 AT2 不得保留字面量 120（须同一 env/平台推导，注释外代码零命中）"
@@ -1098,7 +1152,7 @@ assert_file_not_matches "GH6/rev3 ponygo 内同源 README heredoc 不得写死 c
 # ============================================================
 # 契约 D（§4）：CI 拓扑（真 YAML 结构化解析，禁止一行注释/子串命中冒充接线）
 # ============================================================
-CI_PY=$(python3 -X utf8 - "$CI_YML" <<'PY'
+CI_PY=$(python3 -X utf8 - "$CI_YML" "$RUN_SH" <<'PY'
 import re
 import sys
 
@@ -1217,15 +1271,17 @@ try:
         env = core.get("env") if isinstance(core.get("env"), dict) else {}
         layer = norm(env.get("PONYGO_TEST_LAYER", "")) if env else ""
         if layer == "core":
-            ok("GH6/D2 windows-core env: PONYGO_TEST_LAYER=core（core 层 27 场景）")
+            ok("GH6/D2 windows-core env: PONYGO_TEST_LAYER=core（core 层 26 场景）")
         else:
             fail("GH6/D2 windows-core env: PONYGO_TEST_LAYER=core", repr(layer))
-        # 2026-11-18（B026）：60 → 90——CORE 层含 s90 折叠套件，Windows 实测 60 分钟被 job timeout 取消；
-        # 预算调整的裁决见 .agents/notes/implemented/process/2026-11-18-windows-core-budget.md
-        if extra(core, "timeout-minutes") == 90:
-            ok("GH6/D2 windows-core timeout-minutes: 90（rev4 预算）")
+        # 2026-11-22（B026 / plan §6.1）：90 → 60。s90（gate-hardening 折叠套件）已从 CORE-SET
+        # 移出到 NONCORE-SET，Windows CORE 由 62m17s 降到 ≈37.6m → 60 分钟留 ≈22m 余量。
+        # 预算与分区是同一决策的两面（同批不变量）：只改一侧时本断言或 D2b/D2c 必红。
+        # 决策记录：.agents/notes/implemented/process/2026-11-22-s90-out-of-core-and-budget-reclaim.md
+        if extra(core, "timeout-minutes") == 60:
+            ok("GH6/D2 windows-core timeout-minutes: 60（s90 移出 CORE 后收回）")
         else:
-            fail("GH6/D2 windows-core timeout-minutes: 90（rev4 预算）", repr(core.get("timeout-minutes")))
+            fail("GH6/D2 windows-core timeout-minutes: 60（s90 移出 CORE 后收回）", repr(core.get("timeout-minutes")))
         runs = runs_of(core)
         if any("bash tests/run.sh" in r for r in runs):
             ok("GH6/D2 windows-core 跑 `bash tests/run.sh`")
@@ -1240,6 +1296,23 @@ try:
             fail("GH6/D9 windows-core 不得被 if 关闭（PR 事件必须实际执行）", repr(core.get("if")))
         else:
             ok("GH6/D9 windows-core 未被 if 关闭（PR 事件必须实际执行）")
+
+        # ---------- D2c：预算与分区自洽（plan §6.1「三合一」） ----------
+        # 断言的不只是「60」这个数字，而是「60 与 CORE-26 同批成立」：只把预算改小、
+        # 或只把 s90 塞回 CORE，都会让这条自洽断言红——两处一起错才可能骗过它（不变量式）。
+        core_n = None
+        try:
+            run_sh_src = open(sys.argv[2], encoding="utf-8", errors="replace").read()
+            core_n = len(re.findall(r'^CORE\s+s[0-9]+_[a-z0-9_]+\s*$', run_sh_src, re.M))
+        except Exception as exc:
+            fail("GH6/D2c 读取 tests/run.sh 失败（无法校验预算-分区自洽）", str(exc))
+        if core_n is not None:
+            budget = extra(core, "timeout-minutes")
+            if core_n == 26 and budget == 60:
+                ok("GH6/D2c windows-core 预算与分区自洽（timeout-minutes=60 且 CORE 项数=26）")
+            else:
+                fail("GH6/D2c windows-core 预算与分区自洽（timeout-minutes=60 且 CORE 项数=26）",
+                     "budget=%r core_n=%r" % (budget, core_n))
     else:
         for desc in ("windows-core runs-on: windows-latest",
                      "windows-core env: PONYGO_TEST_LAYER=core",
@@ -1326,6 +1399,26 @@ try:
         else:
             fail("GH6/D7 rev3 聚合门事件感知（读 github.event_name 且区分 schedule）",
                  "聚合步未事件感知")
+
+    # ---------- E1：observe-b027 独立套件的 CI 看守（命约 2：机械可查的承诺必须有门禁） ----------
+    # 为什么需要它：B027 的唯一产品行为改动是 `observe_mount_hit` 的 `grep -In` → `grep -HIn`
+    # （单文件载体的纯注释伪装判绿），而该函数在仓内除 `tests/acceptance/observe-b027/` 外**零覆盖**
+    # （tests/run.sh 与 gh6 都不触达它）。不挂进 CI = 修完就没人看守。
+    # 判据：ci.yml 里恰 1 处调用，且必须落在 governance job 的某个 step 内（注释/别处都不算）。
+    try:
+        ci_raw = open(path, encoding="utf-8").read()
+    except Exception as exc:
+        ci_raw = ""
+        fail("GH6/E1 读取 ci.yml 失败（无法校验 observe-b027 看守）", str(exc))
+    if ci_raw:
+        e1_needle = "tests/acceptance/observe-b027/run-all.sh"
+        e1_n = ci_raw.count(e1_needle)
+        e1_in_gov = any(e1_needle in r for r in runs_of(job("governance")))
+        if e1_n == 1 and e1_in_gov:
+            ok("GH6/E1 ci.yml governance job 调用 observe-b027/run-all.sh（B027 产品改动的 CI 看守，恰 1 处）")
+        else:
+            fail("GH6/E1 ci.yml governance job 调用 observe-b027/run-all.sh（B027 产品改动的 CI 看守，恰 1 处）",
+                 "命中=%d governance内=%s" % (e1_n, e1_in_gov))
     emit()
 except Exception as exc:  # 解析器自身异常必须显性失败
     out.append("CHECK FAIL GH6/D 结构化解析器异常（%s）" % exc)

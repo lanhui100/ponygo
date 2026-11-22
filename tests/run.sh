@@ -2,7 +2,7 @@
 # ============================================================
 # ponygo 自测（纯 bash、零依赖；mktemp 场景化，不污染仓库）
 # 用法：bash tests/run.sh                                  （full 层 = 全部 94 场景）
-#       PONYGO_TEST_LAYER=core bash tests/run.sh           （core 层 = 27 场景，其余跳过）
+#       PONYGO_TEST_LAYER=core bash tests/run.sh           （core 层 = 26 场景，其余跳过）
 #       PONYGO_SCN_TIMEOUT=600 bash tests/run.sh           （可选：单场景看门狗，1..86400 秒）
 # 退出码：断言失败 / 任一子套件 rc≠0 → 1；配置类错误（非法 env 值）→ 2。
 # 可诊断性口径（Windows CI 实跑教训）：汇总行的 fail= 只数叶子（契约 A4/A5），所以嵌套
@@ -306,7 +306,6 @@ CORE s68_f_hookspath_escape
 CORE s69_f_trailing_sentinel_no_user_loss
 CORE s70_f_function_body_exit_not_early_exit
 CORE s79_wave1_contract_c1_c2_c3_c6
-CORE s90_gate_hardening_acceptance
 CORE s92_p0_fixes_acceptance
 # <<< ponygo-test-layer: CORE-SET <<<
 # >>> ponygo-test-layer: NONCORE-SET >>>
@@ -374,6 +373,7 @@ NONCORE s86_skill_shape_incomplete
 NONCORE s87_skill_advisory_catalog
 NONCORE s88_projection_freshness
 NONCORE s89_auditfix_acceptance
+NONCORE s90_gate_hardening_acceptance
 NONCORE s91_deferred_acceptance
 NONCORE s93_negspace_acceptance
 NONCORE s94_p1_fixes_acceptance

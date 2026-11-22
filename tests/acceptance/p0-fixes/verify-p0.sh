@@ -85,7 +85,23 @@ d
 - a — 落选原因
 EOF
 }
-fill_const() { require_sandbox; sed -i 's/【TODO[^】]*】/filled/g' .meta/constitution/constitution.md; }
+# 填宪法槽位（B005-a）：**必须用 ASCII 锚**。
+# 旧实现 `sed -i 's/【TODO[^】]*】/filled/g'` 把 `】`(E3 80 91) 放进正则字符组——LC_ALL=C
+# （Windows Git Bash 默认 locale）下按字节匹配，多字节序列被拆开 → sed 静默不生效 → 宪法仍是
+# 模板态 → A 走 bootstrap 投影（红）、B 的 warn 首行 return（红），失败原因完全隐没。
+# 改成只匹配 ASCII 的 `TODO:`：与 ponygo 的 projection_is_bootstrap（grep -q 'TODO:'）同源，
+# 与 locale / 编码无关。
+fill_const() {
+  require_sandbox
+  sed -i 's/TODO:/filled:/g' .meta/constitution/constitution.md
+  # 填槽生效守卫（防同类 locale / 编码退化时静默放行）：失败只记一次 bad，成功不占 PASS 名额。
+  local left
+  left=$(grep -c 'TODO:' .meta/constitution/constitution.md 2>/dev/null || true)
+  case "$left" in
+    0) : ;;
+    *) bad "夹具：宪法填槽未生效（TODO: 残留 [${left:-?}] 处——锚/编码退化，其后 A/B 结论不可信）" ;;
+  esac
+}
 meta() { require_sandbox; printf 'level: %s\n%s\n' "$1" "${2:-docs-tier: off}" > .meta/meta.yaml; }
 sync_out() { bash "$CLI" sync 2>&1 | tr -d '\r'; }
 

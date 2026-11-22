@@ -1,0 +1,5 @@
+{
+  "contract_version": "1.0.3",
+  "frozen_at": "2026-11-22",
+  "note": "observe-b027 验收专用替身（内容驱动结论），仅供 ponygo observe audit 的判定面测试；不是真 skill 的契约真源。"
+}
