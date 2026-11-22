@@ -7,6 +7,8 @@ Thumbs.db
 # 临时与过程副产物（工作区抗熵增）
 .scratch/
 .dev-team/
+# 编码代理本地运行时（会话快照/日志，机器本地，不入仓）
+.pony-agent/
 
 # backlog 任务级租约（本地运行时，含 pid/会话/心跳；干净克隆不应有此目录）
 backlog/.locks/
