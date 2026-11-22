@@ -840,29 +840,36 @@ if [ "$FOLD_BUILD" -eq 0 ]; then
     "$FOLD_MIX_N" "$(( FOLD_LINE_N + FOLD_RED_N ))"
   assert_eq "GH6/A16 折叠判据行合计恰为 7（7 个折叠场景各一行）" 7 "$FOLD_MIX_N"
 
-  # CRLF 回归样本（B005-b，2026-11-22）：Windows 上 python3 文本模式 stdout 出 CRLF，前缀行变成
-  # `#FOLD-PREFIX|<前缀>|\r`。解析侧若不剥回车：前缀尾带 CR（len 9）→ awk index 全不匹配 → 计 0，
-  # 派生副本全绿时 fold+RED 合计得 0 ≠ 7（实测 Windows run 44431917796 恒红）。
+  # CRLF 回归样本（B005-b，2026-11-22；2026-11-23 平台无关化）：Windows 上 python3 文本模式 stdout
+  # 出 CRLF，前缀行变成 `#FOLD-PREFIX|<前缀>|\r`。解析侧若不剥回车：前缀尾带 CR（len 9）→ awk index
+  # 全不匹配 → 计 0，派生副本全绿时 fold+RED 合计得 0 ≠ 7（实测 Windows run 44431917796 恒红）。
   # 此处把「不剥必红（0）」与「剥后必绿（7）」同时钉住：修复一旦被回退，本组断言立刻翻红。
-  FOLD_CRLF_PY=$(printf '#FOLD-PREFIX|%s|\r\n' "$FOLD_PREFIX")
+  #
+  # 为什么不再用 `printf ...\r\n` + `read <<<`：那条路径的 CR 保真度取决于平台文本模式/herestring 实现
+  # （Windows run 45042996846 实测 read 后 CR 已被吃掉 → 「旧实现」意外等于干净前缀 → 本条断言 Windows
+  # 恒红、期望 [0] 实得 [7]）。改法：源串用 ANSI-C 引用逐字节构造 CR，再**内联复刻旧解析**（只做
+  # `${1:13}` 与 `${raw%|}`，不剥 CR）——样本有效性不再依赖任何平台的换行翻译。
+  FOLD_CRLF_SRC="#FOLD-PREFIX|${FOLD_PREFIX}|"$'\r'
   FOLD_CRLF_TXT=""
   FOLD_CRLF_I=0
   while [ "$FOLD_CRLF_I" -lt 7 ]; do
     FOLD_CRLF_TXT="${FOLD_CRLF_TXT}${FOLD_PREFIX}crlf-sample-${FOLD_CRLF_I}"$'\n'
     FOLD_CRLF_I=$((FOLD_CRLF_I + 1))
   done
-  FOLD_CRLF_RAW=""
-  while IFS= read -r line; do
-    case "$line" in
-      '#FOLD-PREFIX|'*) FOLD_CRLF_RAW="${line:13}" ;;
-    esac
-  done <<< "$FOLD_CRLF_PY"
-  # 样本有效性：**故意复刻不剥回车的旧实现**，证明这条样本在旧解析下确实计 0（否则样本空转）。
-  FOLD_CRLF_UNFIXED="${FOLD_CRLF_RAW%|}"
+  # 旧实现（不剥 CR）内联复刻：与历史实现同款参数展开（去掉定界 `|`，但不剥尾随 CR）。
+  FOLD_CRLF_UNFIXED="${FOLD_CRLF_SRC:13}"
+  FOLD_CRLF_UNFIXED="${FOLD_CRLF_UNFIXED%|}"
   # 修复路径：走与 A16 实测解析**同一个** fold_prefix_of（解析只有一处真源）。
-  FOLD_CRLF_FIXED=$(fold_prefix_of "$FOLD_CRLF_PY")
+  FOLD_CRLF_FIXED=$(fold_prefix_of "$FOLD_CRLF_SRC")
   FOLD_CRLF_N_UNFIXED=$(printf '%s' "$FOLD_CRLF_TXT" | awk -v p="$FOLD_CRLF_UNFIXED" 'index($0, p) == 1 { n++ } END { print n + 0 }')
   FOLD_CRLF_N_FIXED=$(printf '%s' "$FOLD_CRLF_TXT" | awk -v p="$FOLD_CRLF_FIXED" 'index($0, p) == 1 { n++ } END { print n + 0 }')
+  # 样本有效性（平台无关）：源串尾字节确实是 CR，且旧实现拿到的是「尾带 CR 的前缀」（长度 = 前缀+2）。
+  # 尾字节判定走纯参数展开（不经 printf/tail/od，躲开一切文本模式与字节工具差异）。
+  FOLD_CRLF_TAIL="${FOLD_CRLF_SRC: -1}"
+  if [ "$FOLD_CRLF_TAIL" = $'\r' ]; then FOLD_CRLF_TAIL_OK=yes; else FOLD_CRLF_TAIL_OK=no; fi
+  assert_eq "GH6/A16 CRLF 回归样本源尾字节为 CR" "yes" "$FOLD_CRLF_TAIL_OK"
+  assert_eq "GH6/A16 CRLF 回归样本：旧实现拿到的前缀尾带 CR 且保留定界竖线（len = 前缀+2）" \
+    "$(( ${#FOLD_PREFIX} + 2 ))" "${#FOLD_CRLF_UNFIXED}"
   assert_eq "GH6/A16 CRLF 回归样本有效：不剥回车时前缀尾带 CR → 必然计 0" 0 "$FOLD_CRLF_N_UNFIXED"
   assert_eq "GH6/A16 CRLF 回归样本：解析侧剥回车后仍数到 7 行（B005-b 修复不被回退）" 7 "$FOLD_CRLF_N_FIXED"
   assert_eq "GH6/A16 CRLF 回归样本：剥回车后前缀与实测前缀逐字节一致" "$FOLD_PREFIX" "$FOLD_CRLF_FIXED"
