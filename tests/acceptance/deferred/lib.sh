@@ -224,10 +224,20 @@ start_probe_server() { # <case-dir> [http_status] [delay_seconds]
   STUB_HTTP_STATUS="$st" STUB_DELAY_SECONDS="$delay" \
     python3 "$PROBE_SERVER" "$PROBE_FIFO" "$PROBE_CAP" "$PROBE_NOTIFY" 2>"$PROBE_ERR" &
   PROBE_PID=$!
-  # 阻塞读：服务端绑定端口后写入端口号（就绪即返回），不是轮询
-  read -r PROBE_PORT < "$PROBE_FIFO" || PROBE_PORT=""
+  # 就绪同步：服务端绑定端口后把端口号写进 FIFO。**必须有界**——`read ... < fifo` 的阻塞点在
+  # open(2) 本身，`-t` 管不到它；Windows(Git Bash/MSYS) 上若服务端起不来，这个 open 会永久阻塞
+  # （实测 run 45042996846：s91_deferred_acceptance 单场景 >73min 零输出，整卷被平台 cancelled）。
+  # 改法：读写方式打开（<>）不会阻塞，再对有界读加 -t；超时即杀服务并点名 stderr。
+  PROBE_READY_TIMEOUT="${PROBE_READY_TIMEOUT:-30}"
+  if ! exec 8<>"$PROBE_FIFO"; then
+    bad "夹具失败：无法打开探针端口 FIFO（$PROBE_FIFO）"
+    return 1
+  fi
+  if read -r -t "$PROBE_READY_TIMEOUT" -u 8 PROBE_PORT; then :; else PROBE_PORT=""; fi
+  exec 8<&-
   if [ -z "$PROBE_PORT" ]; then
-    bad "夹具失败：探针服务未报告端口（见 $PROBE_ERR）"
+    bad "夹具失败：探针服务未在 ${PROBE_READY_TIMEOUT}s 内报告端口（见 $PROBE_ERR）"
+    stop_probe_server
     return 1
   fi
   exec 9<>"$PROBE_NOTIFY"  # 读写方式打开：FIFO 的 read-only open 会阻塞到有写者，故用 <>
