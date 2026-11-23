@@ -65,13 +65,16 @@ jobs:
     timeout-minutes: 240
     env:
       # 单场景看门狗（tests/run.sh 的 PONYGO_SCN_TIMEOUT，合法 1..86400 秒）。
-      # 依据（2026-11-23 run 45042996846）：90/94 场景 2h47m 跑完后，s91_deferred_acceptance 单场景
-      # >73min 未返回，整卷到 240min 上限被平台 cancelled ——「cancelled」既无归因也不是 RED，取证无效。
-      # 语义（tests/run.sh scn_begin）：超时打 `TIMEOUT <id>（超 Ns）` 到 stderr 后 **TERM 整轮**
-      # （不为一个挂死套件留无人看守的尾巴）。故 30min 预算的收益 = 最迟 ~3h20m 结束（< 240min 上限），
-      # 失败从「平台 cancelled」变成「点名 s91 的 RED」。要的是归因，不是让挂死套件变绿。
+      # 为什么需要（2026-11-23 run 45042996846）：90/94 场景 2h47m 跑完后，s91_deferred_acceptance
+      # 单场景 >73min 未返回，整卷到 240min 上限被平台 cancelled ——「cancelled」既无归因也不是 RED。
+      # 语义（tests/run.sh scn_begin）：超时打 `TIMEOUT <id>（超 Ns）` 到 stderr 后 **TERM 整轮**。
+      # 阈值取 45min（2700s）的依据 = Windows 实测单场景上界 + 余量：
+      #   s89_auditfix 2030s（run 45042996846）、s90_gate_hardening 1746s、s88 368s；
+      #   30min（1800s）已于 run 45103476794 实测误杀 s89（133m 处 TIMEOUT s89）——阈值必须高于
+      #   真实上界，否则看门狗自己变成红源。45min 下最迟 ~3h35m 结束（< 240min 上限），
+      #   仍能把真正的挂死套件（如 s91）点名成 RED 而不是整卷 cancelled。
       # 只钉 full 卷，不动 PR 级 core（26 场景 26m17s）的预算。
-      PONYGO_SCN_TIMEOUT: 1800
+      PONYGO_SCN_TIMEOUT: 2700
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

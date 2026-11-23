@@ -1358,16 +1358,18 @@ try:
             wd_num = int(str(full_env.get("PONYGO_SCN_TIMEOUT")))
         except Exception:
             wd_num = None
-        if wd_num == 1800:
-            ok("GH6/D3b windows-full env: PONYGO_SCN_TIMEOUT=1800（单场景 30min 看门狗，超时点名 RED）")
+        # 阈值 45min（2700s）= Windows 实测单场景上界 s89 2030s + 余量；30min 已在 run 45103476794
+        # 误杀 s89（看门狗自己变成红源）。断言写死数字：改成别的值 → 红，防止「随手调小」重演误杀。
+        if wd_num == 2700:
+            ok("GH6/D3b windows-full env: PONYGO_SCN_TIMEOUT=2700（单场景 45min 看门狗，超时点名 RED）")
         else:
-            fail("GH6/D3b windows-full env: PONYGO_SCN_TIMEOUT=1800（防回退为无归因的整卷 cancelled）",
+            fail("GH6/D3b windows-full env: PONYGO_SCN_TIMEOUT=2700（须高于 Windows 单场景实测上界 s89 2030s）",
                  repr(full_env.get("PONYGO_SCN_TIMEOUT")))
         # 单位对齐：PONYGO_SCN_TIMEOUT 是**秒**，timeout-minutes 是**分钟**（240min = 14400s）。
-        if wd_num == 1800 and extra(full, "timeout-minutes") == 240 and wd_num < 240 * 60:
-            ok("GH6/D3b windows-full 看门狗预算与整卷上限自洽（1800s 触发点 < 240min 上限）")
-        elif wd_num == 1800:
-            fail("GH6/D3b windows-full 看门狗预算与整卷上限自洽（1800s 触发点 < 240min 上限）",
+        if wd_num == 2700 and extra(full, "timeout-minutes") == 240 and wd_num < 240 * 60:
+            ok("GH6/D3b windows-full 看门狗预算与整卷上限自洽（2700s 触发点 < 240min 上限）")
+        elif wd_num == 2700:
+            fail("GH6/D3b windows-full 看门狗预算与整卷上限自洽（2700s 触发点 < 240min 上限）",
                  repr(full.get("timeout-minutes")))
     else:
         for desc in ("windows-full 必须有 timeout-minutes",
