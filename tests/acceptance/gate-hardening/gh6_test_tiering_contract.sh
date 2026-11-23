@@ -1349,10 +1349,31 @@ try:
             fail("GH6/D3 windows-full 不得在 pull_request 事件执行（PR 必跑性靠 windows-core）", guard)
         else:
             ok("GH6/D3 windows-full 不得在 pull_request 事件执行（PR 必跑性靠 windows-core）")
+        # ---------- D3b：full 卷必须有单场景看门狗预算 ----------
+        # 教训（2026-11-23 run 45042996846）：没有单场景预算时，「某个套件挂死」只会表现为整卷在
+        # timeout-minutes 被平台 cancelled —— 既无归因也不是 RED，取证无效。断言把预算钉死：
+        # 回退成「无 env」或改成别的数字都会红（不变量式，不认「差不多」）。
+        full_env = full.get("env") if isinstance(full.get("env"), dict) else {}
+        try:
+            wd_num = int(str(full_env.get("PONYGO_SCN_TIMEOUT")))
+        except Exception:
+            wd_num = None
+        if wd_num == 1800:
+            ok("GH6/D3b windows-full env: PONYGO_SCN_TIMEOUT=1800（单场景 30min 看门狗，超时点名 RED）")
+        else:
+            fail("GH6/D3b windows-full env: PONYGO_SCN_TIMEOUT=1800（防回退为无归因的整卷 cancelled）",
+                 repr(full_env.get("PONYGO_SCN_TIMEOUT")))
+        # 单位对齐：PONYGO_SCN_TIMEOUT 是**秒**，timeout-minutes 是**分钟**（240min = 14400s）。
+        if wd_num == 1800 and extra(full, "timeout-minutes") == 240 and wd_num < 240 * 60:
+            ok("GH6/D3b windows-full 看门狗预算与整卷上限自洽（1800s 触发点 < 240min 上限）")
+        elif wd_num == 1800:
+            fail("GH6/D3b windows-full 看门狗预算与整卷上限自洽（1800s 触发点 < 240min 上限）",
+                 repr(full.get("timeout-minutes")))
     else:
         for desc in ("windows-full 必须有 timeout-minutes",
                      "windows-full 全量 `bash tests/run.sh`",
-                     "windows-full 仅在 schedule/workflow_dispatch 触发（if 白名单守卫）"):
+                     "windows-full 仅在 schedule/workflow_dispatch 触发（if 白名单守卫）",
+                     "windows-full env: PONYGO_SCN_TIMEOUT=1800（单场景看门狗）"):
             fail("GH6/D3 " + desc, "job 缺失")
 
     # ---------- D6/D7：all-checks-passed 聚合语义 ----------
