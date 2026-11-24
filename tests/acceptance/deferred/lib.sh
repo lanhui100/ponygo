@@ -232,6 +232,10 @@ start_probe_server() { # <case-dir> [http_status] [delay_seconds]
   PROBE_FD=${PROBE_CO[0]}
   local line=""
   read -r -t "$PROBE_READY_TIMEOUT" -u "$PROBE_FD" line || line=""
+  # Windows 原生 python 把 stdout 当文本流 → `\n` 翻成 `\r\n`，端口字符串会拖一个 CR。
+  # 不剥它，URL 就变成 `http://127.0.0.1:34567\r`：curl/observe 直接 exit 2、抓不到请求，
+  # 表现为 F10 一片「实得 2 / 0 个请求」（run 45322719418 实测 13 条红即此，不是服务没起来）。
+  line="${line%$'\r'}"
   case "$line" in
     'PORT '*) PROBE_PORT="${line#PORT }" ;;
     *) PROBE_PORT="" ;;
@@ -241,6 +245,14 @@ start_probe_server() { # <case-dir> [http_status] [delay_seconds]
     stop_probe_server
     return 1
   fi
+  # 端口必须是纯数字：把「换行翻译/协议漂移」这类夹具故障就地判死，不要让它退化成 13 条下游断言红。
+  case "$PROBE_PORT" in
+    *[!0-9]*)
+      bad "夹具失败：探针端口非法（[$PROBE_PORT] 非纯数字——换行翻译带进 CR？）"
+      stop_probe_server
+      return 1
+      ;;
+  esac
   return 0
 }
 # 阻塞等待「接收器已收到一个请求」（read -t 超时兜底，不是 sleep 轮询）
