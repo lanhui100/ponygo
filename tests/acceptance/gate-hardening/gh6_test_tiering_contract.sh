@@ -1371,6 +1371,30 @@ try:
         elif wd_num == 2700:
             fail("GH6/D3b windows-full 看门狗预算与整卷上限自洽（2700s 触发点 < 240min 上限）",
                  repr(full.get("timeout-minutes")))
+        # ---------- D3c：full 卷必须自带判词归档（2026-11-24 裁决 D：取证交回 CI） ----------
+        # 背景：连续三次红（45042996846 / 45103476794 / 45222755424）都靠人肉翻几万行 job log 才定到
+        # 具体断言。判词归档步把「场景结果 + TIMEOUT/RED 名单」写进 step summary 与 job log，
+        # 使失败取证不再依赖本地脚本（本地 cron 已停用，见 .agents/notes 决策记录）。
+        full_run_txt = " ".join(runs_of(full))
+        if "full.log" in full_run_txt and "pipefail" in full_run_txt:
+            ok("GH6/D3c windows-full 测试步 tee 落盘 + pipefail（判词步有输入、退出码不被吞）")
+        else:
+            fail("GH6/D3c windows-full 测试步 tee 落盘 + pipefail（判词步有输入、退出码不被吞）",
+                 full_run_txt[:160])
+        summ_steps = [st for st in (full.get("steps") or [])
+                      if isinstance(st, dict) and "GITHUB_STEP_SUMMARY" in norm(st.get("run", ""))]
+        always_steps = [st for st in summ_steps if norm(st.get("if", "")).replace(" ", "") == "always()"]
+        if always_steps:
+            ok("GH6/D3c windows-full 判词步 if: always() 且写 $GITHUB_STEP_SUMMARY（失败也留证）")
+        else:
+            fail("GH6/D3c windows-full 判词步 if: always() 且写 $GITHUB_STEP_SUMMARY（失败也留证）",
+                 repr([st.get("if") for st in summ_steps]))
+        truncating = [st for st in summ_steps if "s[0-9]+[a-z_]" in norm(st.get("run", ""))]
+        if truncating:
+            fail("GH6/D3c 判词里 grep 场景 id 不得用 s[0-9]+[a-z_]*（数字后截断，实测红名单只剩 RED  s94_p）",
+                 "命中 %d 步" % len(truncating))
+        else:
+            ok("GH6/D3c 判词 grep 不截断场景 id（数字之后继续吃字母/数字/下划线）")
     else:
         for desc in ("windows-full 必须有 timeout-minutes",
                      "windows-full 全量 `bash tests/run.sh`",

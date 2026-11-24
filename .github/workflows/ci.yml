@@ -86,8 +86,32 @@ jobs:
         shell: bash
         run: python3 -m pip install --disable-pip-version-check pyyaml
       - name: bash tests/run.sh（full 层，Git Bash）
+        id: full_run
         shell: bash
-        run: bash tests/run.sh
+        # tee 落盘是后置判词步的输入：没有它，失败时只能翻几万行 job log 人肉找判词。
+        # pipefail 保证 tee 不吞掉测试退出码（bash -e 单独用不够）。
+        run: |
+          set -o pipefail
+          bash tests/run.sh 2>&1 | tee "$RUNNER_TEMP/full.log"
+      - name: 判词与证据归档（full 卷，恒跑）
+        if: always()
+        shell: bash
+        # 为什么恒跑：取证的价值在**失败**时最大（2026-11-23 连续三次红都靠翻日志定位）。
+        # 判词同时进 step summary（人一眼看）与 job log（gh run view 可取，作为 B005 判据 4 的可复跑收据）。
+        run: |
+          LOG="$RUNNER_TEMP/full.log"
+          {
+            echo "## windows-full 判词（${GITHUB_SHA:0:7}）"
+            echo ""
+            echo "- 测试步结果: ${{ steps.full_run.outcome }}"
+            echo "- 场景结果: $(grep -aoE '==== 测试结果：.*' "$LOG" 2>/dev/null | tail -1)"
+            echo "- 总体判定: $(grep -aoE '==== 结果：.*' "$LOG" 2>/dev/null | tail -1)"
+            echo ""
+            echo '```'
+            grep -aE 'TIMEOUT s|RED  s[0-9]' "$LOG" 2>/dev/null | tail -20 || echo '(无 TIMEOUT / RED)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          grep -aE 'TIMEOUT s|RED  s[0-9]|==== (测试结果|结果)：' "$LOG" 2>/dev/null | tail -20 || true
 
   # 治理执行面与自测同属本 workflow，聚合门可直接消费其结果；实例门（hygiene / backlog）只在本仓执行。
   governance:
