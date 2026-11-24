@@ -744,12 +744,28 @@ write_adr "$R" .agents/notes/implemented/process/2026-10-29-other.md "$LEGAL_BOD
 git -C "$R" add -A >/dev/null 2>&1
 expect_accept "带参模式不受删除入册判据影响（只判给定文件）" "$R" .agents/notes/implemented/process/2026-10-29-other.md
 
+# ⑦ 带参模式的未知选项必须 fail-closed（B0xx：早先 `--x` 被当"非 ADR 宽参"跳过并以 0 退出，
+#    等于给 pre-commit 负样本开 fail-open 后门——pre-commit.spec.sh 在 HEAD 即红）。
+R=$(new_repo argmode-unknown-flag)
+write_adr "$R" .agents/notes/implemented/process/2026-10-29-legal-flag.md "$LEGAL_BODY"
+spec_commit "$R" base
+out=$(run_gate "$R" --non-existent-illegal-flag-test-fail) && rc=0 || rc=$?
+REJECTS=$((REJECTS+1))
+if [ "$rc" -eq 0 ]; then
+  fail "未知选项 --non-existent-illegal-flag-test-fail 应被拒绝，实得 exit 0（fail-open）"
+else
+  PASS_N=$((PASS_N+1))
+  printf 'PASS  %s（exit %d）\n' "带参模式未知选项 fail-closed" "$rc"
+fi
+# 反向对照：同一份仓 + 合法相对路径仍放行（证明不是"带参一律拒"）
+expect_accept "带参模式未知选项拒绝后，合法路径仍放行" "$R" .agents/notes/implemented/process/2026-10-29-legal-flag.md
+
 if [ "$FAIL" -ne 0 ]; then
   printf '[%s] 未通过：门禁的拒绝/放行语义与预期不符（见上方 FAIL）\n' "$SPEC" >&2
   exit 1
 fi
 # U4（W3b）运行时契约：**成功路径的最后一行**。asserts = 本 spec 自身 PASS+FAIL；
 # rejects = 期望被拒/期望非零退出的断言条数（逐断言累加，不是手写的常数）。
-printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节 + 1.7 rejected 理由（含 CJK 标点）+ 1.8 ## Decision/中文提案标题（含复合词）+ 围栏感知（1.8/1.10）+ A6 缺失/被清空/被换成假门 → fail-closed（含 A6 在场正控制与补回反向对照）+ 删除 ADR 必须同提交入册简化记录（无 note 拒 / 有合法 note 放 / 缺复活条件由 1.11 拒 / 带参模式不受影响 / 生命周期迁移不算删除 / README 不算入册载体）均已证明（exit 0）\n' "$SPEC"
+printf '[%s] 全部通过：拒绝语义 + 放行语义 + TOCTOU 双向 + 非普通文件 + 1.10 缺备选节 + 1.7 rejected 理由（含 CJK 标点）+ 1.8 ## Decision/中文提案标题（含复合词）+ 围栏感知（1.8/1.10）+ A6 缺失/被清空/被换成假门 → fail-closed（含 A6 在场正控制与补回反向对照）+ 删除 ADR 必须同提交入册简化记录（无 note 拒 / 有合法 note 放 / 缺复活条件由 1.11 拒 / 带参模式不受影响 / 生命周期迁移不算删除 / README 不算入册载体） + 带参模式未知选项 fail-closed（含合法路径反向对照）均已证明（exit 0）\n' "$SPEC"
 printf '##SPEC asserts=%s rejects=%s\n' "$((PASS_N + FAIL_N))" "$REJECTS"
 exit 0

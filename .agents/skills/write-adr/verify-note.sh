@@ -166,8 +166,8 @@ baseline_read() {
     [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
     *) B_STATE="corrupt"; return 0 ;;
   esac
-  date -d "$B_EXPIRES" >/dev/null 2>&1 || { B_STATE="corrupt"; return 0; }
-  date -d "$B_GEN" >/dev/null 2>&1 || { B_STATE="corrupt"; return 0; }
+  vn_date_ok "$B_EXPIRES" || { B_STATE="corrupt"; return 0; }
+  vn_date_ok "$B_GEN" || { B_STATE="corrupt"; return 0; }
   # entries：每个对象必须恰为 file→criterion→fingerprint 三键（缺键/多键/坏指纹都算损坏）
   objs=$(printf '%s' "$c" | grep -oE '\{"file":"[^"]*","criterion":"[^"]*","fingerprint":"[0-9a-f]{64}"\}')
   n_all=$(printf '%s' "$c" | grep -oF '{"file":' | wc -l | tr -d ' \t')
@@ -246,9 +246,18 @@ vn_render_fail() { # <下标>
 
 [ -d "$NOTES_DIR" ] || { echo "verify-note: 无 $NOTES_DIR（先 ponygo init）" >&2; exit 1; }
 
-# DATE_OK：GNU date 可用才机械判日期，否则降级"靠 review"（与 CLI 同款诚实条款）
+# 跨平台日期解析：GNU date -d（Linux/Git-Bash） / BSD date -j -f（macOS）。
+# 基线到期判定与 1.6 文件名日期都需要它；任一实现可用即可机械判日期。
+vn_date_ok() {
+  date -d "$1" >/dev/null 2>&1 && return 0
+  date -j -f "%Y-%m-%d" "$1" >/dev/null 2>&1 && return 0
+  date -j -f "%Y-%m-%dT%H:%M:%S%z" "$1" >/dev/null 2>&1 && return 0
+  return 1
+}
+
+# DATE_OK：有可用的日期解析实现才机械判日期，否则降级"靠 review"（与 CLI 同款诚实条款）
 DATE_OK=0
-date -d @0 '+%Y' >/dev/null 2>&1 && DATE_OK=1
+vn_date_ok "1970-01-01" && DATE_OK=1
 
 # 基线在判定之前读：损坏时**不判违例**（§3.2 fail-closed），避免给出任何"看起来通过"的输出
 baseline_read
@@ -329,7 +338,7 @@ check_one() { # $1 = 决策文件路径
   fi
   if [ "$DATE_OK" = "1" ]; then
     d8="${b:0:10}"
-    date -d "$d8" >/dev/null 2>&1 || vfail "1.6" "$f" "日期不合法（$d8）"
+    vn_date_ok "$d8" || vfail "1.6" "$f" "日期不合法（$d8）"
   fi
   # 1.7 Status 首词与所在 lifecycle 一致（archived 允许 implemented/archived）
   # stline = Status: 行剥标记后的原文（供下面的 rejected 理由判据复用，避免二次读文件）
