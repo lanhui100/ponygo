@@ -43,6 +43,20 @@ EOF
   chmod +x .meta/gates/my-gate*.sh
 }
 meta() { printf 'level: %s\n%s\n' "$1" "${2:-docs-tier: off}" > .meta/meta.yaml; }
+# 填槽锚必须 ASCII（2026-11-24，run 45222755424 的 P1-7 红）：旧写法 `sed -i 's/【TODO[^】]*】/filled/g'`
+# 把多字节 `】`(E3 80 91) 放进正则字符组，在 Windows Git Bash（MSYS sed，LC_ALL=C）下按字节匹配失败 →
+# 宪法仍是模板态（含 TODO:）→ sync 走 bootstrap、status 的残留投影告警在首行 return → 断言必红。
+# 诚实边界：本地 GNU sed 即使 LC_ALL=C 也会命中该多字节模式（已实测不复现），故**不能**靠本地复现兜底；
+# 改用与 tests/acceptance/p0-fixes/verify-p0.sh 同款 ASCII 锚（`TODO:`）+ 生效守卫（失败只记一次 bad）。
+fill_const() {
+  sed -i 's/TODO:/filled:/g' .meta/constitution/constitution.md
+  local left
+  left=$(grep -c 'TODO:' .meta/constitution/constitution.md 2>/dev/null || true)
+  case "$left" in
+    0) : ;;
+    *) bad "夹具：宪法填槽未生效（TODO: 残留 [${left:-?}] 处——锚/编码退化，其后 P1-7 结论不可信）" ;;
+  esac
+}
 
 echo "== P1-1 JSON 机读面（declared/verified/miss/exempt） =="
 mk; meta 2 $'ai-surface: off\ndocs-tier: off'; add_adr; add_gate
@@ -85,7 +99,7 @@ has "README 索引含 install.sh" "$(sed -n '270,300p' "$ROOT/README.md")" 'inst
 has "README 索引含 .githooks" "$(sed -n '270,300p' "$ROOT/README.md")" '.githooks'
 
 echo "== P1-7 off/retire 残留投影告警 =="
-mk; sed -i 's/【TODO[^】]*】/filled/g' .meta/constitution/constitution.md
+mk; fill_const
 meta 2 $'ai-surface: on\ndocs-tier: off'; add_adr; add_gate; bash "$CLI" sync >/dev/null 2>&1
 bash "$CLI" retire --level off >/dev/null 2>&1
 out=$(bash "$CLI" status 2>&1)

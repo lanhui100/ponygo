@@ -211,50 +211,51 @@ proc_argv_snapshot() { # [过滤正则]
   fi
 }
 
-# ---------- 本地 OTLP 探针接收器（零外网；FIFO 就绪同步，无 sleep 轮询）----------
-PROBE_PID=""; PROBE_PORT=""; PROBE_CAP=""; PROBE_FIFO=""; PROBE_ERR=""; PROBE_NOTIFY=""
+# ---------- 本地 OTLP 探针接收器（零外网；stdout 管道就绪同步，无 sleep 轮询）----------
+# 为什么不再用 FIFO（Windows run 45222755424 实测 9 条「探针服务未在 30s 内报告端口」）：
+#   MSYS 的 mkfifo 只有 MSYS 程序能打开；CI 的 python3 是**原生 Windows 解释器**，open(fifo) 直接
+#   失败 → 端口永远写不出来。改用 coproc 的 stdout 匿名管道：那是普通 OS 管道，MSYS bash 与原生
+#   python 两端都能用，且仍是有界阻塞读（read -t），不引入 sleep 轮询。
+PROBE_PID=""; PROBE_PORT=""; PROBE_CAP=""; PROBE_ERR=""; PROBE_FD=""
 start_probe_server() { # <case-dir> [http_status] [delay_seconds]
   local dir="$1" st="${2:-200}" delay="${3:-0}"
   PROBE_CAP="$dir/.probe-capture.txt"; : > "$PROBE_CAP"
-  PROBE_FIFO="$dir/.probe-port.fifo"; rm -f "$PROBE_FIFO"
-  if ! mkfifo "$PROBE_FIFO" 2>/dev/null; then bad "夹具失败：无法创建 FIFO（$PROBE_FIFO）"; return 1; fi
-  PROBE_NOTIFY="$dir/.probe-notify.fifo"; rm -f "$PROBE_NOTIFY"
-  if ! mkfifo "$PROBE_NOTIFY" 2>/dev/null; then bad "夹具失败：无法创建 notify FIFO"; return 1; fi
   PROBE_ERR="$dir/.probe-server.err"; : > "$PROBE_ERR"
-  STUB_HTTP_STATUS="$st" STUB_DELAY_SECONDS="$delay" \
-    python3 "$PROBE_SERVER" "$PROBE_FIFO" "$PROBE_CAP" "$PROBE_NOTIFY" 2>"$PROBE_ERR" &
-  PROBE_PID=$!
-  # 就绪同步：服务端绑定端口后把端口号写进 FIFO。**必须有界**——`read ... < fifo` 的阻塞点在
-  # open(2) 本身，`-t` 管不到它；Windows(Git Bash/MSYS) 上若服务端起不来，这个 open 会永久阻塞
-  # （实测 run 45042996846：s91_deferred_acceptance 单场景 >73min 零输出，整卷被平台 cancelled）。
-  # 改法：读写方式打开（<>）不会阻塞，再对有界读加 -t；超时即杀服务并点名 stderr。
   PROBE_READY_TIMEOUT="${PROBE_READY_TIMEOUT:-30}"
-  if ! exec 8<>"$PROBE_FIFO"; then
-    bad "夹具失败：无法打开探针端口 FIFO（$PROBE_FIFO）"
-    return 1
-  fi
-  if read -r -t "$PROBE_READY_TIMEOUT" -u 8 PROBE_PORT; then :; else PROBE_PORT=""; fi
-  exec 8<&-
+  PROBE_PORT=""
+  # coproc 的 stdout 即协议通道：服务端先打 `PORT <n>`，之后每收到一个请求打一行 `REQ`。
+  coproc PROBE_CO {
+    STUB_HTTP_STATUS="$st" STUB_DELAY_SECONDS="$delay" \
+      python3 "$PROBE_SERVER" "$PROBE_CAP" 2>"$PROBE_ERR"
+  }
+  PROBE_PID=$PROBE_CO_PID
+  PROBE_FD=${PROBE_CO[0]}
+  local line=""
+  read -r -t "$PROBE_READY_TIMEOUT" -u "$PROBE_FD" line || line=""
+  case "$line" in
+    'PORT '*) PROBE_PORT="${line#PORT }" ;;
+    *) PROBE_PORT="" ;;
+  esac
   if [ -z "$PROBE_PORT" ]; then
     bad "夹具失败：探针服务未在 ${PROBE_READY_TIMEOUT}s 内报告端口（见 $PROBE_ERR）"
     stop_probe_server
     return 1
   fi
-  exec 9<>"$PROBE_NOTIFY"  # 读写方式打开：FIFO 的 read-only open 会阻塞到有写者，故用 <>
   return 0
 }
 # 阻塞等待「接收器已收到一个请求」（read -t 超时兜底，不是 sleep 轮询）
-probe_wait_request() { read -r -t 30 -u 9 _ 2>/dev/null; }
+probe_wait_request() { read -r -t 30 -u "${PROBE_FD:-0}" _ 2>/dev/null; }
 stop_probe_server() {
-  { exec 9<&-; } 2>/dev/null || true
   if [ -n "${PROBE_PID:-}" ]; then
     kill "$PROBE_PID" 2>/dev/null || true
     wait "$PROBE_PID" 2>/dev/null || true
     PROBE_PID=""
   fi
-  [ -n "${PROBE_FIFO:-}" ] && rm -f "$PROBE_FIFO"
-  [ -n "${PROBE_NOTIFY:-}" ] && rm -f "$PROBE_NOTIFY"
-  PROBE_FIFO=""; PROBE_NOTIFY=""
+  if [ -n "${PROBE_FD:-}" ]; then
+    { exec {PROBE_FD}<&- ; } 2>/dev/null || true   # 动态 fd 关闭（bash 4.1+），防读端泄漏
+    PROBE_FD=""
+  fi
+  PROBE_PORT=""
 }
 # curl argv 观测桩（TEST-DEFECT 修复）：/proc 时间窗取样不可靠（curl 可能在取样前已退出），
 # 改用 PATH 前置的 curl 包装桩——它把**自己的 argv** 追加到日志，再 exec 真 curl。
